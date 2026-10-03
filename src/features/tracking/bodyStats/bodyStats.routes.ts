@@ -1,0 +1,162 @@
+import { Router, Request, Response } from "express"
+import { authenticateToken } from "@/middleware/auth.js"
+import { healthConsentGuard } from "../healthConsent.js"
+import {
+  ValidationError,
+  NotFoundError,
+} from "@/middleware/errorHandler.js"
+import {
+  validateWeightEntry,
+  queryLimit,
+  parseIntParam,
+  parseBackdatedTimestamp,
+} from "@/middleware/validation.js"
+import { logger } from "@/utils/logger.js"
+import {
+  logWeight,
+  getWeightHistory,
+  deleteWeightEntry,
+  getCurrentWeight,
+  calculateBodyFatPercentage,
+  logBodyFat,
+  getBodyFatHistory,
+  deleteBodyFatEntry,
+} from "./bodyStats.model.js"
+import { getUserBodyData } from "@/features/auth/user.model.js"
+
+// Every response here is `{ success, data }`. The older per-feature keys
+// (`entry`, `entries`, `id`, `supplement`, `supplements`) are still emitted
+// beside `data` so an app build released after the server image still works.
+// Drop them once no released app reads them.
+const router: Router = Router()
+
+router.use(authenticateToken)
+router.use(healthConsentGuard)
+
+router.post("/weight", validateWeightEntry, async (req: Request, res: Response) => {
+  const { weightKg, measuredAt, note } = req.body
+  const id = await logWeight(
+    req.user!.id,
+    weightKg,
+    parseBackdatedTimestamp(measuredAt, "measuredAt"),
+    note || null,
+  )
+  res.status(201).json({ success: true, data: { id }, id })
+})
+
+router.get("/weight/current", async (req: Request, res: Response) => {
+  const entry = await getCurrentWeight(req.user!.id)
+  res.json({ success: true, data: entry, entry })
+})
+
+router.get("/weight", async (req: Request, res: Response) => {
+  const limit = queryLimit(req, { def: 90, max: 365 })
+  const entries = await getWeightHistory(req.user!.id, limit)
+  res.json({ success: true, data: entries, entries })
+})
+
+router.delete("/weight/:id", async (req: Request, res: Response) => {
+  const entryId = parseIntParam(String(req.params.id), "weight entry ID")
+  const deleted = await deleteWeightEntry(req.user!.id, entryId)
+  if (!deleted) throw new NotFoundError("Weight entry")
+  res.json({ success: true })
+})
+
+router.post("/bodyfat/log", async (req: Request, res: Response) => {
+  const { percentage, measurements, measuredAt, bfFormulaSex } = req.body
+  const userId = req.user!.id
+
+  if (percentage == null || measurements == null) {
+    throw new ValidationError("percentage and measurements are required")
+  }
+
+  // Validate percentage BEFORE any DB calls. 0 is rejected too: ck_m_value
+  // only stores value > 0, so 0% would be a 500 on insert.
+  if (typeof percentage !== "number" || percentage <= 0 || percentage > 100) {
+    throw new ValidationError(
+      `Invalid body fat percentage: ${percentage}%. Must be between 1-100%.`,
+    )
+  }
+
+  // An override the client sends must name a real sex, otherwise it falls
+  // silently into the wrong formula branch.
+  if (bfFormulaSex != null && bfFormulaSex !== "male" && bfFormulaSex !== "female")
+    throw new ValidationError("bfFormulaSex must be 'male' or 'female'")
+
+  const { waist, neck, hip, unit } = measurements
+
+  // The client only sends bfFormulaSex when it differs from the stored one, so
+  // fall back to the profile: the formula picks a different branch per sex.
+  const userData = await getUserBodyData(userId)
+  const sex: "male" | "female" = bfFormulaSex ?? userData.bfFormulaSex
+
+  if (!waist || waist <= 0)
+    throw new ValidationError("Invalid waist measurement")
+  if (!neck || neck <= 0)
+    throw new ValidationError("Invalid neck measurement")
+  if (sex === "female" && (!hip || hip <= 0)) {
+    throw new ValidationError(
+      "Invalid hip measurement (required for females)",
+    )
+  }
+
+  let waistCm: number = waist
+  let neckCm: number = neck
+  let hipCm: number | null = hip || null
+
+  if (unit === "in") {
+    waistCm = waist * 2.54
+    neckCm = neck * 2.54
+    if (hip) hipCm = hip * 2.54
+  }
+
+  if (waistCm <= neckCm) {
+    throw new ValidationError(
+      "Waist measurement must be greater than neck measurement",
+    )
+  }
+
+  // Height is only used to re-derive the percentage as a cross-check: the
+  // client already did the maths with its own copy, and the height is no longer
+  // copied onto the entry (it is read live from the profile). A profile without
+  // a height skips the check instead of rejecting the log.
+  if (userData.heightCm) {
+    const calculatedPercentage = calculateBodyFatPercentage(
+      sex,
+      userData.heightCm,
+      waistCm,
+      neckCm,
+      hipCm,
+    )
+
+    if (Math.abs(calculatedPercentage - percentage) > 0.5) {
+      logger.warn("Body fat calculation mismatch (values not logged: health data)")
+    }
+  }
+
+  const entry = await logBodyFat(
+    userId,
+    percentage,
+    waistCm,
+    neckCm,
+    hipCm,
+    parseBackdatedTimestamp(measuredAt, "measuredAt") ?? new Date().toISOString(),
+  )
+
+  res.json({ success: true, data: entry, entry })
+})
+
+router.get("/bodyfat/log", async (req: Request, res: Response) => {
+  const limit = queryLimit(req, { def: 90, max: 365 })
+  const entries = await getBodyFatHistory(req.user!.id, limit)
+  res.json({ success: true, data: entries, entries })
+})
+
+router.delete("/bodyfat/log/:id", async (req: Request, res: Response) => {
+  const entryId = parseIntParam(String(req.params.id), "body fat entry ID")
+  const deleted = await deleteBodyFatEntry(req.user!.id, entryId)
+  if (!deleted) throw new NotFoundError("Body fat entry")
+  res.json({ success: true })
+})
+
+export default router

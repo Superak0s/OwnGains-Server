@@ -1,0 +1,8 @@
+OwnGains Server is MIT-licensed (see LICENSE). Its npm dependencies carry
+their own licences, listed in each package under node_modules/.
+
+sharp bundles prebuilt libvips binaries (@img/sharp-libvips-*), which are
+licensed under LGPL-3.0-or-later. They are dynamically linked and unmodified;
+their source is available at https://github.com/libvips/libvips and the
+licence text ships inside each @img/sharp-libvips-* package. You may replace
+them with your own build of libvips (see https://sharp.pixelplumbing.com/install).

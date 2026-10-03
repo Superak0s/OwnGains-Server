@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const c=(JSON.parse(s||'{}').tool_input||{}).command||'';if(c.includes('release.sh'))console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'deny',permissionDecisionReason:'scripts/release.sh pushes to origin main and publishes to Docker Hub. Releases are run by the user, not by Claude.'}}))})\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.mjs\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Typechecking...",
+            "command": "f=$(node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s||'{}').tool_input||{};process.stdout.write(t.file_path||'')})\"); case \"$f\" in *.ts) out=$(pnpm exec tsc --noEmit 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 2; } ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

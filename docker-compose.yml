@@ -1,0 +1,48 @@
+# OwnGains Server + MariaDB. Optional backend for the OwnGains fitness app:
+# accounts, workout sync and real-time social features.
+# Setup: copy .env.example to .env (set DB_USER, DB_PASSWORD, JWT_SECRET,
+# ALLOWED_ORIGINS), then `docker compose up -d`.
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-owngains}
+      MARIADB_USER: ${DB_USER:?set DB_USER in .env}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: superak0s/owngains-server:latest
+    # build: .   # uncomment to build from source instead of pulling
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      # mDNS can't reach the LAN from bridge networking.
+      MDNS_ENABLED: "false"
+    ports:
+      - "${PORT:-5000}:${PORT:-5000}"
+    volumes:
+      - backups:/backups
+    # Logs hold IPs and user ids; cap them rather than keep them forever.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  db-data:
+  backups:

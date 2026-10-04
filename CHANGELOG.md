@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Internal
+
+- The WebSocket server loads the real `ws` package by file path, so its 8KB `maxPayload` cap also holds when the server runs on Bun (which otherwise swaps in its own `ws` and ignores the cap).
+
 ## [0.1.2] - 2026-10-04
 
 ### Added

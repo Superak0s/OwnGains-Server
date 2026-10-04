@@ -1,5 +1,8 @@
-import { WebSocketServer, WebSocket, RawData } from "ws"
+import type * as Ws from "ws"
+import type { RawData } from "ws"
 import http from "http"
+import { createRequire } from "node:module"
+import path from "node:path"
 import jwt from "jsonwebtoken"
 import type { RowDataPacket } from "mysql2/promise"
 import { pool } from "../config/database.js"
@@ -15,6 +18,18 @@ import type { JointSession, ParticipantProgress } from "../features/social/socia
 import type { JwtPayload } from "../features/auth/auth.types.js"
 import { isUuid } from "../middleware/validation.js"
 import { NotFoundError } from "../middleware/errorHandler.js"
+
+// Bun swaps a bare `import "ws"` for its own implementation, which ignores
+// `maxPayload`, so an oversized frame would be buffered and handed to the
+// message handler. Loading ws's own files by absolute path gets the real
+// package on Bun and Node alike (a `ws/lib/...` specifier would be refused by
+// its `exports` map on Node).
+const require = createRequire(import.meta.url)
+const wsLib = path.join(path.dirname(require.resolve("ws/package.json")), "lib")
+const WebSocketServer: typeof Ws.WebSocketServer = require(path.join(wsLib, "websocket-server.js"))
+const WebSocket: typeof Ws.WebSocket = require(path.join(wsLib, "websocket.js"))
+type WebSocketServer = Ws.WebSocketServer
+type WebSocket = Ws.WebSocket
 
 interface WsUser {
   id: number

@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Internal
 
 - The WebSocket server loads the real `ws` package by file path, so its 8KB `maxPayload` cap also holds when the server runs on Bun (which otherwise swaps in its own `ws` and ignores the cap).
@@ -59,6 +61,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.2.0
 [0.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.1.1

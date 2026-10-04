@@ -390,6 +390,59 @@ export function validateSessionCreation(
   next()
 }
 
+const DEMO_DAYS_MAX = 14
+const DEMO_EXERCISES_MAX = 20
+const DEMO_SETS_MAX = 10
+
+/**
+ * POST /api/sessions/demo. The caps bound the work one request can buy: at most
+ * 14 days x 20 exercises x 10 sets per generated workout.
+ */
+export function validateDemoFill(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  const errors: string[] = []
+  const { days, split } = req.body
+  if (
+    split != null &&
+    (typeof split !== "string" || !split.trim() || split.length > SPLIT_NAME_MAX)
+  )
+    errors.push(`split must be a non-empty string of at most ${SPLIT_NAME_MAX} characters`)
+
+  if (!Array.isArray(days) || days.length < 1 || days.length > DEMO_DAYS_MAX) {
+    errors.push(`days must be an array of 1-${DEMO_DAYS_MAX} days`)
+  } else {
+    days.forEach((day: Record<string, unknown>, d: number) => {
+      const where = `days[${d}]`
+      if (!day || typeof day !== "object") return void errors.push(`${where} must be an object`)
+      if (!validateInteger(day.dayNumber) || (day.dayNumber as number) < 1)
+        errors.push(`${where}.dayNumber must be a positive integer`)
+      if (typeof day.dayTitle !== "string" || !day.dayTitle.trim())
+        errors.push(`${where}.dayTitle is required`)
+      else if (checkMaxLength(day.dayTitle, "dayTitle"))
+        errors.push(`${where}.dayTitle is too long`)
+      const exercises = day.exercises
+      if (!Array.isArray(exercises) || exercises.length < 1 || exercises.length > DEMO_EXERCISES_MAX)
+        return void errors.push(`${where}.exercises must be an array of 1-${DEMO_EXERCISES_MAX} exercises`)
+      exercises.forEach((ex: Record<string, unknown>, e: number) => {
+        const exWhere = `${where}.exercises[${e}]`
+        if (!ex || typeof ex !== "object") return void errors.push(`${exWhere} must be an object`)
+        if (typeof ex.name !== "string" || !ex.name.trim() || checkMaxLength(ex.name, "exerciseName"))
+          errors.push(`${exWhere}.name must be a non-empty string`)
+        if (!validateInteger(ex.sets) || (ex.sets as number) < 1 || (ex.sets as number) > DEMO_SETS_MAX)
+          errors.push(`${exWhere}.sets must be an integer from 1 to ${DEMO_SETS_MAX}`)
+        checkMuscleArray(ex.primaryMuscles, `${exWhere}.primaryMuscles`, errors)
+        checkMuscleArray(ex.secondaryMuscles, `${exWhere}.secondaryMuscles`, errors)
+      })
+    })
+  }
+
+  if (errors.length > 0) throw new ValidationError("Invalid demo data request", errors)
+  next()
+}
+
 /**
  * Validate the fields of a set timing. Every field is checked only if it is
  * present, so this serves both the create and the partial-update path: the

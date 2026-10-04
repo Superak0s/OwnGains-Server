@@ -10,6 +10,7 @@ import {
   queryLimit,
   queryString,
   validateRequired,
+  validateDemoFill,
   validateSessionCreation,
   validateSetTiming,
 } from "@/middleware/validation.js"
@@ -31,8 +32,8 @@ import {
   parseHistoryCursor,
   getRecordSessions,
   deleteAllSessionsForSplit,
-  deleteDemoSessions,
 } from "./workouts.model.js"
+import { clearDemoData, fillDemoData } from "./demo.model.js"
 import { getLiveAudience } from "../social/sharing/sharing.model.js"
 
 const router: Router = Router()
@@ -274,10 +275,19 @@ router.patch("/:sessionId/sets/:setId", validateSetTiming, async (req: Request, 
 // NOTE: Static paths (/split/:split, /) MUST come before the dynamic
 // /:sessionId routes so Express doesn't treat the literal as a session ID.
 
+router.post("/demo", denyTrainer, validateDemoFill, async (req: Request, res: Response) => {
+  const result = await fillDemoData(req.user!.id, req.body.days, req.body.split ?? null)
+  res.json({ success: true, ...result })
+})
+
 router.delete("/demo", denyTrainer, async (req: Request, res: Response) => {
-  const userId = req.user!.id
-  const deletedCount = await deleteDemoSessions(userId)
-  res.json({ success: true, deletedCount })
+  const { sessions, friends, tracking } = await clearDemoData(req.user!.id)
+  res.json({
+    success: true,
+    deletedCount: sessions,
+    deletedFriends: friends,
+    deletedTracking: tracking,
+  })
 })
 
 router.delete("/split/:split", denyTrainer, async (req: Request, res: Response) => {

@@ -207,6 +207,15 @@ const largeBodyLimiter = limiter(
   },
 )
 
+// Each demo fill rewrites about a thousand rows in one transaction.
+app.post(
+  "/api/sessions/demo",
+  authenticateToken,
+  limiter(FIFTEEN_MIN, envInt("DEMO_FILL_RATE_LIMIT", 5, 1), {
+    keyGenerator: (req) => `user:${req.user?.uuid ?? "anon"}`,
+  }),
+)
+
 // Body parsing comes AFTER the limiters, so a flood is rejected before the
 // box pays to buffer and JSON.parse the payload. The program-upload cap is
 // also behind authenticateToken: at 2 MB it's 40x the global limit, and an

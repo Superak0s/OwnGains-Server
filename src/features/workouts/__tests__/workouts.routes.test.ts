@@ -174,6 +174,66 @@ describe("workout session routes", () => {
     expect(nothing.body.deletedCount).toBe(0)
   })
 
+  it("fills and clears demo workouts, friends and tracking in one request each", async () => {
+    const days = [
+      { dayNumber: 1, dayTitle: "Push", exercises: [{ name: "Bench Press", sets: 3, primaryMuscles: ["Chest"] }] },
+      { dayNumber: 2, dayTitle: "Pull", exercises: [{ name: "Barbell Row", sets: 2 }] },
+    ]
+    const fill = () => request(app).post("/api/sessions/demo").set(auth(b.token)).send({ split: "Demo", days })
+
+    expect((await fill()).status).toBe(200)
+    const again = await fill()
+    expect(again.status).toBe(200)
+    expect(again.body).toMatchObject({ sessions: 18, sets: 45, friends: 3, tracking: 202 })
+    const supplements = await request(app).get("/api/tracking/supplements").set(auth(b.token))
+    expect(supplements.body.supplements).toHaveLength(3)
+    const photos = await request(app).get("/api/tracking/photos/muscle").set(auth(b.token))
+    expect(photos.body.data).toHaveLength(30)
+    const lats = await request(app).get("/api/tracking/photos/muscle/group/lats").set(auth(b.token))
+    expect(lats.body.data).toHaveLength(3)
+    const thumb = await request(app).get(`/api/tracking/photos/muscle/${photos.body.data[0].id}/thumb`).set(auth(b.token))
+    expect(thumb.status).toBe(200)
+    const me = await request(app).get("/api/auth/me").set(auth(b.token))
+    expect(me.body.user.heightCm).toBe(178)
+
+    const history = await request(app).get("/api/sessions?limit=100").set(auth(b.token))
+    expect(history.body.sessions.filter((s: { isDemo: number }) => s.isDemo)).toHaveLength(18)
+
+    const friends = await request(app).get("/api/friends").set(auth(b.token))
+    expect(friends.body.friends).toHaveLength(3)
+    const pending = await request(app).get("/api/friends/requests/pending").set(auth(b.token))
+    expect(pending.body.requests).toHaveLength(1)
+
+    const friend = friends.body.friends[0]
+    const shared = await request(app)
+      .get(`/api/sharing/sessions/friend/${friend.friendUserId}`)
+      .set(auth(b.token))
+    expect(shared.status).toBe(200)
+    expect(shared.body.sessions.length).toBeGreaterThan(0)
+
+    const search = await request(app).get("/api/friends/search?q=demo_").set(auth(b.token))
+    expect(search.body.users ?? []).toHaveLength(0)
+
+    const clear = await request(app).delete("/api/sessions/demo").set(auth(b.token))
+    expect(clear.body).toMatchObject({ deletedCount: 18, deletedFriends: 4, deletedTracking: 202 })
+    const supplementsAfter = await request(app).get("/api/tracking/supplements").set(auth(b.token))
+    expect(supplementsAfter.body.supplements).toHaveLength(0)
+    const photosAfter = await request(app).get("/api/tracking/photos/muscle").set(auth(b.token))
+    expect(photosAfter.body.data).toHaveLength(0)
+    const meAfter = await request(app).get("/api/auth/me").set(auth(b.token))
+    expect(meAfter.body.user.heightCm).toBeNull()
+    const after = await request(app).get("/api/friends").set(auth(b.token))
+    expect(after.body.friends).toHaveLength(0)
+  })
+
+  it("rejects a malformed demo fill", async () => {
+    const bad = await request(app)
+      .post("/api/sessions/demo")
+      .set(auth(a.token))
+      .send({ days: [{ dayNumber: 1, dayTitle: "X", exercises: [{ name: "Y", sets: 99 }] }] })
+    expect(bad.status).toBe(400)
+  })
+
   it("rejects a non-boolean isDemo", async () => {
     const bad = await request(app)
       .post("/api/sessions/start")

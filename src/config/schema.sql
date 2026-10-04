@@ -66,11 +66,17 @@ CREATE TABLE IF NOT EXISTS users (
   terms_version     VARCHAR(32)                 DEFAULT NULL,
   terms_accepted_at DATETIME                    DEFAULT NULL,
   health_consent_at DATETIME                    DEFAULT NULL,
+  -- Set on the fake friends POST /api/sessions/demo creates: the real user
+  -- they were made for. They are also suspended, so nobody can sign in as
+  -- one or find one in search.
+  demo_owner_id  INT UNSIGNED                   DEFAULT NULL,
   created_at     DATETIME              NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_users_uuid (uuid),
   UNIQUE KEY uq_users_username (username),
   UNIQUE KEY uq_users_email (email),
+  KEY idx_users_demo_owner (demo_owner_id),
+  CONSTRAINT fk_users_demo_owner FOREIGN KEY (demo_owner_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT ck_users_height CHECK (height_cm IS NULL OR height_cm > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -794,4 +800,14 @@ CREATE TABLE IF NOT EXISTS consent_events (
   PRIMARY KEY (id),
   KEY idx_ce_user (user_id),
   CONSTRAINT fk_ce_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Tracking and supplement rows created by "Fill Demo Data", so removing it
+-- deletes exactly those. The tracking tables carry no is_demo flag of their own.
+CREATE TABLE IF NOT EXISTS demo_rows (
+  user_id    INT UNSIGNED NOT NULL,
+  table_name VARCHAR(64)  NOT NULL,
+  row_id     INT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, table_name, row_id),
+  CONSTRAINT fk_dr_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,10 +1,10 @@
 {
   "name": "owngains-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Sync, accounts and social backend for the OwnGains fitness app — central instance or self-hosted",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && cp src/config/schema.sql dist/config/schema.sql && mkdir -p dist/migrations && (cp -r src/migrations/. dist/migrations/ 2>/dev/null || true)",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && cp src/config/schema.sql dist/config/schema.sql && cp -r src/features/workouts/demo-photos dist/features/workouts/ && mkdir -p dist/migrations && (cp -r src/migrations/. dist/migrations/ 2>/dev/null || true)",
     "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "owngains": "tsx --env-file-if-exists=.env src/owngains.ts",

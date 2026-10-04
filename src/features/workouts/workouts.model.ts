@@ -1023,14 +1023,6 @@ export async function deleteAllSessionsForSplit(
   return result.affectedRows
 }
 
-export async function deleteDemoSessions(userId: number): Promise<number> {
-  const [result] = await pool.execute<ResultSetHeader>(
-    `DELETE FROM workouts WHERE user_id = ? AND is_demo = 1`,
-    [userId],
-  )
-  return result.affectedRows
-}
-
 // A workout is only ever closed by the client calling POST /:sessionId/end.
 // If the app is killed, crashes, or the device dies mid-workout, that call
 // never happens and the workout (and the day it belongs to) remains open in

@@ -46,11 +46,11 @@ async function appCounts(): Promise<AppCounts> {
   // One round trip: scalar subqueries, each on its own table.
   const [rows] = await pool.query<RowDataPacket[]>(`
     SELECT
-      (SELECT COUNT(*) FROM users)                                              AS users_total,
+      (SELECT COUNT(*) FROM users WHERE demo_owner_id IS NULL)                 AS users_total,
       (SELECT COUNT(*) FROM users WHERE is_admin = 1)                           AS users_admins,
-      (SELECT COUNT(*) FROM users WHERE disabled_at IS NOT NULL)                AS users_suspended,
-      (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY)   AS users_new7d,
-      (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 30 DAY)  AS users_new30d,
+      (SELECT COUNT(*) FROM users WHERE disabled_at IS NOT NULL AND demo_owner_id IS NULL) AS users_suspended,
+      (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY AND demo_owner_id IS NULL)  AS users_new7d,
+      (SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 30 DAY AND demo_owner_id IS NULL) AS users_new30d,
       (SELECT COUNT(DISTINCT user_id) FROM workouts WHERE start_time >= NOW() - INTERVAL 1 DAY)  AS active_day,
       (SELECT COUNT(DISTINCT user_id) FROM workouts WHERE start_time >= NOW() - INTERVAL 7 DAY)  AS active_week,
       (SELECT COUNT(DISTINCT user_id) FROM workouts WHERE start_time >= NOW() - INTERVAL 30 DAY) AS active_month,

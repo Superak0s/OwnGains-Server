@@ -124,7 +124,7 @@ router.get("/sessions/friend/:friendId", async (req: Request, res: Response) => 
     before,
   )
   // nextCursor, as on GET /api/sessions: null on the last page.
-  const last = sessions[sessions.length - 1]
+  const last = sessions.at(-1)
   res.json({
     success: true,
     sessions,

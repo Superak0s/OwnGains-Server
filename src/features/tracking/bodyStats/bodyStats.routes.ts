@@ -65,6 +65,64 @@ router.delete("/weight/:id", async (req: Request, res: Response) => {
   res.json({ success: true })
 })
 
+/**
+ * The tape measurements behind a body-fat log, in cm, checked against the
+ * formula when the profile has a height.
+ */
+async function checkTapeMeasurements(
+  userId: number,
+  measurements: { waist?: number; neck?: number; hip?: number; unit?: string },
+  bfFormulaSex: "male" | "female" | undefined,
+  percentage: number,
+): Promise<{ waistCm: number; neckCm: number; hipCm: number | null }> {
+  const { waist, neck, hip, unit } = measurements
+
+  // The client only sends bfFormulaSex when it differs from the stored one, so
+  // fall back to the profile: the formula picks a different branch per sex.
+  const userData = await getUserBodyData(userId)
+  const sex: "male" | "female" = bfFormulaSex ?? userData.bfFormulaSex
+
+  if (!waist || waist <= 0)
+    throw new ValidationError("Invalid waist measurement")
+  if (!neck || neck <= 0)
+    throw new ValidationError("Invalid neck measurement")
+  if (sex === "female" && (!hip || hip <= 0)) {
+    throw new ValidationError(
+      "Invalid hip measurement (required for females)",
+    )
+  }
+
+  const toCm = unit === "in" ? 2.54 : 1
+  const w: number = waist * toCm
+  const n: number = neck * toCm
+  const hipCm = hip ? hip * toCm : null
+
+  if (w <= n) {
+    throw new ValidationError(
+      "Waist measurement must be greater than neck measurement",
+    )
+  }
+
+  // Height is only used to re-derive the percentage as a cross-check: the
+  // client already did the maths with its own copy, and the height is no longer
+  // copied onto the entry (it is read live from the profile). A profile without
+  // a height skips the check instead of rejecting the log.
+  if (userData.heightCm) {
+    const calculatedPercentage = calculateBodyFatPercentage(
+      sex,
+      userData.heightCm,
+      w,
+      n,
+      hipCm,
+    )
+
+    if (Math.abs(calculatedPercentage - percentage) > 0.5) {
+      logger.warn("Body fat calculation mismatch (values not logged: health data)")
+    }
+  }
+  return { waistCm: w, neckCm: n, hipCm }
+}
+
 router.post("/bodyfat/log", async (req: Request, res: Response) => {
   const { percentage, measurements, measuredAt, bfFormulaSex } = req.body
   const userId = req.user!.id
@@ -86,58 +144,10 @@ router.post("/bodyfat/log", async (req: Request, res: Response) => {
 
   // Health Connect readings carry only a percentage: no tape measurements, so
   // no circumferences to store and no formula to cross-check.
-  let waistCm: number | null = null
-  let neckCm: number | null = null
-  let hipCm: number | null = null
-  if (measurements != null) {
-    const { waist, neck, hip, unit } = measurements
-
-    // The client only sends bfFormulaSex when it differs from the stored one, so
-    // fall back to the profile: the formula picks a different branch per sex.
-    const userData = await getUserBodyData(userId)
-    const sex: "male" | "female" = bfFormulaSex ?? userData.bfFormulaSex
-
-    if (!waist || waist <= 0)
-      throw new ValidationError("Invalid waist measurement")
-    if (!neck || neck <= 0)
-      throw new ValidationError("Invalid neck measurement")
-    if (sex === "female" && (!hip || hip <= 0)) {
-      throw new ValidationError(
-        "Invalid hip measurement (required for females)",
-      )
-    }
-
-    const toCm = unit === "in" ? 2.54 : 1
-    const w: number = waist * toCm
-    const n: number = neck * toCm
-    waistCm = w
-    neckCm = n
-    hipCm = hip ? hip * toCm : null
-
-    if (w <= n) {
-      throw new ValidationError(
-        "Waist measurement must be greater than neck measurement",
-      )
-    }
-
-    // Height is only used to re-derive the percentage as a cross-check: the
-    // client already did the maths with its own copy, and the height is no longer
-    // copied onto the entry (it is read live from the profile). A profile without
-    // a height skips the check instead of rejecting the log.
-    if (userData.heightCm) {
-      const calculatedPercentage = calculateBodyFatPercentage(
-        sex,
-        userData.heightCm,
-        w,
-        n,
-        hipCm,
-      )
-
-      if (Math.abs(calculatedPercentage - percentage) > 0.5) {
-        logger.warn("Body fat calculation mismatch (values not logged: health data)")
-      }
-    }
-  }
+  const { waistCm, neckCm, hipCm } =
+    measurements == null
+      ? { waistCm: null, neckCm: null, hipCm: null }
+      : await checkTapeMeasurements(userId, measurements, bfFormulaSex, percentage)
 
   const entry = await logBodyFat(
     userId,

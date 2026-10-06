@@ -11,6 +11,9 @@ import {
 /** The pool, or a connection holding an open transaction. */
 type Queryable = Pool | PoolConnection
 
+/** A DATETIME as the driver returns it, or the ISO string a caller passed in. */
+type Timestamp = Date | string
+
 /**
  * One recorded set as every read returns it. The pool runs with
  * `dateStrings: true`, so the DATETIME columns are strings.
@@ -121,8 +124,8 @@ interface WorkoutRow extends RowDataPacket {
   // NULL only when the workout has no program_day link.
   primaryMuscles: string[] | null
   secondaryMuscles: string[] | null
-  startTime: Date | string
-  endTime: Date | string | null
+  startTime: Timestamp
+  endTime: Timestamp | null
   totalDuration: number | null
   completedSets: number
   split: string | null
@@ -261,11 +264,11 @@ export async function createSession(
   userId: number,
   dayNumber: number,
   dayTitle: string,
-  startTime: string | Date | null = null,
+  startTime: Timestamp | null = null,
   isDemo = false,
   split: string | null = null,
 ): Promise<number> {
-  const ts = formatDateForMySQL(startTime ? startTime : new Date())
+  const ts = formatDateForMySQL(startTime || new Date())
   const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO workouts (user_id, program_day_id, day_number, day_title, split, start_time, is_demo)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -285,20 +288,36 @@ export async function createSession(
 export async function recordSetTiming(
   sessionId: number,
   userId: number,
-  exerciseName: string,
-  setIndex: number,
-  startTime: string,
-  endTime: string,
-  weight: number,
-  reps: number,
-  note: string | null = null,
-  isWarmup = false,
-  primaryMuscles: string[] = [],
-  secondaryMuscles: string[] = [],
-  machineName: string | null = null,
-  rir: number | null = null,
+  set: {
+    exerciseName: string
+    setIndex: number
+    startTime: string
+    endTime: string
+    weight: number
+    reps: number
+    note?: string | null
+    isWarmup?: boolean
+    primaryMuscles?: string[]
+    secondaryMuscles?: string[]
+    machineName?: string | null
+    rir?: number | null
+  },
   { openWorkoutOnly = false }: { openWorkoutOnly?: boolean } = {},
 ): Promise<RecordSetResult> {
+  const {
+    exerciseName,
+    setIndex,
+    startTime,
+    endTime,
+    weight,
+    reps,
+    note = null,
+    isWarmup = false,
+    primaryMuscles = [],
+    secondaryMuscles = [],
+    machineName = null,
+    rir = null,
+  } = set
   const start = new Date(startTime)
   const end = new Date(endTime)
   const setDuration = Math.round((end.getTime() - start.getTime()) / 1000)
@@ -473,38 +492,8 @@ export async function updateSetTiming(
       "TRAINER_WORKOUT_ENDED",
     )
 
-  const assignments: string[] = []
-  const params: (string | number | null)[] = []
-  const set = (col: string, value: string | number | null) => {
-    assignments.push(`${col} = ?`)
-    params.push(value)
-  }
-
   const u = updates
-  if (u.exerciseName !== undefined)
-    set(
-      "exercise_id",
-      await findOrCreateExercise(
-        userId,
-        u.exerciseName,
-        u.primaryMuscles ?? [],
-        u.secondaryMuscles ?? [],
-      ),
-    )
-  if (u.weight !== undefined) set("weight", u.weight)
-  if (u.reps !== undefined) set("reps", u.reps)
-  if (u.note !== undefined) set("note", u.note)
-  if (u.isWarmup !== undefined) set("is_warmup", u.isWarmup ? 1 : 0)
-  if (u.rir !== undefined) set("rir", u.rir)
-  if (u.machineName !== undefined) set("machine_name", u.machineName)
-  if (u.startTime !== undefined)
-    set("start_time", formatDateForMySQL(u.startTime))
-  if (u.endTime !== undefined) set("end_time", formatDateForMySQL(u.endTime))
-  if (u.startTime !== undefined || u.endTime !== undefined) {
-    const start = parseMySQLDate(u.startTime ?? (owned[0].startTime as string))
-    const end = parseMySQLDate(u.endTime ?? (owned[0].endTime as string))
-    set("set_duration", Math.round((end.getTime() - start.getTime()) / 1000))
-  }
+  const { assignments, params } = await setAssignments(userId, u, owned[0])
 
   if (assignments.length > 0) {
     params.push(setId)
@@ -531,7 +520,47 @@ export async function updateSetTiming(
      WHERE ws.id = ? AND w.user_id = ?`,
     [setId, userId],
   )
-  return updated[0]!
+  return updated[0]
+}
+
+/** The `col = ?` list and its values for the fields an edit sends. */
+async function setAssignments(
+  userId: number,
+  u: UpdateSetTimingParams,
+  current: { startTime: Timestamp; endTime: Timestamp },
+): Promise<{ assignments: string[]; params: (string | number | null)[] }> {
+  const assignments: string[] = []
+  const params: (string | number | null)[] = []
+  const set = (col: string, value: string | number | null) => {
+    assignments.push(`${col} = ?`)
+    params.push(value)
+  }
+
+  if (u.exerciseName !== undefined)
+    set(
+      "exercise_id",
+      await findOrCreateExercise(
+        userId,
+        u.exerciseName,
+        u.primaryMuscles ?? [],
+        u.secondaryMuscles ?? [],
+      ),
+    )
+  if (u.weight !== undefined) set("weight", u.weight)
+  if (u.reps !== undefined) set("reps", u.reps)
+  if (u.note !== undefined) set("note", u.note)
+  if (u.isWarmup !== undefined) set("is_warmup", u.isWarmup ? 1 : 0)
+  if (u.rir !== undefined) set("rir", u.rir)
+  if (u.machineName !== undefined) set("machine_name", u.machineName)
+  if (u.startTime !== undefined)
+    set("start_time", formatDateForMySQL(u.startTime))
+  if (u.endTime !== undefined) set("end_time", formatDateForMySQL(u.endTime))
+  if (u.startTime !== undefined || u.endTime !== undefined) {
+    const start = parseMySQLDate(u.startTime ?? current.startTime)
+    const end = parseMySQLDate(u.endTime ?? current.endTime)
+    set("set_duration", Math.round((end.getTime() - start.getTime()) / 1000))
+  }
+  return { assignments, params }
 }
 
 /**
@@ -636,7 +665,7 @@ export async function renameExerciseInHistory(
 export async function endSession(
   sessionId: number,
   userId: number,
-  endTime: string | Date | null = null,
+  endTime: Timestamp | null = null,
 ): Promise<{ session: Session; alreadyEnded: boolean }> {
   const ts = formatDateForMySQL(endTime ?? new Date())
   // Scoped by user_id like every other statement in this file, rather than
@@ -865,7 +894,10 @@ export function pickRecordSetIds(candidates: RecordCandidate[]): Set<number> {
     // pair, and null remains distinct from the string "null".
     const key = JSON.stringify([c.exerciseName, c.machineName ?? null])
     let best = groups.get(key)
-    if (!best) groups.set(key, (best = new Map()))
+    if (!best) {
+      best = new Map()
+      groups.set(key, best)
+    }
 
     consider(best, "maxWeight", c.id, c.weight, true)
     consider(best, "minWeight", c.id, c.weight, false)
@@ -937,14 +969,32 @@ export async function getRecordSessions(userId: number): Promise<Session[]> {
   }
   // Newest first, as the one query ordered them (start_time strings sort
   // chronologically, and id breaks ties the same way the history list does).
-  rows.sort((a, b) =>
-    a.startTime === b.startTime
-      ? b.id - a.id
-      : String(a.startTime) < String(b.startTime) ? 1 : -1,
-  )
+  rows.sort((a, b) => {
+    if (a.startTime === b.startTime) return b.id - a.id
+    return String(a.startTime) < String(b.startTime) ? 1 : -1
+  })
 
-  // Set chunks break only between sessions, so each session's sets arrive in
-  // one query, in performed order.
+  const bySession = new Map<number, SetTiming[]>()
+  for (const t of await fetchKeptSets(keptBySession)) {
+    const list = bySession.get(t.sessionId)
+    if (list) list.push(t)
+    else bySession.set(t.sessionId, [t])
+  }
+  return rows.map((r) => ({
+    ...(r as unknown as Session),
+    primaryMuscles: parseMuscleGroups(r.primaryMuscles),
+    secondaryMuscles: parseMuscleGroups(r.secondaryMuscles),
+    setTimings: bySession.get(r.id) ?? [],
+  }))
+}
+
+/**
+ * The kept sets, in chunks that break only between sessions, so each
+ * session's sets arrive in one query, in performed order.
+ */
+async function fetchKeptSets(
+  keptBySession: Map<number, number[]>,
+): Promise<WorkoutSetRow[]> {
   const sets: WorkoutSetRow[] = []
   let chunk: number[] = []
   const flush = async () => {
@@ -964,19 +1014,7 @@ export async function getRecordSessions(userId: number): Promise<Session[]> {
     chunk.push(...ids)
   }
   await flush()
-
-  const bySession = new Map<number, SetTiming[]>()
-  for (const t of sets) {
-    const list = bySession.get(t.sessionId)
-    if (list) list.push(t)
-    else bySession.set(t.sessionId, [t])
-  }
-  return rows.map((r) => ({
-    ...(r as unknown as Session),
-    primaryMuscles: parseMuscleGroups(r.primaryMuscles),
-    secondaryMuscles: parseMuscleGroups(r.secondaryMuscles),
-    setTimings: bySession.get(r.id) ?? [],
-  }))
+  return sets
 }
 
 export async function deleteAllSessionsForSplit(

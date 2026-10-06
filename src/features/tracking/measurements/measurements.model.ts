@@ -87,8 +87,8 @@ function fixedIn<T>(values: readonly T[], size: number): { sql: string; params: 
   if (values.length === 0 || values.length > size)
     throw new Error(`fixedIn: ${values.length} values for ${size} slots`)
   const params = [...values]
-  while (params.length < size) params.push(values[values.length - 1]!)
-  return { sql: Array(size).fill("?").join(", "), params }
+  while (params.length < size) params.push(values.at(-1)!)
+  return { sql: new Array(size).fill("?").join(", "), params }
 }
 
 /**
@@ -164,7 +164,7 @@ export async function logMetrics(
   }
   const cleanNote = requireOptionalNote(note) ?? null
 
-  const ts = formatDateForMySQL(measuredAt ? measuredAt : new Date())
+  const ts = formatDateForMySQL(measuredAt || new Date())
   const upserts = samples.filter((s) => !ADDITIVE_METRICS.has(s.metric))
   const ids: number[] = []
 
@@ -305,7 +305,7 @@ export async function getMetricGroups(
   if (require && !aliases.some((a) => metrics[a] === require))
     throw new Error(`${require} is not in the pivot`)
   const keys = fixedIn(
-    aliases.map((a) => metrics[a]!),
+    aliases.map((a) => metrics[a]),
     MAX_METRICS_PER_QUERY,
   )
 
@@ -336,8 +336,18 @@ export async function getMetricGroups(
     ],
   )
 
-  // Same semantics as the SQL it replaces: MIN(id), MAX(note) and MAX(value)
-  // per metric within a session.
+  return pivotMetricRows(rows, metrics)
+}
+
+/**
+ * Same semantics as the SQL pivot it replaces: MIN(id), MAX(note) and
+ * MAX(value) per metric within a session.
+ */
+function pivotMetricRows(
+  rows: { id: number; measuredAt: string; metric: string; value: number; note: string | null }[],
+  metrics: Record<string, string>,
+): MetricGroup[] {
+  const aliases = Object.keys(metrics)
   const groups = new Map<string, MetricGroup>()
   for (const r of rows) {
     let g = groups.get(r.measuredAt)

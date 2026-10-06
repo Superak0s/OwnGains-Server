@@ -80,7 +80,7 @@ export async function logInjury(
       muscleGroup,
       injuryType,
       painLevel,
-      formatDateForMySQL(startDate ? startDate : new Date()),
+      formatDateForMySQL(startDate || new Date()),
       requireOptionalNote(note) ?? null,
     ],
   )

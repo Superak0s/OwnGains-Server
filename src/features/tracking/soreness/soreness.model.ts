@@ -8,7 +8,6 @@
 
 import { pool, formatDateForMySQL, withTransaction } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
-import type { PoolConnection } from "mysql2/promise"
 import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
 import { requireOptionalNote } from "@/middleware/validation.js"
 
@@ -155,7 +154,7 @@ export async function logSoreness(
       requireMuscleGroup(muscleGroup),
       requireIntensity(intensity),
       requireOptionalNote(note) ?? null,
-      formatDateForMySQL(loggedAt ? loggedAt : new Date()),
+      formatDateForMySQL(loggedAt || new Date()),
     ],
   )
   return getSorenessById(userId, result.insertId)
@@ -217,7 +216,7 @@ export async function addFollowUp(
   const [entry] = await applyFollowUps(userId, [
     { sorenessId, intensity, status, note },
   ])
-  return entry!
+  return entry
 }
 
 /**
@@ -308,7 +307,7 @@ async function applyFollowUps(
           u.intensity,
           sorenessStatusFor(u.status),
           u.status === "recovered" ? now : null,
-          u.note !== undefined ? 1 : 0,
+          u.note === undefined ? 0 : 1,
           u.note ?? null,
         ]),
         userId,

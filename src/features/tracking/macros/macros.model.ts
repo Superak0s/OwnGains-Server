@@ -13,15 +13,18 @@ const MACROS_COLS = `id, name, protein, carbs, fat, calories,
 
 export async function logMacrosIntake(
   userId: number,
-  name: string | null,
-  protein: number | null,
-  carbs: number | null,
-  fat: number | null,
-  calories: number | null,
-  errorMargin: number,
-  takenAt: string,
-  note?: string | null,
+  entry: {
+    name: string | null
+    protein: number | null
+    carbs: number | null
+    fat: number | null
+    calories: number | null
+    errorMargin: number
+    takenAt: string
+    note?: string | null
+  },
 ): Promise<MacrosIntakeRow> {
+  const { name, protein, carbs, fat, calories, errorMargin, takenAt, note } = entry
   const ts = formatDateForMySQL(takenAt)
   const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO macros_intake (user_id, name, protein, carbs, fat, calories, error_margin, taken_at, note)

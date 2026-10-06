@@ -182,6 +182,24 @@ router.get("/me", authenticateToken, async (req: Request, res: Response) => {
   res.json({ success: true, user: publicUser(req.user!) })
 })
 
+function addBodyProfileUpdates(
+  heightCm: unknown,
+  bfFormulaSex: unknown,
+  updates: Record<string, string | number>,
+): void {
+  // The app keeps height on-device. This is the only way it reaches the
+  // server, which needs it to re-check a body-fat percentage.
+  if (heightCm !== undefined) updates.height_cm = Number(heightCm)
+
+  // Which branch of the US-Navy formula to use, stored once instead of being
+  // resent with every body-fat log. The column had no writer at all before.
+  if (bfFormulaSex !== undefined) {
+    if (bfFormulaSex !== "male" && bfFormulaSex !== "female")
+      throw new ValidationError('bfFormulaSex must be "male" or "female"')
+    updates.bf_formula_sex = bfFormulaSex
+  }
+}
+
 router.put("/profile", authenticateToken, validateProfileUpdate, async (req: Request, res: Response) => {
   const { name, email, heightCm, bfFormulaSex, currentPassword } = req.body
   const updates: Record<string, string | number> = {}
@@ -208,19 +226,8 @@ router.put("/profile", authenticateToken, validateProfileUpdate, async (req: Req
   // Both exist only to re-check a body-fat log, so a box that doesn't store
   // tracking has no reason to keep them. Ignored rather than refused, so an
   // app that PUTs the whole profile still saves the rest.
-  const storesBody = !readLocalOnlyFeatures().includes("tracking")
-
-  // The app keeps height on-device. This is the only way it reaches the
-  // server, which needs it to re-check a body-fat percentage.
-  if (storesBody && heightCm !== undefined) updates.height_cm = Number(heightCm)
-
-  // Which branch of the US-Navy formula to use, stored once instead of being
-  // resent with every body-fat log. The column had no writer at all before.
-  if (storesBody && bfFormulaSex !== undefined) {
-    if (bfFormulaSex !== "male" && bfFormulaSex !== "female")
-      throw new ValidationError('bfFormulaSex must be "male" or "female"')
-    updates.bf_formula_sex = bfFormulaSex
-  }
+  if (!readLocalOnlyFeatures().includes("tracking"))
+    addBodyProfileUpdates(heightCm, bfFormulaSex, updates)
 
   if (Object.keys(updates).length === 0) {
     return res.json({

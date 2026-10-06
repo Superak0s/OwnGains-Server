@@ -1,12 +1,12 @@
 import express, { Request, Response, NextFunction } from "express"
-import http from "http"
-import os from "os"
+import http from "node:http"
+import os from "node:os"
 import cors from "cors"
 import helmet from "helmet"
 import compression from "compression"
 import rateLimit, { type Options as RateLimitOptions } from "express-rate-limit"
-import { randomUUID } from "crypto"
-import { pathToFileURL } from "url"
+import { randomUUID } from "node:crypto"
+import { pathToFileURL } from "node:url"
 import { Bonjour, type Service } from "bonjour-service"
 import { version } from "@/config/version.js"
 import { startStaleSessionCleanup, stopStaleSessionCleanup } from "./jobs/sessionCleanup.js"
@@ -260,7 +260,10 @@ export function beginDrain(): void {
 }
 
 app.get("/healthz", async (_req: Request, res: Response) => {
-  if (draining) return void res.status(503).json({ status: "DRAINING" })
+  if (draining) {
+    res.status(503).json({ status: "DRAINING" })
+    return
+  }
   if (Date.now() - dbProbe.at > DB_PROBE_TTL_MS) {
     let ok = true
     try {
@@ -270,7 +273,10 @@ app.get("/healthz", async (_req: Request, res: Response) => {
     }
     dbProbe = { at: Date.now(), ok }
   }
-  if (!dbProbe.ok) return void res.status(503).json({ status: "DOWN" })
+  if (!dbProbe.ok) {
+    res.status(503).json({ status: "DOWN" })
+    return
+  }
   res.json({
     status: "OK",
     fqdn: process.env.SERVER_FQDN || null,
@@ -350,7 +356,10 @@ async function start() {
       }),
     )
 
-    if (!b) return void logger.info("📡 mDNS advertising disabled (MDNS_ENABLED=false)")
+    if (!b) {
+      logger.info("📡 mDNS advertising disabled (MDNS_ENABLED=false)")
+      return
+    }
     mdnsService = b.publish({
       name: "OwnGains Server",
       type: "owngains",

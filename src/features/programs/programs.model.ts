@@ -46,7 +46,7 @@ export const MACHINE_FIELDS = [
  * than dropped: the old behaviour discarded unrecognised keys silently, so a
  * client sending a field the server had never heard of got a 200 and no data.
  */
-const EXERCISE_KEYS: readonly string[] = [
+const EXERCISE_KEYS: ReadonlySet<string> = new Set([
   "name",
   "primaryMuscles",
   "secondaryMuscles",
@@ -58,7 +58,7 @@ const EXERCISE_KEYS: readonly string[] = [
   // it, so rejecting it would 400 a re-upload of an older program.
   "custom",
   ...MACHINE_FIELDS,
-]
+])
 
 /** Case-insensitive catalog key: `exercises.name` is utf8mb4_unicode_ci. */
 const catalogKey = (name: string): string => name.trim().toLowerCase()
@@ -186,7 +186,7 @@ function toProgramData(
           sets: slot.sets,
           ...(slot.reps ? { reps: slot.reps } : {}),
           exerciseId: slot.exerciseId,
-          ...(slot.machine ?? {}),
+          ...slot.machine,
         }
         const sw = (unordered[slot.splitName] ??= {
           exercises: [],
@@ -338,31 +338,27 @@ export async function upsertProgram(
     string,
     { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
   >()
-  for (const day of days)
-    for (const sw of Object.values(day.split ?? {}))
-      for (const ex of sw.exercises ?? []) {
-        const name = ex.name?.trim()
-        if (!name) throw new ValidationError("Every exercise needs a name")
-        const unknown = Object.keys(ex).filter(
-          (k) => !EXERCISE_KEYS.includes(k),
-        )
-        if (unknown.length)
-          throw new ValidationError(
-            `Unknown key(s) on an exercise: ${unknown.join(", ")}`,
-          )
-        if (ex.sets != null && !Number.isFinite(Number(ex.sets)))
-          throw new ValidationError("sets must be a number")
-        const existing = catalog.get(catalogKey(name))
-        catalog.set(catalogKey(name), {
-          name,
-          primaryMuscles: ex.primaryMuscles?.length
-            ? ex.primaryMuscles
-            : (existing?.primaryMuscles ?? []),
-          secondaryMuscles: ex.secondaryMuscles?.length
-            ? ex.secondaryMuscles
-            : (existing?.secondaryMuscles ?? []),
-        })
-      }
+  for (const ex of uploadExercises(days)) {
+    const name = ex.name?.trim()
+    if (!name) throw new ValidationError("Every exercise needs a name")
+    const unknown = Object.keys(ex).filter((k) => !EXERCISE_KEYS.has(k))
+    if (unknown.length)
+      throw new ValidationError(
+        `Unknown key(s) on an exercise: ${unknown.join(", ")}`,
+      )
+    if (ex.sets != null && !Number.isFinite(Number(ex.sets)))
+      throw new ValidationError("sets must be a number")
+    const existing = catalog.get(catalogKey(name))
+    catalog.set(catalogKey(name), {
+      name,
+      primaryMuscles: ex.primaryMuscles?.length
+        ? ex.primaryMuscles
+        : (existing?.primaryMuscles ?? []),
+      secondaryMuscles: ex.secondaryMuscles?.length
+        ? ex.secondaryMuscles
+        : (existing?.secondaryMuscles ?? []),
+    })
+  }
 
   const ids = await catalogIds(catalog)
 
@@ -417,21 +413,21 @@ export async function upsertProgram(
       [programId],
     )
 
-    const slots = days.flatMap((day) =>
-      Object.entries(day.split ?? {}).flatMap(([splitName, sw]) =>
-        (sw.exercises ?? []).map((ex, position) => [
-          dayIds.get(day.dayNumber)!,
-          splitName,
-          position,
-          ids.get(catalogKey(ex.name))!,
-          ex.exerciseId?.trim() || null,
-          Number(ex.sets) || 0,
-          // Free text. A spreadsheet cell may arrive as a number.
-          ex.reps != null ? String(ex.reps).trim() || null : null,
-          JSON.stringify(machineOf(ex)),
-        ]),
-      ),
-    )
+    const slots: (string | number | null)[][] = []
+    for (const day of days)
+      for (const [splitName, sw] of Object.entries(day.split ?? {}))
+        for (const [position, ex] of (sw.exercises ?? []).entries())
+          slots.push([
+            dayIds.get(day.dayNumber)!,
+            splitName,
+            position,
+            ids.get(catalogKey(ex.name))!,
+            ex.exerciseId?.trim() || null,
+            Number(ex.sets) || 0,
+            // Free text. A spreadsheet cell may arrive as a number.
+            ex.reps == null ? null : String(ex.reps).trim() || null,
+            JSON.stringify(machineOf(ex)),
+          ])
     if (slots.length)
       await connection.execute(
         `INSERT INTO program_exercises
@@ -463,6 +459,13 @@ export async function upsertProgram(
       [programId, ...days.map((d) => d.dayNumber)],
     )
   })
+}
+
+/** Every exercise of every split of every day, in upload order. */
+function uploadExercises(days: ProgramData["days"] & {}): Exercise[] {
+  return days.flatMap((day) =>
+    Object.values(day.split ?? {}).flatMap((sw) => sw.exercises ?? []),
+  )
 }
 
 /** The machine sub-object of an exercise, separated from its program fields. */
@@ -573,11 +576,14 @@ export async function renameExercise(
   dayNumber: number,
   split: string,
   exerciseIndex: number,
-  newName: string,
-  newPrimaryMuscles?: string[],
-  newSecondaryMuscles?: string[],
-  newExerciseId?: string | null,
+  rename: {
+    newName: string
+    newPrimaryMuscles?: string[]
+    newSecondaryMuscles?: string[]
+    newExerciseId?: string | null
+  },
 ): Promise<{ oldName: string; newName: string; exerciseIndex: number }> {
+  const { newName, newPrimaryMuscles, newSecondaryMuscles, newExerciseId } = rename
   const slot = await requireSlot(userId, dayNumber, split, exerciseIndex)
   const trimmed = newName.trim()
   const exerciseId = await findOrCreateExercise(
@@ -646,7 +652,7 @@ export async function addExercise(
   // concurrent adds still read the same MAX and the loser hits uq_pe_slot: a
   // phone and a tablet adding to the same split at once. One retry is enough:
   // by then the winner's row is committed and MAX has moved.
-  const reps = exercise.reps != null ? String(exercise.reps).trim() || null : null
+  const reps = exercise.reps == null ? null : String(exercise.reps).trim() || null
   const catalogId = exercise.exerciseId?.trim() || null
   const insertSlot = () =>
     pool.execute<ResultSetHeader>(

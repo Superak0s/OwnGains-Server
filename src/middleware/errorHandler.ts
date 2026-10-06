@@ -120,13 +120,52 @@ export function errorHandler(
   if (res.headersSent) return _next(err)
   // The real error, for the admin metrics: the body below may mask it.
   if (res.locals) res.locals.error = err
+  if (answeredAsSpecialError(err, req, res)) return
 
+  const statusCode = (err as AppError).statusCode ?? 500
+  logRequestError(statusCode, err, req)
+  const isDev = process.env.NODE_ENV === "development"
+
+  // Never leak internal error details (raw DB/driver messages, stack traces)
+  // for server errors in production. Anything that isn't one of our own
+  // AppError subclasses has no statusCode, so it falls through to 500 and
+  // gets the generic message.
+  // 503/507 raised as our own AppError ("upload slots busy", "photo storage
+  // full") are deliberate, client-actionable answers, so they keep their message
+  // and code like a 4xx does.
+  const exposed =
+    statusCode < 500 ||
+    ((statusCode === 503 || statusCode === 507) &&
+      (err as AppError).statusCode !== undefined)
+  const safeMessage = exposed
+    ? err.message
+    : (isDev && err.message) || "Internal server error"
+
+  const response: ErrorResponse = {
+    success: false,
+    error: safeMessage,
+    reqId: req.reqId,
+  }
+
+  // Only our own errors have a code clients can act on. Driver codes
+  // (ER_DUP_ENTRY, ...) are internal details and stay out of 5xx responses.
+  if (exposed && (err as AppError).code)
+    response.code = (err as AppError).code
+  if (exposed && (err as AppError).details)
+    response.details = (err as AppError).details
+  if (isDev && err.stack) response.stack = err.stack
+
+  res.status(statusCode).json(response)
+}
+
+/** The errors with a fixed answer of their own. True when one was sent. */
+function answeredAsSpecialError(err: Error, req: Request, res: Response): boolean {
   // multer raises its own error class with no statusCode. The one a client can
   // fix is a file over the size limit.
   if (err.name === "MulterError") {
     const status = (err as { code?: string }).code === "LIMIT_FILE_SIZE" ? 413 : 400
     res.status(status).json({ success: false, error: err.message })
-    return
+    return true
   }
 
   // A value that doesn't fit its column is a client that sent something out of
@@ -141,7 +180,7 @@ export function errorHandler(
       error: "Value out of range for its field",
       code: "VALUE_OUT_OF_RANGE",
     })
-    return
+    return true
   }
 
   if (isDbUnavailableError(err)) {
@@ -160,64 +199,30 @@ export function errorHandler(
       code: "SERVICE_UNAVAILABLE",
       reqId: req.reqId,
     })
-    return
+    return true
   }
+  return false
+}
 
-  const statusCode = (err as AppError).statusCode ?? 500
-
+function logRequestError(statusCode: number, err: Error, req: Request): void {
   // 4xx is the client being told something normal ("wrong password", "you have
   // no program yet"): one info line, not a multi-line warning that reads like
   // the server broke. The admin metrics page counts and groups them anyway.
   // Only 5xx means this server is broken, and its stack goes to the log in
-  // every environment. The log is the operator's, and the response (below) is
+  // every environment. The log is the operator's, and the response is
   // where production hides it.
   if (statusCode < 500) {
     const code = (err as AppError).code
     logger.info(
-      `${statusCode} ${req.method} ${req.path}: ${err.message}${code ? ` [${code}]` : ""} (reqId ${req.reqId})`,
+      `${statusCode} ${req.method} ${req.path}: ${err.message}${code ? " [" + code + "]" : ""} (reqId ${req.reqId})`,
     )
-  } else {
-    logger.error("Server error:", {
-      message: err.message,
-      stack: err.stack,
-      path: req.path,
-      method: req.method,
-      reqId: req.reqId,
-    })
+    return
   }
-  const isDev = process.env.NODE_ENV === "development"
-
-  // Never leak internal error details (raw DB/driver messages, stack traces)
-  // for server errors in production. Anything that isn't one of our own
-  // AppError subclasses has no statusCode, so it falls through to 500 and
-  // gets the generic message.
-  // 503/507 raised as our own AppError ("upload slots busy", "photo storage
-  // full") are deliberate, client-actionable answers, so they keep their message
-  // and code like a 4xx does.
-  const exposed =
-    statusCode < 500 ||
-    ((statusCode === 503 || statusCode === 507) &&
-      (err as AppError).statusCode !== undefined)
-  const safeMessage =
-    exposed
-      ? err.message
-      : isDev
-        ? err.message || "Internal server error"
-        : "Internal server error"
-
-  const response: ErrorResponse = {
-    success: false,
-    error: safeMessage,
+  logger.error("Server error:", {
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
     reqId: req.reqId,
-  }
-
-  // Only our own errors have a code clients can act on. Driver codes
-  // (ER_DUP_ENTRY, ...) are internal details and stay out of 5xx responses.
-  if (exposed && (err as AppError).code)
-    response.code = (err as AppError).code
-  if (exposed && (err as AppError).details)
-    response.details = (err as AppError).details
-  if (isDev && err.stack) response.stack = err.stack
-
-  res.status(statusCode).json(response)
+  })
 }

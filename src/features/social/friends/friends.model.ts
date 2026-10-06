@@ -75,7 +75,7 @@ export async function sendFriendRequest(
      WHERE requested_by = ? AND status = 'pending'`,
     [fromUserId],
   )
-  if (Number(pending!.n) >= MAX_PENDING_SENT)
+  if (Number(pending.n) >= MAX_PENDING_SENT)
     throw new AppError(
       `You have ${MAX_PENDING_SENT} friend requests waiting. Cancel some or wait for replies`,
       429,
@@ -325,7 +325,7 @@ export async function searchUsers(
   // The term is bound as a parameter, so this was never injectable, but it
   // is bound *inside* a LIKE, so an unescaped % or _ is still a pattern.
   // `?q=%%%` would match every row again.
-  const pattern = `${searchTerm.replace(/[\\%_]/g, "\\$&")}%`
+  const pattern = searchTerm.replace(/[\\%_]/g, String.raw`\$&`) + "%"
 
   const [rows] = await pool.execute<(UserSearchResult & RowDataPacket)[]>(
     `SELECT u.uuid AS id, u.username,

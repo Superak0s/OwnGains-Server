@@ -188,7 +188,7 @@ function buildChildExports(
   const paths = new Map<string, { hops: ForeignKeyRow[][]; rootWhere: string }>()
   for (const [table, cols] of owned) {
     if (cols.length !== 1 || OUTBOUND_ONLY[table]) continue
-    paths.set(table, { hops: [], rootWhere: cols[0]! })
+    paths.set(table, { hops: [], rootWhere: cols[0] })
   }
 
   const children = new Map<string, ChildExport>()
@@ -198,37 +198,47 @@ function buildChildExports(
     for (const [table, cons] of byTable) {
       if (paths.has(table) || owned.has(table) || EXPORT_SKIPPED_CHILDREN.has(table))
         continue
-      const hop = [...cons.values()].find((cols) => paths.has(cols[0]!.refTable))
+      const hop = [...cons.values()].find((cols) => paths.has(cols[0].refTable))
       if (!hop) continue
-      const up = paths.get(hop[0]!.refTable)!
-      const hops = [hop, ...up.hops]
-      paths.set(table, { hops, rootWhere: up.rootWhere })
-
-      // t0 is the child, and t1…tN walk up to the root.
-      const joins = hops.map((cols, i) => {
-        const on = cols
-          .map((c) => `t${i + 1}.${c.refColumn} = t${i}.${c.columnName}`)
-          .join(" AND ")
-        return `JOIN ${cols[0]!.refTable} t${i + 1} ON ${on}`
-      })
-      children.set(table, {
-        sql: `SELECT t0.* FROM ${table} t0 ${joins.join(" ")}
-              WHERE t${hops.length}.${up.rootWhere} = ?`,
-        params: 1,
-      })
-
-      // A composite FK through the parent's user column (supplement_intake's
-      // (user_id, supplement_id)) carries a numeric users.id. Mark it so
-      // idsToUuids rewrites it like any other.
-      const parentUserCols = userColumns.get(hop[0]!.refTable) ?? []
-      const childUserCols = hop
-        .filter((c) => parentUserCols.includes(c.refColumn))
-        .map((c) => c.columnName)
-      if (childUserCols.length) userColumns.set(table, childUserCols)
+      addChildExport(table, hop, paths, children, userColumns)
       grew = true
     }
   }
   return children
+}
+
+function addChildExport(
+  table: string,
+  hop: ForeignKeyRow[],
+  paths: Map<string, { hops: ForeignKeyRow[][]; rootWhere: string }>,
+  children: Map<string, ChildExport>,
+  userColumns: Map<string, string[]>,
+): void {
+  const up = paths.get(hop[0].refTable)!
+  const hops = [hop, ...up.hops]
+  paths.set(table, { hops, rootWhere: up.rootWhere })
+
+  // t0 is the child, and t1…tN walk up to the root.
+  const joins = hops.map((cols, i) => {
+    const on = cols
+      .map((c) => `t${i + 1}.${c.refColumn} = t${i}.${c.columnName}`)
+      .join(" AND ")
+    return `JOIN ${cols[0].refTable} t${i + 1} ON ${on}`
+  })
+  children.set(table, {
+    sql: `SELECT t0.* FROM ${table} t0 ${joins.join(" ")}
+          WHERE t${hops.length}.${up.rootWhere} = ?`,
+    params: 1,
+  })
+
+  // A composite FK through the parent's user column (supplement_intake's
+  // (user_id, supplement_id)) carries a numeric users.id. Mark it so
+  // idsToUuids rewrites it like any other.
+  const parentUserCols = userColumns.get(hop[0].refTable) ?? []
+  const childUserCols = hop
+    .filter((c) => parentUserCols.includes(c.refColumn))
+    .map((c) => c.columnName)
+  if (childUserCols.length) userColumns.set(table, childUserCols)
 }
 
 let userTables: Promise<UserTables> | null = null
@@ -292,10 +302,9 @@ async function idsToUuids(
   userColumns: Map<string, string[]>,
 ): Promise<void> {
   const ids = new Set<number>()
-  for (const [table, cols] of userColumns) {
-    for (const row of (data[table] as RowDataPacket[] | undefined) ?? [])
-      for (const c of cols) if (typeof row[c] === "number") ids.add(row[c])
-  }
+  forEachUserCell(data, userColumns, (row, c) => {
+    if (typeof row[c] === "number") ids.add(row[c])
+  })
   const uuidById = new Map<number, string>()
   const all = [...ids]
   for (let i = 0; i < all.length; i += 1000) {
@@ -306,11 +315,19 @@ async function idsToUuids(
     )
     for (const r of rows) uuidById.set(r.id, r.uuid)
   }
-  for (const [table, cols] of userColumns) {
+  forEachUserCell(data, userColumns, (row, c) => {
+    if (row[c] != null) row[c] = uuidById.get(row[c]) ?? null
+  })
+}
+
+function forEachUserCell(
+  data: Record<string, unknown>,
+  userColumns: Map<string, string[]>,
+  fn: (row: RowDataPacket, column: string) => void,
+): void {
+  for (const [table, cols] of userColumns)
     for (const row of (data[table] as RowDataPacket[] | undefined) ?? [])
-      for (const c of cols)
-        if (row[c] != null) row[c] = uuidById.get(row[c]) ?? null
-  }
+      for (const c of cols) fn(row, c)
 }
 
 /** `user_id = ? OR friend_id = ?`: every way this table can point at a user. */
@@ -389,7 +406,7 @@ async function exportTableRows(
   for (const [table, child] of children) {
     const [rows] = await pool.execute<RowDataPacket[]>(
       `${child.sql} LIMIT ${EXPORT_ROW_CAP}`,
-      Array(child.params).fill(userId),
+      new Array(child.params).fill(userId),
     )
     data[table] = rows
   }
@@ -409,7 +426,7 @@ export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
   const empty = [...owned]
     .map(
       ([table, cols]) =>
-        `AND NOT EXISTS (SELECT 1 FROM ${table} x WHERE ${cols.map((c) => `x.${c} = u.id`).join(" OR ")})`,
+        `AND NOT EXISTS (SELECT 1 FROM ${table} x WHERE ${cols.map((c) => "x." + c + " = u.id").join(" OR ")})`,
     )
     .join("\n       ")
   const [r] = await pool.execute<ResultSetHeader>(

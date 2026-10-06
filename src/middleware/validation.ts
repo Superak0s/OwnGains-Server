@@ -85,11 +85,11 @@ export function queryLimit(
   // arrives as an array, stringifies to "1,2" and silently became 1.
   // Floor at 1 as well as capping: `?limit=-1` is truthy, so without the
   // Math.max it reached `LIMIT ?` as a negative and every list endpoint 500'd.
-  return Math.min(Math.max(parseInt(queryString(req, key) ?? "", 10) || def, 1), max)
+  return Math.min(Math.max(Number.parseInt(queryString(req, key) ?? "", 10) || def, 1), max)
 }
 
 export const validateEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
-export const validateUsername = (v: string) => /^[a-zA-Z0-9_]{3,20}$/.test(v)
+export const validateUsername = (v: string) => /^\w{3,20}$/.test(v)
 
 const PASSWORD_MIN_LENGTH = 8
 /** bcrypt only reads the first 72 bytes. Anything past that was silently ignored. */
@@ -111,9 +111,9 @@ export function passwordPolicyError(v: unknown): string | null {
   return null
 }
 const validatePositiveNumber = (v: unknown): v is number =>
-  typeof v === "number" && v > 0 && !isNaN(v)
+  typeof v === "number" && v > 0 && !Number.isNaN(v)
 const validateInteger = (v: unknown): v is number => Number.isInteger(v)
-const validateISODate = (v: string) => !isNaN(new Date(v).getTime())
+const validateISODate = (v: string) => !Number.isNaN(new Date(v).getTime())
 
 /**
  * Read an optional client-supplied timestamp for an entry the user is
@@ -148,6 +148,25 @@ function checkMaxLength(
   return value.length > limit
     ? `${field} must not exceed ${limit} characters`
     : null
+}
+
+/**
+ * A string field the caller has already found present: `badType` when it isn't
+ * a string (or is blank, unless `allowBlank`), otherwise the length cap.
+ */
+function checkStringField(
+  value: unknown,
+  field: keyof typeof MAX_LENGTHS,
+  badType: string,
+  errors: string[],
+  allowBlank = false,
+): void {
+  if (typeof value !== "string" || (!allowBlank && !value.trim())) {
+    errors.push(badType)
+    return
+  }
+  const lenErr = checkMaxLength(value, field)
+  if (lenErr) errors.push(lenErr)
 }
 
 /**
@@ -229,23 +248,23 @@ export function validateRegistration(
   const { username, email, password } = req.body
   const errors: string[] = []
 
-  if (!username) {
-    errors.push("Username is required")
-  } else {
+  if (username) {
     if (!validateUsername(username))
       errors.push(
         "Username must be 3-20 characters (letters, numbers, underscores)",
       )
     const lenErr = checkMaxLength(username, "username")
     if (lenErr) errors.push(lenErr)
+  } else {
+    errors.push("Username is required")
   }
 
-  if (!email) {
-    errors.push("Email is required")
-  } else {
+  if (email) {
     if (!validateEmail(email)) errors.push("Invalid email format")
     const lenErr = checkMaxLength(email, "email")
     if (lenErr) errors.push(lenErr)
+  } else {
+    errors.push("Email is required")
   }
 
   const pwErr = passwordPolicyError(password)
@@ -267,11 +286,11 @@ export function validatePasswordChange(
 
   if (!currentPassword) errors.push("Current password is required")
 
-  if (!newPassword) {
-    errors.push("New password is required")
-  } else {
+  if (newPassword) {
     const pwErr = passwordPolicyError(newPassword)
-    if (pwErr) errors.push(`New ${pwErr[0]!.toLowerCase()}${pwErr.slice(1)}`)
+    if (pwErr) errors.push(`New ${pwErr[0].toLowerCase()}${pwErr.slice(1)}`)
+  } else {
+    errors.push("New password is required")
   }
 
   if (errors.length > 0) throw new ValidationError("Validation failed", errors)
@@ -414,33 +433,44 @@ export function validateDemoFill(
   if (!Array.isArray(days) || days.length < 1 || days.length > DEMO_DAYS_MAX) {
     errors.push(`days must be an array of 1-${DEMO_DAYS_MAX} days`)
   } else {
-    days.forEach((day: Record<string, unknown>, d: number) => {
-      const where = `days[${d}]`
-      if (!day || typeof day !== "object") return void errors.push(`${where} must be an object`)
-      if (!validateInteger(day.dayNumber) || (day.dayNumber as number) < 1)
-        errors.push(`${where}.dayNumber must be a positive integer`)
-      if (typeof day.dayTitle !== "string" || !day.dayTitle.trim())
-        errors.push(`${where}.dayTitle is required`)
-      else if (checkMaxLength(day.dayTitle, "dayTitle"))
-        errors.push(`${where}.dayTitle is too long`)
-      const exercises = day.exercises
-      if (!Array.isArray(exercises) || exercises.length < 1 || exercises.length > DEMO_EXERCISES_MAX)
-        return void errors.push(`${where}.exercises must be an array of 1-${DEMO_EXERCISES_MAX} exercises`)
-      exercises.forEach((ex: Record<string, unknown>, e: number) => {
-        const exWhere = `${where}.exercises[${e}]`
-        if (!ex || typeof ex !== "object") return void errors.push(`${exWhere} must be an object`)
-        if (typeof ex.name !== "string" || !ex.name.trim() || checkMaxLength(ex.name, "exerciseName"))
-          errors.push(`${exWhere}.name must be a non-empty string`)
-        if (!validateInteger(ex.sets) || (ex.sets as number) < 1 || (ex.sets as number) > DEMO_SETS_MAX)
-          errors.push(`${exWhere}.sets must be an integer from 1 to ${DEMO_SETS_MAX}`)
-        checkMuscleArray(ex.primaryMuscles, `${exWhere}.primaryMuscles`, errors)
-        checkMuscleArray(ex.secondaryMuscles, `${exWhere}.secondaryMuscles`, errors)
-      })
-    })
+    for (const [d, day] of days.entries()) checkDemoDay(day, `days[${d}]`, errors)
   }
 
   if (errors.length > 0) throw new ValidationError("Invalid demo data request", errors)
   next()
+}
+
+function checkDemoDay(day: unknown, where: string, errors: string[]): void {
+  if (!isPlainObject(day)) {
+    errors.push(`${where} must be an object`)
+    return
+  }
+  if (!validateInteger(day.dayNumber) || day.dayNumber < 1)
+    errors.push(`${where}.dayNumber must be a positive integer`)
+  if (typeof day.dayTitle !== "string" || !day.dayTitle.trim())
+    errors.push(`${where}.dayTitle is required`)
+  else if (checkMaxLength(day.dayTitle, "dayTitle"))
+    errors.push(`${where}.dayTitle is too long`)
+  const exercises = day.exercises
+  if (!Array.isArray(exercises) || exercises.length < 1 || exercises.length > DEMO_EXERCISES_MAX) {
+    errors.push(`${where}.exercises must be an array of 1-${DEMO_EXERCISES_MAX} exercises`)
+    return
+  }
+  for (const [e, ex] of exercises.entries())
+    checkDemoExercise(ex, `${where}.exercises[${e}]`, errors)
+}
+
+function checkDemoExercise(ex: unknown, where: string, errors: string[]): void {
+  if (!isPlainObject(ex)) {
+    errors.push(`${where} must be an object`)
+    return
+  }
+  if (typeof ex.name !== "string" || !ex.name.trim() || checkMaxLength(ex.name, "exerciseName"))
+    errors.push(`${where}.name must be a non-empty string`)
+  if (!validateInteger(ex.sets) || ex.sets < 1 || ex.sets > DEMO_SETS_MAX)
+    errors.push(`${where}.sets must be an integer from 1 to ${DEMO_SETS_MAX}`)
+  checkMuscleArray(ex.primaryMuscles, `${where}.primaryMuscles`, errors)
+  checkMuscleArray(ex.secondaryMuscles, `${where}.secondaryMuscles`, errors)
 }
 
 /**
@@ -455,34 +485,14 @@ export function validateSetTiming(
   _res: Response,
   next: NextFunction,
 ): void {
-  const {
-    exerciseName,
-    primaryMuscles,
-    secondaryMuscles,
-    setIndex,
-    startTime,
-    endTime,
-    weight,
-    reps,
-    note,
-    isWarmup,
-    machineName,
-    rir,
-  } = req.body
+  const { exerciseName, primaryMuscles, secondaryMuscles, startTime, endTime, note, isWarmup, machineName } =
+    req.body
   const errors: string[] = []
 
-  if (exerciseName !== undefined) {
-    if (typeof exerciseName !== "string" || !exerciseName.trim())
-      errors.push("Exercise name must be a non-empty string")
-    else {
-      const lenErr = checkMaxLength(exerciseName, "exerciseName")
-      if (lenErr) errors.push(lenErr)
-    }
-  }
+  if (exerciseName !== undefined)
+    checkStringField(exerciseName, "exerciseName", "Exercise name must be a non-empty string", errors)
   checkMuscleArray(primaryMuscles, "primaryMuscles", errors)
   checkMuscleArray(secondaryMuscles, "secondaryMuscles", errors)
-  if (setIndex !== undefined && (!validateInteger(setIndex) || setIndex < 0))
-    errors.push("Set index must be a non-negative integer")
   // parseBackdatedTimestamp, not a bare date parse: `new Date()` accepts 0,
   // true and "2999-01-01", and a phone whose clock is years ahead wrote sets
   // that sorted to the top of every history query forever.
@@ -497,38 +507,34 @@ export function validateSetTiming(
       errors.push((err as Error).message)
     }
   }
-  // ck_ws_weight / ck_ws_reps both allow 0, and the route stores 0 when the
-  // field is omitted, so an explicit 0 (a bodyweight set, a failed set) has
-  // to be accepted too.
-  if (weight != null && (typeof weight !== "number" || isNaN(weight) || weight < 0))
-    errors.push("Weight must be a number >= 0")
-  if (reps != null && (!validateInteger(reps) || reps < 0))
-    errors.push("Reps must be an integer >= 0")
-  if (note != null) {
-    if (typeof note !== "string") errors.push("Note must be a string")
-    else {
-      const lenErr = checkMaxLength(note, "note")
-      if (lenErr) errors.push(lenErr)
-    }
-  }
+  checkSetNumbers(req.body, errors)
+  if (note != null) checkStringField(note, "note", "Note must be a string", errors, true)
   if (isWarmup !== undefined && typeof isWarmup !== "boolean")
     errors.push("isWarmup must be a boolean")
-  // null clears a previous rating, absent leaves it alone. 0 (failure) is a real rating.
-  if (rir != null && (!validateInteger(rir) || rir < 0 || rir > 9))
-    errors.push("rir must be an integer between 0 and 9")
   // Free text from the user: only the column width matters.
-  if (machineName != null) {
-    if (typeof machineName !== "string")
-      errors.push("machineName must be a string")
-    else {
-      const lenErr = checkMaxLength(machineName, "machineName")
-      if (lenErr) errors.push(lenErr)
-    }
-  }
+  if (machineName != null)
+    checkStringField(machineName, "machineName", "machineName must be a string", errors, true)
 
   if (errors.length > 0)
     throw new ValidationError("Invalid set timing data", errors)
   next()
+}
+
+/** The numeric fields of a set timing, each checked only when present. */
+function checkSetNumbers(body: Record<string, unknown>, errors: string[]): void {
+  const { setIndex, weight, reps, rir } = body
+  if (setIndex !== undefined && (!validateInteger(setIndex) || setIndex < 0))
+    errors.push("Set index must be a non-negative integer")
+  // ck_ws_weight / ck_ws_reps both allow 0, and the route stores 0 when the
+  // field is omitted, so an explicit 0 (a bodyweight set, a failed set) has
+  // to be accepted too.
+  if (weight != null && (typeof weight !== "number" || Number.isNaN(weight) || weight < 0))
+    errors.push("Weight must be a number >= 0")
+  if (reps != null && (!validateInteger(reps) || reps < 0))
+    errors.push("Reps must be an integer >= 0")
+  // null clears a previous rating, absent leaves it alone. 0 (failure) is a real rating.
+  if (rir != null && (!validateInteger(rir) || rir < 0 || rir > 9))
+    errors.push("rir must be an integer between 0 and 9")
 }
 
 // ─── Tracking ────────────────────────────────────────────────────────────────
@@ -714,6 +720,82 @@ function checkProgramExercise(
 /** Stop collecting after this many problems, since the client needs the first few. */
 const MAX_REPORTED_ERRORS = 20
 
+/** What validateProgramUpload accumulates while it walks the days. */
+interface UploadWalk {
+  errors: string[]
+  names: Set<string>
+  slots: number
+}
+
+/** One uploaded day. Coerces a digit-string dayNumber in place. */
+function checkUploadDay(day: unknown, where: string, walk: UploadWalk): void {
+  const L = PROGRAM_LIMITS
+  const { errors } = walk
+  if (!isPlainObject(day)) {
+    errors.push(`${where} must be an object`)
+    return
+  }
+  const dayNumber = asInt(day.dayNumber)
+  if (dayNumber === undefined || dayNumber < 1 || dayNumber > L.dayNumber)
+    errors.push(`${where}.dayNumber must be an integer between 1 and ${L.dayNumber}`)
+  else day.dayNumber = dayNumber
+  if (day.dayTitle != null && !isShortString(day.dayTitle, MAX_LENGTHS.dayTitle))
+    errors.push(`${where}.dayTitle must be a string of at most ${MAX_LENGTHS.dayTitle} characters`)
+  checkMuscleArray(day.primaryMuscles, `${where}.primaryMuscles`, errors)
+  checkMuscleArray(day.secondaryMuscles, `${where}.secondaryMuscles`, errors)
+  // The flat per-day list is derived data the server never stores, but the
+  // upload response echoes it back.
+  if (
+    day.exercises != null &&
+    !(Array.isArray(day.exercises) && day.exercises.length <= L.slots)
+  )
+    errors.push(`${where}.exercises must be an array of at most ${L.slots} entries`)
+
+  if (day.split == null) return
+  if (!isPlainObject(day.split)) {
+    errors.push(`${where}.split must be an object keyed by split name`)
+    return
+  }
+  const splits = Object.entries(day.split)
+  if (splits.length > L.splits) {
+    errors.push(`${where}.split may have at most ${L.splits} splits`)
+    return
+  }
+  for (const [splitName, sw] of splits)
+    checkUploadSplit(splitName, sw, `${where}.split[${JSON.stringify(splitName.slice(0, 40))}]`, walk)
+}
+
+/** One split of an uploaded day. Throws once the program passes its slot cap. */
+function checkUploadSplit(splitName: string, sw: unknown, where: string, walk: UploadWalk): void {
+  const L = PROGRAM_LIMITS
+  const { errors } = walk
+  if (!isSplitName(splitName)) {
+    errors.push(`${where}: split names must be 1-${SPLIT_NAME_MAX} characters`)
+    return
+  }
+  if (!isPlainObject(sw)) {
+    errors.push(`${where} must be an object`)
+    return
+  }
+  if (sw.exercises == null) return
+  if (!Array.isArray(sw.exercises) || sw.exercises.length > L.exercisesPerSplit) {
+    errors.push(`${where}.exercises must be an array of at most ${L.exercisesPerSplit} exercises`)
+    return
+  }
+  walk.slots += sw.exercises.length
+  if (walk.slots > L.slots)
+    throw new ValidationError(`A program may have at most ${L.slots} exercise slots in total`)
+  for (const [j, ex] of sw.exercises.entries()) {
+    const eWhere = `${where}.exercises[${j}]`
+    if (!isPlainObject(ex)) {
+      errors.push(`${eWhere} must be an object`)
+      continue
+    }
+    checkProgramExercise(ex, eWhere, errors)
+    if (typeof ex.name === "string") walk.names.add(ex.name.trim().toLowerCase())
+  }
+}
+
 /**
  * POST /api/program/upload. Checks every type and cap before the model opens
  * its transaction, so a hostile or broken payload costs a walk over the parsed
@@ -750,71 +832,13 @@ export function validateProgramUpload(
     )
 
   const errors: string[] = []
-  const names = new Set<string>()
-  let slots = 0
+  const walk: UploadWalk = { errors, names: new Set<string>(), slots: 0 }
 
   for (const [i, day] of days.entries()) {
     if (errors.length >= MAX_REPORTED_ERRORS) break
-    const where = `days[${i}]`
-    if (!isPlainObject(day)) {
-      errors.push(`${where} must be an object`)
-      continue
-    }
-    const dayNumber = asInt(day.dayNumber)
-    if (dayNumber === undefined || dayNumber < 1 || dayNumber > L.dayNumber)
-      errors.push(`${where}.dayNumber must be an integer between 1 and ${L.dayNumber}`)
-    else day.dayNumber = dayNumber
-    if (day.dayTitle != null && !isShortString(day.dayTitle, MAX_LENGTHS.dayTitle))
-      errors.push(`${where}.dayTitle must be a string of at most ${MAX_LENGTHS.dayTitle} characters`)
-    checkMuscleArray(day.primaryMuscles, `${where}.primaryMuscles`, errors)
-    checkMuscleArray(day.secondaryMuscles, `${where}.secondaryMuscles`, errors)
-    // The flat per-day list is derived data the server never stores, but the
-    // upload response echoes it back.
-    if (
-      day.exercises != null &&
-      !(Array.isArray(day.exercises) && day.exercises.length <= L.slots)
-    )
-      errors.push(`${where}.exercises must be an array of at most ${L.slots} entries`)
-
-    if (day.split == null) continue
-    if (!isPlainObject(day.split)) {
-      errors.push(`${where}.split must be an object keyed by split name`)
-      continue
-    }
-    const splits = Object.entries(day.split)
-    if (splits.length > L.splits) {
-      errors.push(`${where}.split may have at most ${L.splits} splits`)
-      continue
-    }
-    for (const [splitName, sw] of splits) {
-      const sWhere = `${where}.split[${JSON.stringify(splitName.slice(0, 40))}]`
-      if (!isSplitName(splitName)) {
-        errors.push(`${sWhere}: split names must be 1-${SPLIT_NAME_MAX} characters`)
-        continue
-      }
-      if (!isPlainObject(sw)) {
-        errors.push(`${sWhere} must be an object`)
-        continue
-      }
-      if (sw.exercises == null) continue
-      if (!Array.isArray(sw.exercises) || sw.exercises.length > L.exercisesPerSplit) {
-        errors.push(`${sWhere}.exercises must be an array of at most ${L.exercisesPerSplit} exercises`)
-        continue
-      }
-      slots += sw.exercises.length
-      if (slots > L.slots)
-        throw new ValidationError(`A program may have at most ${L.slots} exercise slots in total`)
-      for (const [j, ex] of sw.exercises.entries()) {
-        const eWhere = `${sWhere}.exercises[${j}]`
-        if (!isPlainObject(ex)) {
-          errors.push(`${eWhere} must be an object`)
-          continue
-        }
-        checkProgramExercise(ex, eWhere, errors)
-        if (typeof ex.name === "string") names.add(ex.name.trim().toLowerCase())
-      }
-    }
+    checkUploadDay(day, `days[${i}]`, walk)
   }
+  const { names } = walk
   if (names.size > L.distinctNames)
     errors.push(`A program may name at most ${L.distinctNames} distinct exercises`)
 
@@ -837,18 +861,10 @@ export function validateProgramExercisePatch(
   const b = req.body ?? {}
   const errors: string[] = []
 
-  if (b.dayNumber != null) {
-    const n = asInt(b.dayNumber)
-    if (n === undefined || n < 1 || n > L.dayNumber)
-      errors.push(`dayNumber must be an integer between 1 and ${L.dayNumber}`)
-    else b.dayNumber = n
-  }
-  if (b.exerciseIndex != null) {
-    const n = asInt(b.exerciseIndex)
-    if (n === undefined || n < 0 || n >= L.exercisesPerSplit * 10)
-      errors.push("exerciseIndex must be a non-negative integer")
-    else b.exerciseIndex = n
-  }
+  coerceIntField(b, "dayNumber", (n) => n >= 1 && n <= L.dayNumber,
+    `dayNumber must be an integer between 1 and ${L.dayNumber}`, errors)
+  coerceIntField(b, "exerciseIndex", (n) => n >= 0 && n < L.exercisesPerSplit * 10,
+    "exerciseIndex must be a non-negative integer", errors)
   if (b.split != null && !isSplitName(b.split))
     errors.push(`split must be a non-empty string of at most ${SPLIT_NAME_MAX} characters`)
   if (
@@ -860,24 +876,34 @@ export function validateProgramExercisePatch(
   checkMuscleArray(b.newSecondaryMuscles, "newSecondaryMuscles", errors)
   if (b.newExerciseId != null && !isShortString(b.newExerciseId, L.catalogId))
     errors.push(`newExerciseId must be a string of at most ${L.catalogId} characters`)
-  if (b.additionalSets != null) {
-    const n = asInt(b.additionalSets)
-    if (n === undefined || Math.abs(n) > L.sets)
-      errors.push(`additionalSets must be an integer between -${L.sets} and ${L.sets}`)
-    else b.additionalSets = n
-  }
+  coerceIntField(b, "additionalSets", (n) => Math.abs(n) <= L.sets,
+    `additionalSets must be an integer between -${L.sets} and ${L.sets}`, errors)
   if (b.exercise != null) {
-    if (!isPlainObject(b.exercise)) errors.push("exercise must be an object")
-    else checkProgramExercise(b.exercise, "exercise", errors)
+    if (isPlainObject(b.exercise)) checkProgramExercise(b.exercise, "exercise", errors)
+    else errors.push("exercise must be an object")
   }
   if (b.patch != null) {
-    if (!isPlainObject(b.patch)) errors.push("patch must be an object")
-    else checkMachineFields(b.patch, "patch", errors)
+    if (isPlainObject(b.patch)) checkMachineFields(b.patch, "patch", errors)
+    else errors.push("patch must be an object")
   }
 
   if (errors.length > 0)
     throw new ValidationError("Invalid program edit", errors)
   next()
+}
+
+/** When `body[key]` is present: coerce it to an integer in place, or push `message`. */
+function coerceIntField(
+  body: Record<string, unknown>,
+  key: string,
+  inRange: (n: number) => boolean,
+  message: string,
+  errors: string[],
+): void {
+  if (body[key] == null) return
+  const n = asInt(body[key])
+  if (n === undefined || !inRange(n)) errors.push(message)
+  else body[key] = n
 }
 
 /**

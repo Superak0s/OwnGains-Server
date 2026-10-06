@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import http from "http"
+import http from "node:http"
 import jwt from "jsonwebtoken"
 import WebSocket, { type WebSocketServer } from "ws"
 import { createWsServer, sendToUser, type WsServerOptions } from "../wsServer.js"

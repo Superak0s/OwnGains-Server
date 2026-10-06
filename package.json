@@ -10,7 +10,8 @@
     "owngains": "bun src/owngains.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "bun scripts/smoke.mjs"
+    "smoke": "bun scripts/smoke.mjs",
+    "sonar:scan": "bash scripts/sonar-scan.sh"
   },
   "keywords": [
     "workout",

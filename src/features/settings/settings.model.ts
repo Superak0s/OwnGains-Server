@@ -87,7 +87,7 @@ export async function updateUserSettings(
     await pool.execute(
       `INSERT INTO user_settings (user_id, ${cols.join(", ")})
        VALUES (?${", ?".repeat(cols.length)})
-       ON DUPLICATE KEY UPDATE ${cols.map((c) => `${c} = VALUES(${c})`).join(", ")}`,
+       ON DUPLICATE KEY UPDATE ${cols.map((c) => c + " = VALUES(" + c + ")").join(", ")}`,
       [userId, ...keys.map((k) => patch[k] as number)],
     )
   } catch (err) {

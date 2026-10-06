@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express"
-import { randomBytes } from "crypto"
+import { randomBytes } from "node:crypto"
 
 /**
  * GET /admin/metrics: a self-contained dashboard over GET /api/admin/metrics.
@@ -43,7 +43,7 @@ router.get("/", (_req: Request, res: Response) => {
 
 export default router
 
-const PAGE = /* html */ `<!doctype html>
+const PAGE = /* html */ String.raw`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -622,7 +622,7 @@ pre {
           ["Error type", ev.name || "—"], ["Code", ev.code || "—"],
           ["User", ev.user || "anonymous"], ["Acting trainer", ev.trainer || "—"],
           ["Client IP", ev.ip || "—"], ["Request id", ev.reqId || "—"], ["Duration", ms(ev.durationMs)],
-        ]) + '<pre>' + esc(ev.message + (ev.stack ? "\\n\\n" + ev.stack : "")) + '</pre></div></details>'
+        ]) + '<pre>' + esc(ev.message + (ev.stack ? "\n\n" + ev.stack : "")) + '</pre></div></details>'
     }).join("") : empty(e.recentServer.length ? "No server errors match the filter" : "No server errors recorded.")
 
     const client = e.recentClient.filter(errorMatches).slice(0, 100)
@@ -641,7 +641,7 @@ pre {
       const key = "l:" + l.at + i
       return '<details class="event" data-key="' + esc(key) + '"' + (ui.open.has(key) ? " open" : "") + '><summary>' +
         '<span class="muted small">' + esc(time(l.at)) + '</span><span class="badge bad">log</span>' +
-        '<span>' + esc(l.message.split("\\n")[0]) + '</span><span></span><span class="muted small">' + esc(ago(l.at)) + '</span>' +
+        '<span>' + esc(l.message.split("\n")[0]) + '</span><span></span><span class="muted small">' + esc(ago(l.at)) + '</span>' +
         '</summary><div class="body"><pre>' + esc(l.message) + '</pre></div></details>'
     }).join("") : empty("Nothing logged at error level.")
   }

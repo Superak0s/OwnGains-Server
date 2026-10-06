@@ -24,8 +24,8 @@ router.use(healthConsentGuard)
 
 function safeMacro(v: unknown, name: string): number | null {
   if (v == null) return null
-  const n = parseFloat(v as string)
-  if (isNaN(n) || !isFinite(n) || n < 0 || n > 9999) {
+  const n = Number.parseFloat(v as string)
+  if (!Number.isFinite(n) || n < 0 || n > 9999) {
     throw new ValidationError(`Invalid ${name} value`)
   }
   return n
@@ -67,17 +67,16 @@ router.post("/log", idempotent, async (req: Request, res: Response) => {
   const parsedCalories = safeMacro(calories, "calories")
   const parsedMargin = safeMacro(errorMargin, "errorMargin") ?? 0
 
-  const entry = await logMacrosIntake(
-    userId,
+  const entry = await logMacrosIntake(userId, {
     name,
-    parsedProtein,
-    parsedCarbs,
-    parsedFat,
-    parsedCalories,
-    parsedMargin,
-    parsedTakenAt,
+    protein: parsedProtein,
+    carbs: parsedCarbs,
+    fat: parsedFat,
+    calories: parsedCalories,
+    errorMargin: parsedMargin,
+    takenAt: parsedTakenAt,
     note,
-  )
+  })
 
   // `entry` is the legacy key. See the note on the envelope in bodyStats.routes.ts.
   res.status(201).json({ success: true, data: entry, entry })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { spawn } from "child_process"
+import { spawn } from "node:child_process"
 
 // The in-process suite imports `app` directly, so this covers the one thing it
 // can't: booting server.ts as a real process and exiting 0 on SIGTERM.

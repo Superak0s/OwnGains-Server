@@ -14,7 +14,6 @@ import {
   validateSessionCreation,
   validateSetTiming,
 } from "@/middleware/validation.js"
-import { pool } from "@/config/database.js"
 import { logger } from "@/utils/logger.js"
 import { envInt } from "@/config/env.js"
 import { sendToUser, hasOtherClients } from "@/ws/wsServer.js"
@@ -78,7 +77,7 @@ router.get("/", async (req: Request, res: Response) => {
   // No `total`: it was sessions.length, which a client can read off the array
   // itself, and it read like a full-history count that it never was.
   // nextCursor (added, older clients ignore it) is null on the last page.
-  const last = sessions[sessions.length - 1]
+  const last = sessions.at(-1)
   res.json({
     success: true,
     sessions,
@@ -186,18 +185,20 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
   const timing = await recordSetTiming(
     sessionId,
     userId,
-    exerciseName.trim(),
-    setIndex,
-    startTime,
-    endTime,
-    weight || 0,
-    reps || 0,
-    note || null,
-    isWarmup || false,
-    primaryMuscles ?? [],
-    secondaryMuscles ?? [],
-    machineName || null,
-    rir ?? null,
+    {
+      exerciseName: exerciseName.trim(),
+      setIndex,
+      startTime,
+      endTime,
+      weight: weight || 0,
+      reps: reps || 0,
+      note: note || null,
+      isWarmup: isWarmup || false,
+      primaryMuscles: primaryMuscles ?? [],
+      secondaryMuscles: secondaryMuscles ?? [],
+      machineName: machineName || null,
+      rir: rir ?? null,
+    },
     { openWorkoutOnly: !!req.trainer },
   )
 

@@ -53,8 +53,8 @@ export function calculateBodyFatPercentage(
       450
   }
 
-  const result = parseFloat(bf.toFixed(1))
-  if (isNaN(result) || result < 0 || result > 100)
+  const result = Number.parseFloat(bf.toFixed(1))
+  if (Number.isNaN(result) || result < 0 || result > 100)
     throw new ValidationError(
       `Invalid body fat result: ${result}%. Check your measurements.`,
     )

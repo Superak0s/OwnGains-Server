@@ -47,3 +47,6 @@ backups/
 # Local prose linting (not part of the repo)
 .vale/
 .vale.ini
+
+# sonarqube.py output
+scripts/sonarqube/

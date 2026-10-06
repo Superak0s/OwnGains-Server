@@ -6,6 +6,11 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Internal
+
+- Added `bun run sonar:scan` (`scripts/sonar-scan.sh`), a SonarQube scan that reads `SONAR_TOKEN` from the environment or `.env`.
+- Fixed the SonarQube findings: `node:` builtin imports, `Number.*` helpers, unused imports and redundant assertions removed, `Set` lookups, `.at(-1)`, flattened nested ternaries and template literals, long functions split into helpers (CLI commands, validators, error handler, migrations, idempotency, data export, program upload, demo data, WebSocket message handling), and options objects in place of long parameter lists.
+
 ## [0.3.1] - 2026-10-06
 
 ### Changed

@@ -101,29 +101,8 @@ async function insertWorkouts(
     const day = days[i % days.length]
     const week = Math.floor((i * DAYS_BETWEEN_SESSIONS) / 7)
     const start = opts.now - (count - i) * DAYS_BETWEEN_SESSIONS * DAY_MS
-    let cursor = start
-    let prevEnd: number | null = null
-    const sets: (string | number | null)[][] = []
-
-    for (const ex of day.exercises) {
-      for (let setIndex = 1; setIndex <= ex.sets; setIndex++) {
-        const end = cursor + SET_MS
-        sets.push([
-          exerciseIds.get(ex.name)!,
-          setIndex,
-          formatDateForMySQL(new Date(cursor)),
-          formatDateForMySQL(new Date(end)),
-          SET_MS / 1000,
-          prevEnd === null ? null : Math.round((cursor - prevEnd) / 1000),
-          toPlate(baseWeight(ex.name) * opts.strength * (1 + 0.03 * week)),
-          Math.max(6, 11 - setIndex),
-        ])
-        prevEnd = end
-        cursor = end + REST_MS
-      }
-    }
+    const { sets, end } = demoSetRows(day, start, exerciseIds, opts.strength * (1 + 0.03 * week))
     if (sets.length === 0) continue
-    const end = prevEnd!
 
     const [workout] = await conn.execute<ResultSetHeader>(
       `INSERT INTO workouts (user_id, program_day_id, day_number, day_title, split,
@@ -151,6 +130,36 @@ async function insertWorkouts(
     totalSets += sets.length
   }
   return { sessions: count, sets: totalSets }
+}
+
+/** One workout's set rows, back to back from `start`, and when the last ends. */
+function demoSetRows(
+  day: DemoDay,
+  start: number,
+  exerciseIds: Map<string, number>,
+  load: number,
+): { sets: (string | number | null)[][]; end: number } {
+  let cursor = start
+  let prevEnd: number | null = null
+  const sets: (string | number | null)[][] = []
+  for (const ex of day.exercises) {
+    for (let setIndex = 1; setIndex <= ex.sets; setIndex++) {
+      const end = cursor + SET_MS
+      sets.push([
+        exerciseIds.get(ex.name)!,
+        setIndex,
+        formatDateForMySQL(new Date(cursor)),
+        formatDateForMySQL(new Date(end)),
+        SET_MS / 1000,
+        prevEnd === null ? null : Math.round((cursor - prevEnd) / 1000),
+        toPlate(baseWeight(ex.name) * load),
+        Math.max(6, 11 - setIndex),
+      ])
+      prevEnd = end
+      cursor = end + REST_MS
+    }
+  }
+  return { sets, end: prevEnd ?? start }
 }
 
 /**
@@ -235,95 +244,112 @@ async function insertTracking(conn: PoolConnection, userId: number, now: number)
     d.setUTCHours(hour, 0, 0, 0)
     return formatDateForMySQL(d)
   }
-  const days = 35
   let count = 0
 
   if (!localOnly.includes("tracking")) {
-    const metrics: Row[] = []
-    const macros: Row[] = []
-    for (let d = days; d >= 0; d--) {
-      const progress = (days - d) / days
-      if (d % 2 === 0) metrics.push(["weight_kg", 82 - 2.5 * progress, at(d, 7), 0])
-      metrics.push(["water_ml", 500, at(d, 8), 0], ["water_ml", 750 + (d % 3) * 250, at(d, 15), 0])
-      if (d % 7 === 0)
-        for (const [metric, value] of [
-          ["body_fat_pct", 18 - 2 * progress],
-          ["waist_cm", 86 - 3 * progress],
-          ["neck_cm", 38],
-          ["chest_cm", 102 + progress],
-          ["arm_left_cm", 36 + progress],
-          ["arm_right_cm", 36 + progress],
-        ] as const)
-          metrics.push([metric, value, at(d), 0])
-      macros.push(["Daily intake", 150 + (d % 4) * 10, 230 + (d % 5) * 15, 65 + (d % 3) * 5, 2300 + (d % 5) * 80, at(d, 13)])
-    }
-    count += await insertDemoRows(conn, userId, "measurements", ["metric", "value", "measured_at", "entry_seq"], metrics)
-    count += await insertDemoRows(conn, userId, "macros_intake", ["name", "protein", "carbs", "fat", "calories", "taken_at"], macros)
-    count += await insertDemoRows(conn, userId, "soreness", ["muscle_group", "intensity", "logged_at"], [
-      ["quads", 6, at(1, 18)],
-      ["chest_upper", 4, at(2, 18)],
-    ])
-    count += await insertDemoRows(conn, userId, "injuries", ["muscle_group", "injury_type", "pain_level", "start_date", "note"], [
-      ["lower_back", "strain", 3, at(10), "Demo injury"],
-    ])
-    count += await insertDemoRows(conn, userId, "muscle_notes", ["muscle_group", "content"], [
-      ["shoulders_front", "Warm up with band pull-aparts."],
-    ])
-    count += await insertDemoRows(conn, userId, "menstrual_cycle", ["cycle_start", "symptoms"], [
-      [at(56), '["cramps"]'],
-      [at(28), '["cramps"]'],
-      [at(0), '["cramps"]'],
-    ])
-
-    const [height] = await conn.execute<ResultSetHeader>(
-      `UPDATE users SET height_cm = 178 WHERE id = ? AND height_cm IS NULL`,
-      [userId],
-    )
-    if (height.affectedRows)
-      await conn.execute(
-        `INSERT INTO demo_rows (user_id, table_name, row_id) VALUES (?, 'users', ?)`,
-        [userId, userId],
-      )
-
-    for (const [muscle, angle] of DEMO_PHOTO_MUSCLES)
-      for (const [i, daysAgo] of DEMO_PHOTO_DAYS_AGO.entries()) {
-        const data = await readFile(new URL(`./demo-photos/${muscle}-${i + 1}.jpg`, import.meta.url))
-        count += await insertDemoRows(conn, userId, "progress_photos", ["mime_type", "file_size", "content_hash", "taken_at", "note", "angle"], [
-          ["image/jpeg", data.length, createHash("sha256").update(data).digest("hex"), at(daysAgo, 8), "Demo photo", angle],
-        ])
-        const [[{ id }]] = await conn.query<(RowDataPacket & { id: number })[]>(
-          `SELECT MAX(row_id) AS id FROM demo_rows WHERE user_id = ? AND table_name = 'progress_photos'`,
-          [userId],
-        )
-        await conn.execute(`INSERT INTO progress_photo_blobs (photo_id, data) VALUES (?, ?)`, [id, data])
-        await conn.execute(`INSERT INTO progress_photo_muscles (photo_id, muscle_group) VALUES (?, ?)`, [id, muscle])
-      }
+    count += await insertTrackingDemo(conn, userId, at)
+    count += await insertDemoPhotos(conn, userId, at)
   }
+  if (!localOnly.includes("supplements")) count += await insertSupplementsDemo(conn, userId, at)
+  return count
+}
 
-  if (!localOnly.includes("supplements")) {
-    const supplements = [
-      { name: "Creatine (demo)", unit: "g", amount: 5 },
-      { name: "Vitamin D (demo)", unit: "IU", amount: 2000 },
-      { name: "Omega-3 (demo)", unit: "caps", amount: 2 },
-    ]
-    for (const [i, sup] of supplements.entries()) {
-      count += await insertDemoRows(conn, userId, "supplements", ["name", "unit", "default_amount"], [
-        [sup.name, sup.unit, sup.amount],
+type DemoAt = (daysAgo: number, hour?: number) => string
+const DEMO_TRACKING_DAYS = 35
+
+async function insertTrackingDemo(conn: PoolConnection, userId: number, at: DemoAt): Promise<number> {
+  const days = DEMO_TRACKING_DAYS
+  let count = 0
+  const metrics: Row[] = []
+  const macros: Row[] = []
+  for (let d = days; d >= 0; d--) {
+    const progress = (days - d) / days
+    if (d % 2 === 0) metrics.push(["weight_kg", 82 - 2.5 * progress, at(d, 7), 0])
+    metrics.push(["water_ml", 500, at(d, 8), 0], ["water_ml", 750 + (d % 3) * 250, at(d, 15), 0])
+    if (d % 7 === 0)
+      for (const [metric, value] of [
+        ["body_fat_pct", 18 - 2 * progress],
+        ["waist_cm", 86 - 3 * progress],
+        ["neck_cm", 38],
+        ["chest_cm", 102 + progress],
+        ["arm_left_cm", 36 + progress],
+        ["arm_right_cm", 36 + progress],
+      ] as const)
+        metrics.push([metric, value, at(d), 0])
+    macros.push(["Daily intake", 150 + (d % 4) * 10, 230 + (d % 5) * 15, 65 + (d % 3) * 5, 2300 + (d % 5) * 80, at(d, 13)])
+  }
+  count += await insertDemoRows(conn, userId, "measurements", ["metric", "value", "measured_at", "entry_seq"], metrics)
+  count += await insertDemoRows(conn, userId, "macros_intake", ["name", "protein", "carbs", "fat", "calories", "taken_at"], macros)
+  count += await insertDemoRows(conn, userId, "soreness", ["muscle_group", "intensity", "logged_at"], [
+    ["quads", 6, at(1, 18)],
+    ["chest_upper", 4, at(2, 18)],
+  ])
+  count += await insertDemoRows(conn, userId, "injuries", ["muscle_group", "injury_type", "pain_level", "start_date", "note"], [
+    ["lower_back", "strain", 3, at(10), "Demo injury"],
+  ])
+  count += await insertDemoRows(conn, userId, "muscle_notes", ["muscle_group", "content"], [
+    ["shoulders_front", "Warm up with band pull-aparts."],
+  ])
+  count += await insertDemoRows(conn, userId, "menstrual_cycle", ["cycle_start", "symptoms"], [
+    [at(56), '["cramps"]'],
+    [at(28), '["cramps"]'],
+    [at(0), '["cramps"]'],
+  ])
+
+  const [height] = await conn.execute<ResultSetHeader>(
+    `UPDATE users SET height_cm = 178 WHERE id = ? AND height_cm IS NULL`,
+    [userId],
+  )
+  if (height.affectedRows)
+    await conn.execute(
+      `INSERT INTO demo_rows (user_id, table_name, row_id) VALUES (?, 'users', ?)`,
+      [userId, userId],
+    )
+  return count
+}
+
+async function insertDemoPhotos(conn: PoolConnection, userId: number, at: DemoAt): Promise<number> {
+  let count = 0
+  for (const [muscle, angle] of DEMO_PHOTO_MUSCLES)
+    for (const [i, daysAgo] of DEMO_PHOTO_DAYS_AGO.entries()) {
+      const data = await readFile(new URL(`./demo-photos/${muscle}-${i + 1}.jpg`, import.meta.url))
+      count += await insertDemoRows(conn, userId, "progress_photos", ["mime_type", "file_size", "content_hash", "taken_at", "note", "angle"], [
+        ["image/jpeg", data.length, createHash("sha256").update(data).digest("hex"), at(daysAgo, 8), "Demo photo", angle],
       ])
       const [[{ id }]] = await conn.query<(RowDataPacket & { id: number })[]>(
-        `SELECT MAX(row_id) AS id FROM demo_rows WHERE user_id = ? AND table_name = 'supplements'`,
+        `SELECT MAX(row_id) AS id FROM demo_rows WHERE user_id = ? AND table_name = 'progress_photos'`,
         [userId],
       )
-      const doses: Row[] = []
-      for (let d = days; d >= 0; d--)
-        if ((d + i) % 5 !== 0) doses.push([userId, id, sup.amount, at(d, 8 + i)])
-      await conn.execute(
-        `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at)
-         VALUES ${doses.map(() => "(?, ?, ?, ?)").join(", ")}`,
-        doses.flat(),
-      )
-
+      await conn.execute(`INSERT INTO progress_photo_blobs (photo_id, data) VALUES (?, ?)`, [id, data])
+      await conn.execute(`INSERT INTO progress_photo_muscles (photo_id, muscle_group) VALUES (?, ?)`, [id, muscle])
     }
+  return count
+}
+
+async function insertSupplementsDemo(conn: PoolConnection, userId: number, at: DemoAt): Promise<number> {
+  const days = DEMO_TRACKING_DAYS
+  let count = 0
+  const supplements = [
+    { name: "Creatine (demo)", unit: "g", amount: 5 },
+    { name: "Vitamin D (demo)", unit: "IU", amount: 2000 },
+    { name: "Omega-3 (demo)", unit: "caps", amount: 2 },
+  ]
+  for (const [i, sup] of supplements.entries()) {
+    count += await insertDemoRows(conn, userId, "supplements", ["name", "unit", "default_amount"], [
+      [sup.name, sup.unit, sup.amount],
+    ])
+    const [[{ id }]] = await conn.query<(RowDataPacket & { id: number })[]>(
+      `SELECT MAX(row_id) AS id FROM demo_rows WHERE user_id = ? AND table_name = 'supplements'`,
+      [userId],
+    )
+    const doses: Row[] = []
+    for (let d = days; d >= 0; d--)
+      if ((d + i) % 5 !== 0) doses.push([userId, id, sup.amount, at(d, 8 + i)])
+    await conn.execute(
+      `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at)
+       VALUES ${doses.map(() => "(?, ?, ?, ?)").join(", ")}`,
+      doses.flat(),
+    )
   }
   return count
 }

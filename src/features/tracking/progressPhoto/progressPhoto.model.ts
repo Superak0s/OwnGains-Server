@@ -172,12 +172,15 @@ export async function uploadPhoto(
   userId: number,
   photoBuffer: Buffer,
   mimeType: string,
-  muscleGroups: string[],
-  note: string | null,
-  angle: string,
-  customSideName: string | null,
-  takenAt?: string | null,
+  meta: {
+    muscleGroups: string[]
+    note: string | null
+    angle: string
+    customSideName: string | null
+    takenAt?: string | null
+  },
 ): Promise<number> {
+  const { muscleGroups, note, angle, customSideName, takenAt } = meta
   if (!Buffer.isBuffer(photoBuffer) || photoBuffer.length === 0)
     throw new ValidationError("Invalid photo data")
   if (photoBuffer.length > MAX_PHOTO_SIZE)
@@ -207,7 +210,7 @@ export async function uploadPhoto(
         `SELECT COALESCE(SUM(file_size), 0) AS bytes FROM progress_photos WHERE user_id = ?`,
         [userId],
       )
-      if (Number(used!.bytes) + original.length > photoQuota.perUserMb * 1024 * 1024)
+      if (Number(used.bytes) + original.length > photoQuota.perUserMb * 1024 * 1024)
         throw new ValidationError(
           `Photo storage quota reached (${photoQuota.perUserMb} MB). Delete older photos to upload more.`,
           null,
@@ -221,7 +224,7 @@ export async function uploadPhoto(
       const [[total]] = await connection.execute<RowDataPacket[]>(
         `SELECT COALESCE(SUM(file_size), 0) AS bytes FROM progress_photos`,
       )
-      if (Number(total!.bytes) + original.length > photoQuota.totalGb * 1024 ** 3) {
+      if (Number(total.bytes) + original.length > photoQuota.totalGb * 1024 ** 3) {
         logger.error(
           `Photo storage for the instance is full (PHOTO_TOTAL_QUOTA_GB=${photoQuota.totalGb}); uploads are refused until space is freed or the cap is raised`,
         )
@@ -243,7 +246,7 @@ export async function uploadPhoto(
         "image/jpeg",
         original.length,
         sha256(original),
-        formatDateForMySQL(takenAt ? takenAt : new Date()),
+        formatDateForMySQL(takenAt || new Date()),
         note ?? null,
         angle,
         customSideName ?? null,
@@ -291,11 +294,11 @@ export async function getAllPhotos(
       : [userId, limit + 1],
   )
   const page = rows.slice(0, limit)
-  const last = page[page.length - 1]
+  const last = page.at(-1)
   return {
     data: page.map(withUri),
     nextCursor:
-      rows.length > limit ? { before: last.takenAt, beforeId: String(last.id) } : null,
+      rows.length > limit && last ? { before: last.takenAt, beforeId: String(last.id) } : null,
   }
 }
 

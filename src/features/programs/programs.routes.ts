@@ -32,7 +32,7 @@ router.use("/exercise", validateProgramExercisePatch)
 function clearsSomething(v: unknown): boolean {
   if (v === null) return true
   if (typeof v !== "object") return false
-  return Object.values(v as object).some(clearsSomething)
+  return Object.values(v).some(clearsSomething)
 }
 
 router.get("/", async (req: Request, res: Response) => {
@@ -148,11 +148,13 @@ router.patch("/exercise/rename", denyTrainer, async (req: Request, res: Response
     dayNumber,
     split,
     exerciseIndex,
-    newName,
-    newPrimaryMuscles,
-    newSecondaryMuscles,
-    // absent leaves the stored id alone. Explicit null clears it
-    "newExerciseId" in req.body ? req.body.newExerciseId : undefined,
+    {
+      newName,
+      newPrimaryMuscles,
+      newSecondaryMuscles,
+      // absent leaves the stored id alone. Explicit null clears it
+      newExerciseId: "newExerciseId" in req.body ? req.body.newExerciseId : undefined,
+    },
   )
 
   res.json({

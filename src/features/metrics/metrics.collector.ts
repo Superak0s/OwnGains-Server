@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express"
-import os from "os"
+import os from "node:os"
 import {
   createHistogram,
   monitorEventLoopDelay,
@@ -173,9 +173,10 @@ export function routeLabel(method: string, originalUrl: string): string {
   const path = originalUrl.split("?")[0]
   const normalised = path
     .split("/")
-    .map((seg) =>
-      UUID.test(seg) || NUMERIC.test(seg) ? ":id" : DATE.test(seg) ? ":date" : seg,
-    )
+    .map((seg) => {
+      if (UUID.test(seg) || NUMERIC.test(seg)) return ":id"
+      return DATE.test(seg) ? ":date" : seg
+    })
     .join("/")
   return `${method} ${normalised.length > 1 ? normalised.replace(/\/$/, "") : normalised}`
 }
@@ -219,14 +220,10 @@ function describeError(res: Response): {
 } {
   const err = res.locals.error as (Error & { code?: unknown; errno?: unknown; details?: unknown }) | undefined
   const body = res.locals.metricsBody as { error?: unknown; code?: unknown; details?: unknown } | undefined
-  const code =
-    typeof err?.code === "string"
-      ? err.code
-      : typeof body?.code === "string"
-        ? body.code
-        : typeof err?.errno === "number"
-          ? `ERRNO_${err.errno}`
-          : null
+  let code: string | null = null
+  if (typeof err?.code === "string") code = err.code
+  else if (typeof body?.code === "string") code = body.code
+  else if (typeof err?.errno === "number") code = `ERRNO_${err.errno}`
   const message = clip(
     String(err?.message || (typeof body?.error === "string" ? body.error : "") || "(no message)"),
   )

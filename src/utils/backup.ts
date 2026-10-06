@@ -2,13 +2,13 @@
 // and optionally encrypted with age. Shells out to mysqldump/mysql/age rather
 // than dumping through mysql2: they already handle every column type, and a
 // restore is then a plain `mysql < dump` an operator can also run by hand.
-import { spawn } from "child_process"
-import { createReadStream, createWriteStream, existsSync } from "fs"
-import { chmod, mkdir, readdir, rename, stat, unlink } from "fs/promises"
-import { join } from "path"
-import { pipeline } from "stream/promises"
-import type { Readable, Writable } from "stream"
-import { createGunzip, createGzip } from "zlib"
+import { spawn } from "node:child_process"
+import { createReadStream, createWriteStream, existsSync } from "node:fs"
+import { chmod, mkdir, readdir, rename, stat, unlink } from "node:fs/promises"
+import { join } from "node:path"
+import { pipeline } from "node:stream/promises"
+import type { Readable, Writable } from "node:stream"
+import { createGunzip, createGzip } from "node:zlib"
 import { envInt } from "@/config/env.js"
 import { logger } from "@/utils/logger.js"
 
@@ -35,7 +35,7 @@ function db(): { name: string; conn: string[] } {
  */
 function run(cmd: string, args: string[], stdin: "pipe" | "ignore") {
   const [bin, ...pre] = cmd.trim().split(/\s+/)
-  const child = spawn(bin!, [...pre, ...args], {
+  const child = spawn(bin, [...pre, ...args], {
     env: { ...process.env, MYSQL_PWD: process.env.DB_PASSWORD ?? "" },
     stdio: [stdin, "pipe", "inherit"],
   })

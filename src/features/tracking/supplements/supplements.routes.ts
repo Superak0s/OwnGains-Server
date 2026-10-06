@@ -39,15 +39,7 @@ function validateSupplementFields(
   fields: Record<string, unknown>,
   requireName: boolean,
 ): void {
-  const {
-    name,
-    unit,
-    defaultAmount,
-    dosesPerDay,
-    doseIntervalMinutes,
-    reminderTime,
-    color,
-  } = fields
+  const { name, unit, defaultAmount } = fields
   if (requireName || name !== undefined) {
     if (typeof name !== "string" || !name.trim())
       throw new ValidationError("name must be a non-empty string")
@@ -70,6 +62,11 @@ function validateSupplementFields(
       "defaultAmount must be a positive number (max 10000)",
     )
   }
+  validateScheduleFields(fields)
+}
+
+function validateScheduleFields(fields: Record<string, unknown>): void {
+  const { dosesPerDay, doseIntervalMinutes, reminderTime, color } = fields
   if (dosesPerDay !== undefined && !isIntIn(dosesPerDay, 1, 10)) {
     throw new ValidationError("dosesPerDay must be an integer between 1 and 10")
   }
@@ -121,18 +118,17 @@ router.post("/", async (req: Request, res: Response) => {
     true,
   )
 
-  const supplementId = await createSupplement(
-    req.user!.id,
-    name.trim(),
-    unit.trim(),
-    defaultAmount ?? 5,
+  const supplementId = await createSupplement(req.user!.id, {
+    name: name.trim(),
+    unit: unit.trim(),
+    defaultAmount: defaultAmount ?? 5,
     reminderEnabled,
     reminderTime,
     color,
-    icon ?? null,
+    icon: icon ?? null,
     dosesPerDay,
     doseIntervalMinutes,
-  )
+  })
   const [summary] = await listSupplementSummaries(req.user!.id, supplementId)
 
   res.status(201).json({ success: true, data: summary, supplement: summary })

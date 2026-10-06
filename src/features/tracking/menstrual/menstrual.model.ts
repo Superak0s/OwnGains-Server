@@ -51,7 +51,7 @@ export async function logMenstrualCycle(
   cycleStart: string,
   symptoms?: unknown,
 ): Promise<MenstrualEntry> {
-  if (isNaN(new Date(cycleStart).getTime()))
+  if (Number.isNaN(new Date(cycleStart).getTime()))
     throw new ValidationError("Invalid cycle start date")
 
   const [result] = await pool.execute<ResultSetHeader>(
@@ -183,26 +183,19 @@ export async function getCycleStats(
   // ponytail: fixed windows, not a fertility tracker. Widen only if asked.
   const follicularEnd = periodDays + 7
   const ovulationEnd = periodDays + 11
-  const currentPhase: CyclePhase =
-    day <= periodDays
-      ? { phase: "menstruation", daysInPhase: day, estimatedEnd: endOf(periodDays) }
-      : day <= follicularEnd
-        ? {
-            phase: "follicular",
-            daysInPhase: day - periodDays,
-            estimatedEnd: endOf(follicularEnd),
-          }
-        : day <= ovulationEnd
-          ? {
-              phase: "ovulation",
-              daysInPhase: day - follicularEnd,
-              estimatedEnd: endOf(ovulationEnd),
-            }
-          : {
-              phase: "luteal",
-              daysInPhase: day - ovulationEnd,
-              estimatedEnd: nextPeriodEstimate,
-            }
+  const windows = [
+    ["menstruation", 0, periodDays],
+    ["follicular", periodDays, follicularEnd],
+    ["ovulation", follicularEnd, ovulationEnd],
+  ] as const
+  const w = windows.find(([, , end]) => day <= end)
+  const currentPhase: CyclePhase = w
+    ? { phase: w[0], daysInPhase: day - w[1], estimatedEnd: endOf(w[2]) }
+    : {
+        phase: "luteal",
+        daysInPhase: day - ovulationEnd,
+        estimatedEnd: nextPeriodEstimate,
+      }
 
   return {
     currentPhase,

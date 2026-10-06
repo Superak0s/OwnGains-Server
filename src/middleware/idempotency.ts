@@ -60,64 +60,8 @@ export async function idempotent(req: Request, res: Response, next: NextFunction
     }
   }
 
-  if (!(await claim())) {
-    const [[stored]] = await pool.execute<RowDataPacket[]>(
-      `SELECT route, body_hash AS bodyHash, status, response, created_at AS createdAt
-       FROM idempotency_keys WHERE user_id = ? AND actor_id = ? AND idem_key = ?`,
-      pk,
-    )
-    const age = stored ? now - parseMySQLDate(stored.createdAt).getTime() : 0
-    const expired = age >= TTL_MS
-    const abandoned = stored?.status === PENDING && age >= IN_FLIGHT_STALE_MS
-
-    if (stored && !expired) {
-      if (stored.route !== route || stored.bodyHash !== bodyHash)
-        throw new AppError(
-          "Idempotency-Key was already used for a different request",
-          422,
-          null,
-          "IDEMPOTENCY_KEY_REUSED",
-        )
-      if (stored.status !== PENDING) {
-        res.status(stored.status).type("json").send(stored.response)
-        return
-      }
-    }
-
-    // The row vanished between the INSERT and the SELECT (its request failed
-    // and released it), has expired, or was abandoned: take the key over. The
-    // UPDATE is conditional on the row we read, so of two retries racing for
-    // it exactly one wins.
-    let tookOver = false
-    if (!stored) tookOver = await claim()
-    else if (expired || abandoned) {
-      const [r] = await pool.execute<ResultSetHeader>(
-        `UPDATE idempotency_keys
-         SET route = ?, body_hash = ?, status = ?, response = '', created_at = ?
-         WHERE user_id = ? AND actor_id = ? AND idem_key = ?
-           AND status = ? AND created_at = ?`,
-        [
-          route,
-          bodyHash,
-          PENDING,
-          formatDateForMySQL(new Date(now)),
-          ...pk,
-          stored.status,
-          stored.createdAt,
-        ],
-      )
-      tookOver = r.affectedRows === 1
-    }
-    if (!tookOver) {
-      res.set("Retry-After", "2")
-      throw new AppError(
-        "A request with this Idempotency-Key is still in progress",
-        409,
-        null,
-        "IDEMPOTENCY_KEY_IN_FLIGHT",
-      )
-    }
-  }
+  if (!(await claim()) && (await replayOrTakeOver(res, claim, { pk, route, bodyHash, now })))
+    return
 
   // From here this request has claimed the placeholder and must settle it exactly
   // once: store a 2xx, or release the key for anything else so a retry runs.
@@ -177,4 +121,72 @@ export async function purgeExpiredIdempotencyKeys(batch = 5000): Promise<number>
     [cutoff],
   )
   return r.affectedRows
+}
+
+/**
+ * The key already has a row. Replay its stored response (true), or take an
+ * expired or abandoned key over (false). Throws when it is in use.
+ */
+async function replayOrTakeOver(
+  res: Response,
+  claim: () => Promise<boolean>,
+  { pk, route, bodyHash, now }: { pk: (string | number)[]; route: string; bodyHash: string; now: number },
+): Promise<boolean> {
+  const [[stored]] = await pool.execute<RowDataPacket[]>(
+    `SELECT route, body_hash AS bodyHash, status, response, created_at AS createdAt
+     FROM idempotency_keys WHERE user_id = ? AND actor_id = ? AND idem_key = ?`,
+    pk,
+  )
+  const age = stored ? now - parseMySQLDate(stored.createdAt).getTime() : 0
+  const expired = age >= TTL_MS
+  const abandoned = stored?.status === PENDING && age >= IN_FLIGHT_STALE_MS
+
+  if (stored && !expired) {
+    if (stored.route !== route || stored.bodyHash !== bodyHash)
+      throw new AppError(
+        "Idempotency-Key was already used for a different request",
+        422,
+        null,
+        "IDEMPOTENCY_KEY_REUSED",
+      )
+    if (stored.status !== PENDING) {
+      res.status(stored.status).type("json").send(stored.response)
+      return true
+    }
+  }
+
+  // The row vanished between the INSERT and the SELECT (its request failed
+  // and released it), has expired, or was abandoned: take the key over. The
+  // UPDATE is conditional on the row we read, so of two retries racing for
+  // it exactly one wins.
+  let tookOver = false
+  if (!stored) tookOver = await claim()
+  else if (expired || abandoned) {
+    const [r] = await pool.execute<ResultSetHeader>(
+      `UPDATE idempotency_keys
+       SET route = ?, body_hash = ?, status = ?, response = '', created_at = ?
+       WHERE user_id = ? AND actor_id = ? AND idem_key = ?
+         AND status = ? AND created_at = ?`,
+      [
+        route,
+        bodyHash,
+        PENDING,
+        formatDateForMySQL(new Date(now)),
+        ...pk,
+        stored.status,
+        stored.createdAt,
+      ],
+    )
+    tookOver = r.affectedRows === 1
+  }
+  if (!tookOver) {
+    res.set("Retry-After", "2")
+    throw new AppError(
+      "A request with this Idempotency-Key is still in progress",
+      409,
+      null,
+      "IDEMPOTENCY_KEY_IN_FLIGHT",
+    )
+  }
+  return false
 }

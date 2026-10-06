@@ -1,6 +1,6 @@
 import mysql, { Pool, PoolConnection } from "mysql2/promise";
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import type { RowDataPacket } from "mysql2/promise";
 import type { Connection as CoreConnection } from "mysql2";
 import { logger } from "../utils/logger.js";
@@ -192,7 +192,7 @@ async function createDatabaseIfNotExists(): Promise<void> {
     // DB_NAME is the operator's own, not user input, but an unescaped backtick
     // turns a typo into a confusing syntax error at boot instead of a clear one.
     await connection.execute(
-      `CREATE DATABASE IF NOT EXISTS \`${dbName.replace(/`/g, "``")}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE DATABASE IF NOT EXISTS \`${dbName.replaceAll("`", "``")}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     );
     logger.info(`✓ Database '${dbName}' verified/created`);
   } finally {
@@ -226,7 +226,7 @@ async function isEmptyDatabase(conn: PoolConnection): Promise<boolean> {
   const [rows] = await conn.execute<RowDataPacket[]>(
     `SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE()`,
   );
-  return Number(rows[0]!.n) === 0;
+  return Number(rows[0].n) === 0;
 }
 
 async function initializeTables(conn: PoolConnection): Promise<void> {
@@ -297,26 +297,33 @@ async function runMigrations(
       [file],
     );
     if (applied.length > 0) continue;
-
-    const statements = parseSQLStatements(
-      fs.readFileSync(path.join(migrationsDir, file), "utf8"),
-    );
-    for (const stmt of statements) {
-      try {
-        await conn.execute(stmt);
-      } catch (err) {
-        if (ALREADY_APPLIED.has((err as { code?: string }).code ?? "")) continue;
-        // Without the filename the operator sees a bare MySQL error from a
-        // box that won't boot, and no hint that a migration was even running.
-        throw new Error(
-          `migration ${file} failed on "${stmt.slice(0, 120)}": ${(err as Error).message}`,
-          { cause: err },
-        );
-      }
-    }
-    await conn.execute(`INSERT INTO _migrations (name) VALUES (?)`, [file]);
-    logger.info(`✓ Applied migration ${file}`);
+    await applyMigration(conn, migrationsDir, file);
   }
+}
+
+async function applyMigration(
+  conn: PoolConnection,
+  migrationsDir: string,
+  file: string,
+): Promise<void> {
+  const statements = parseSQLStatements(
+    fs.readFileSync(path.join(migrationsDir, file), "utf8"),
+  );
+  for (const stmt of statements) {
+    try {
+      await conn.execute(stmt);
+    } catch (err) {
+      if (ALREADY_APPLIED.has((err as { code?: string }).code ?? "")) continue;
+      // Without the filename the operator sees a bare MySQL error from a
+      // box that won't boot, and no hint that a migration was even running.
+      throw new Error(
+        `migration ${file} failed on "${stmt.slice(0, 120)}": ${(err as Error).message}`,
+        { cause: err },
+      );
+    }
+  }
+  await conn.execute(`INSERT INTO _migrations (name) VALUES (?)`, [file]);
+  logger.info(`✓ Applied migration ${file}`);
 }
 
 // How long a booting process waits for another one to finish provisioning.

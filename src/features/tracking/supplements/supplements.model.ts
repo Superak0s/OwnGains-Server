@@ -67,16 +67,29 @@ function withBooleans(row: Supplement): Supplement {
 
 export async function createSupplement(
   userId: number,
-  name: string,
-  unit = "g",
-  defaultAmount = 5,
-  reminderEnabled = false,
-  reminderTime: string | null = null,
-  color: string | null = null,
-  icon: string | null = null,
-  dosesPerDay = 1,
-  doseIntervalMinutes: number | null = null,
+  fields: {
+    name: string
+    unit?: string
+    defaultAmount?: number
+    reminderEnabled?: boolean
+    reminderTime?: string | null
+    color?: string | null
+    icon?: string | null
+    dosesPerDay?: number
+    doseIntervalMinutes?: number | null
+  },
 ): Promise<number> {
+  const {
+    name,
+    unit = "g",
+    defaultAmount = 5,
+    reminderEnabled = false,
+    reminderTime = null,
+    color = null,
+    icon = null,
+    dosesPerDay = 1,
+    doseIntervalMinutes = null,
+  } = fields
   // Count-then-insert: two parallel creates can land one over the cap, which
   // is fine for a bound whose job is "not unbounded".
   const [[{ n }]] = await pool.execute<(RowDataPacket & { n: number })[]>(
@@ -190,7 +203,7 @@ export async function listSupplementSummaries(
     return {
       ...withBooleans(s),
       takenToday,
-      dosesToday: takenToday ? days[0]!.doses : 0,
+      dosesToday: takenToday ? days[0].doses : 0,
       lastTakenAt: lastBySupplement.get(s.id) ?? null,
       streak: streakFromDays(days.map((d) => d.day)),
     }
@@ -303,7 +316,7 @@ export async function logSupplement(
       userId,
       supplementId,
       amount,
-      formatDateForMySQL(takenAt ? takenAt : new Date()),
+      formatDateForMySQL(takenAt || new Date()),
       note ?? null,
     ],
   )

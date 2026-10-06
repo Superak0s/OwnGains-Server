@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken"
-import { createHash, randomBytes, randomUUID } from "crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import type { SignOptions } from "jsonwebtoken"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import type { AuthUser, ConsentInput } from "./user.types.js"
@@ -7,7 +7,7 @@ import { ConflictError, NotFoundError } from "@/middleware/errorHandler.js"
 import { parseUuidParam } from "@/middleware/validation.js"
 import { pool, withTransaction } from "@/config/database.js"
 import { envInt } from "@/config/env.js"
-import { hashPassword, verifyPassword } from "./password.js"
+import { hashPassword } from "./password.js"
 import { logger } from "@/utils/logger.js"
 
 export { verifyPassword, DUMMY_PASSWORD_HASH } from "./password.js"
@@ -445,7 +445,7 @@ export async function revokeAllSessions(
 ): Promise<boolean> {
   return withTransaction(async (conn) => {
     const [result] = await conn.execute<ResultSetHeader>(
-      `UPDATE users SET ${extraSet ? `${extraSet}, ` : ""}token_version = token_version + 1
+      `UPDATE users SET ${extraSet ? extraSet + ", " : ""}token_version = token_version + 1
        WHERE id = ?`,
       [...extraParams, userId],
     )

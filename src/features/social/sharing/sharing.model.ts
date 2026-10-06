@@ -71,14 +71,14 @@ interface ParticipantRow extends RowDataPacket {
   lastUpdated: Date
 }
 
-const VALID_PERMISSION_TYPES: PermissionType[] = [
+const VALID_PERMISSION_TYPES: ReadonlySet<PermissionType> = new Set([
   "history",
   "analytics",
   "program",
   "joint_session",
   "watch_session",
   "trainer",
-]
+])
 
 const INVITE_TTL_SECONDS = 120
 
@@ -125,7 +125,7 @@ export async function grantPermission(
   permissionType: PermissionType,
   payload: Record<string, unknown> | null = null,
 ): Promise<number> {
-  if (!VALID_PERMISSION_TYPES.includes(permissionType))
+  if (!VALID_PERMISSION_TYPES.has(permissionType))
     throw new ValidationError(`Invalid permission type: ${permissionType}`)
 
   // Only a program grant has anything to carry. Any other type's payload was
@@ -143,8 +143,8 @@ export async function grantPermission(
      FROM sharing_permissions WHERE from_user_id = ?`,
     [toUserId, permissionType, fromUserId],
   )
-  if (!Number(counts!.existing)) {
-    if (Number(counts!.total) >= MAX_GRANTS_PER_USER)
+  if (!Number(counts.existing)) {
+    if (Number(counts.total) >= MAX_GRANTS_PER_USER)
       throw new AppError(
         `You can hold at most ${MAX_GRANTS_PER_USER} sharing permissions`,
         409,
@@ -153,7 +153,7 @@ export async function grantPermission(
       )
     if (
       permissionType === "program" &&
-      Number(counts!.programs) >= MAX_PROGRAM_GRANTS_PER_USER
+      Number(counts.programs) >= MAX_PROGRAM_GRANTS_PER_USER
     )
       throw new AppError(
         `You can share your program with at most ${MAX_PROGRAM_GRANTS_PER_USER} friends`,
@@ -419,8 +419,8 @@ export async function getFriendSessions(
   const bySession = new Map<number, RowDataPacket[]>()
   for (const { sessionId, ...set } of sets) {
     const list = bySession.get(sessionId)
-    if (list) list.push(set as RowDataPacket)
-    else bySession.set(sessionId, [set as RowDataPacket])
+    if (list) list.push(set)
+    else bySession.set(sessionId, [set])
   }
   // Every session gets the field, [] included: the app reads a missing
   // setTimings as an older server and falls back to per-session calls.

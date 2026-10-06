@@ -1,4 +1,4 @@
-import { createHash } from "crypto"
+import { createHash } from "node:crypto"
 import type { RowDataPacket } from "mysql2"
 import { pool } from "@/config/database.js"
 import { AppError } from "@/middleware/errorHandler.js"

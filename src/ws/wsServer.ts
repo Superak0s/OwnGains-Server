@@ -1,6 +1,5 @@
 import type * as Ws from "ws"
-import type { RawData } from "ws"
-import http from "http"
+import http from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
 import jwt from "jsonwebtoken"
@@ -129,7 +128,7 @@ function clientIp(req: http.IncomingMessage, hops: number): string {
     .filter(Boolean)
     .reverse()
   const chain = [remote, ...forwarded]
-  return chain[Math.min(hops, chain.length - 1)]!
+  return chain[Math.min(hops, chain.length - 1)]
 }
 
 function isWsMessage(value: unknown): value is WsMessage {
@@ -192,13 +191,19 @@ async function handleAuthRefresh(
   data: WsMessage,
 ): Promise<void> {
   try {
-    if (typeof data.token !== "string" || !data.token)
-      return void ws.close(4001, "Unauthorized: No token in auth.refresh message")
+    if (typeof data.token !== "string" || !data.token) {
+      ws.close(4001, "Unauthorized: No token in auth.refresh message")
+      return
+    }
     const verified = await verifyWsToken(data.token)
-    if ("reason" in verified)
-      return void ws.close(4001, `Unauthorized: ${verified.reason}`)
-    if (verified.payload.userId !== user.uuid)
-      return void ws.close(4001, "Unauthorized: token belongs to another user")
+    if ("reason" in verified) {
+      ws.close(4001, `Unauthorized: ${verified.reason}`)
+      return
+    }
+    if (verified.payload.userId !== user.uuid) {
+      ws.close(4001, "Unauthorized: token belongs to another user")
+      return
+    }
 
     ws._exp = verified.payload.exp
     ws._tokenVersion = verified.payload.tokenVersion
@@ -224,7 +229,7 @@ async function handlePushJointProgress(
     typeof progress === "object" && progress !== null ? progress : {}
 
   const session: JointSession | null = await getJointSession(jointSessionId)
-  if (!session || !session.participants.some((pt) => pt.userId === user.uuid))
+  if (!session?.participants.some((pt) => pt.userId === user.uuid))
     return send(ws, "error", { message: "Not a participant" })
 
   // An unfriend or a block ends the session in the DB (see blockUser /
@@ -427,15 +432,17 @@ export function createWsServer(
       ext._pongReceived = false
       ws.ping()
       if (!ext._userId) return
-      if (ext._exp != null && ext._exp * 1000 <= Date.now())
-        return void ext.close(4001, "Unauthorized: Token expired")
+      if (ext._exp != null && ext._exp * 1000 <= Date.now()) {
+        ext.close(4001, "Unauthorized: Token expired")
+        return
+      }
       toCheck.push(ext)
     })
     // A sweep still waiting on the DB (saturated pool) is not stacked with
     // another. The next tick picks everything up again.
     if (revalidating || toCheck.length === 0) return
     revalidating = true
-    void revalidate(toCheck).finally(() => {
+    revalidate(toCheck).finally(() => {
       revalidating = false
     })
   }, heartbeatMs)
@@ -528,7 +535,10 @@ export function createWsServer(
         send(ws, "auth_success", { userId: authed.uuid })
 
         let sockets = clients.get(authed.uuid)
-        if (!sockets) clients.set(authed.uuid, (sockets = new Set()))
+        if (!sockets) {
+          sockets = new Set()
+          clients.set(authed.uuid, sockets)
+        }
         sockets.add(ws)
         // Past the per-user cap, the oldest socket goes, usually a zombie
         // from a network switch that the heartbeat hasn't reaped yet. close()
@@ -554,42 +564,47 @@ export function createWsServer(
       }
     }
 
-    async function handleMessage(raw: RawData): Promise<void> {
+    /** Counts this frame against the pre-auth or per-user cap. False once the socket was closed for it. */
+    function admitMessage(): boolean {
+      if (user) return admitUserMessage(user.uuid)
+      preAuthMsgCount++
+      if (preAuthMsgCount <= MAX_PRE_AUTH_MESSAGES) return true
+      ws.close(4001, "Unauthorized: too many messages before auth")
+      return false
+    }
+
+    function admitUserMessage(uuid: string): boolean {
+      // Rate limit per user. Not a fixed window: each message adds 1 to
+      // the count and schedules its own -1 after 1s, so this is a decaying
+      // counter ("no more than MAX_MSG_PER_SEC in-flight per rolling
+      // second"), not a hard per-clock-second bucket.
+      const count = (msgCount.get(uuid) ?? 0) + 1
+      msgCount.set(uuid, count)
+      setTimeout(() => {
+        // Only decrement a live entry. The close handler deletes the key,
+        // and a timer still pending from a message sent in the last second
+        // would otherwise re-insert it and leak the entry for the life of
+        // the process.
+        if (!msgCount.has(uuid)) return
+        msgCount.set(uuid, Math.max(0, (msgCount.get(uuid) ?? 1) - 1))
+      }, 1000)
+      if (count > MAX_MSG_PER_SEC) {
+        // Tell the client why, then close. Replying alone left the socket
+        // open, so a flooding client kept paying us to JSON.parse up to
+        // 8KB, allocate a timer and write an error frame per message. A
+        // legitimate client sends ~1 message per completed set, so this is
+        // ~90x its peak rate and closing costs it nothing.
+        send(ws, "error", { message: "Rate limit exceeded" })
+        ws.close(4008, "Rate limit exceeded")
+        return false
+      }
+      return true
+    }
+
+    async function handleMessage(raw: Ws.RawData): Promise<void> {
       // Counted before parsing, so a stream of garbage frames is capped
       // exactly like a stream of well-formed ones.
-      if (!user) {
-        preAuthMsgCount++
-        if (preAuthMsgCount > MAX_PRE_AUTH_MESSAGES) {
-          ws.close(4001, "Unauthorized: too many messages before auth")
-          return
-        }
-      } else {
-        // Rate limit per user. Not a fixed window: each message adds 1 to
-        // the count and schedules its own -1 after 1s, so this is a decaying
-        // counter ("no more than MAX_MSG_PER_SEC in-flight per rolling
-        // second"), not a hard per-clock-second bucket.
-        const uuid = user.uuid
-        const count = (msgCount.get(uuid) ?? 0) + 1
-        msgCount.set(uuid, count)
-        setTimeout(() => {
-          // Only decrement a live entry. The close handler deletes the key,
-          // and a timer still pending from a message sent in the last second
-          // would otherwise re-insert it and leak the entry for the life of
-          // the process.
-          if (!msgCount.has(uuid)) return
-          msgCount.set(uuid, Math.max(0, (msgCount.get(uuid) ?? 1) - 1))
-        }, 1000)
-        if (count > MAX_MSG_PER_SEC) {
-          // Tell the client why, then close. Replying alone left the socket
-          // open, so a flooding client kept paying us to JSON.parse up to
-          // 8KB, allocate a timer and write an error frame per message. A
-          // legitimate client sends ~1 message per completed set, so this is
-          // ~90x its peak rate and closing costs it nothing.
-          send(ws, "error", { message: "Rate limit exceeded" })
-          ws.close(4008, "Rate limit exceeded")
-          return
-        }
-      }
+      if (!admitMessage()) return
 
       // No size check here: `maxPayload` above makes ws close the connection
       // with 1009 before any oversized frame reaches this handler.
@@ -651,7 +666,7 @@ export function createWsServer(
       }
     }
 
-    ws.on("message", (raw: RawData) => {
+    ws.on("message", (raw: Ws.RawData) => {
       // Backstop for anything handleMessage didn't anticipate: an async
       // listener's rejection has nowhere else to go but the process.
       handleMessage(raw).catch((err) => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest"
-import http from "http"
+import http from "node:http"
 import type { AddressInfo } from "net"
 import jwt from "jsonwebtoken"
 import WebSocket from "ws"

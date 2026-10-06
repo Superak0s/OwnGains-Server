@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { randomUUID } from "node:crypto"
-import http from "http"
+import http from "node:http"
 import type { AddressInfo } from "net"
 import request from "supertest"
 import WebSocket from "ws"

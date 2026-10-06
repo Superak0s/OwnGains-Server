@@ -73,11 +73,13 @@ router.post(
       req.user!.id,
       req.file.buffer,
       req.file.mimetype,
-      muscleGroups,
-      note || null,
-      angle || "custom",
-      customSideName || null,
-      parseBackdatedTimestamp(takenAt || null, "takenAt"),
+      {
+        muscleGroups,
+        note: note || null,
+        angle: angle || "custom",
+        customSideName: customSideName || null,
+        takenAt: parseBackdatedTimestamp(takenAt || null, "takenAt"),
+      },
     )
 
     const uri = `/api/tracking/photos/muscle/${id}/image`

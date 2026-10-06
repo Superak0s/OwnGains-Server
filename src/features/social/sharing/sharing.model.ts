@@ -85,15 +85,15 @@ const INVITE_TTL_SECONDS = 120
 /** Largest program snapshot a `program` grant may include (serialised JSON). */
 export const MAX_PAYLOAD_BYTES = 256 * 1024
 /** Grants one user may hold out to others, all types together. */
-export const MAX_GRANTS_PER_USER = 300
+const MAX_GRANTS_PER_USER = 300
 /** Of those, how many may be `program` grants, i.e. have a payload. */
-export const MAX_PROGRAM_GRANTS_PER_USER = 25
+const MAX_PROGRAM_GRANTS_PER_USER = 25
 /**
  * With `?includePayload=true`, a permissions list inlines at most this many
  * payloads. Any others come back with `payload: null, hasPayload: true` and
  * are fetched one at a time from GET /permissions/:id/payload.
  */
-export const MAX_INLINE_PAYLOADS = 10
+const MAX_INLINE_PAYLOADS = 10
 
 /**
  * MySQL's JSON type comes back from the driver already parsed. MariaDB's JSON
@@ -274,7 +274,7 @@ export async function getPermissionPayload(
  * grant+friendship join twice: once from a raw query in workouts.routes.ts,
  * once here, on the hottest write path the server has.
  */
-export interface LiveAudienceRow extends RowDataPacket {
+interface LiveAudienceRow extends RowDataPacket {
   uuid: string
   username: string
   permissionType: "watch_session" | "trainer"
@@ -295,7 +295,7 @@ export async function getLiveAudience(
   return rows
 }
 
-export interface FriendAccess {
+interface FriendAccess {
   id: number
   uuid: string
   /** An accepted friendship with the viewer. */
@@ -667,7 +667,7 @@ export async function endJointSession(
   return { partnerId: rows[0].partnerId }
 }
 
-export interface ActiveSessionStatus {
+interface ActiveSessionStatus {
   hasActiveSession: boolean
   sessionId: number | null
   /** ISO start of the active workout, or null when there is none. */

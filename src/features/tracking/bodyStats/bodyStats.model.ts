@@ -1,54 +1,16 @@
-// Weight and body-fat, both of them series in the shared `measurements` table.
-// This file is now only the US-Navy formula plus the mapping from metric rows to
-// the shapes the app expects. See features/tracking/measurements/measurements.model.ts
-// for the storage.
+// Body fat, a group of series in the shared `measurements` table. This file is
+// only the US-Navy formula plus the mapping from metric rows to the shape the
+// app expects. Weight is a plain series, so its routes call
+// features/tracking/measurements/measurements.model.ts directly.
 
 import type { BodyFatEntry } from "../tracking.types.js"
 import { ValidationError } from "@/middleware/errorHandler.js"
 import {
   METRICS,
   logMetrics,
-  getMetricHistory,
-  getLatestMetric,
   getMetricGroups,
-  deleteMetricEntry,
   deleteMetricGroup,
-  type MetricEntry,
 } from "../measurements/measurements.model.js"
-
-export async function logWeight(
-  userId: number,
-  weightKg: number,
-  measuredAt?: string | null,
-  note?: string | null,
-): Promise<number> {
-  return logMetrics(
-    userId,
-    [{ metric: METRICS.weightKg, value: weightKg }],
-    measuredAt,
-    note,
-  )
-}
-
-export async function getWeightHistory(
-  userId: number,
-  limit = 90,
-): Promise<MetricEntry[]> {
-  return getMetricHistory(userId, METRICS.weightKg, limit)
-}
-
-export async function deleteWeightEntry(
-  userId: number,
-  entryId: number,
-): Promise<boolean> {
-  return deleteMetricEntry(userId, entryId, METRICS.weightKg)
-}
-
-export async function getCurrentWeight(
-  userId: number,
-): Promise<MetricEntry | null> {
-  return getLatestMetric(userId, METRICS.weightKg)
-}
 
 // ─── Body fat percentage (US Navy formula) ────────────────────────────────────
 
@@ -114,8 +76,8 @@ const BODY_FAT_METRICS = Object.values(BODY_FAT_PIVOT)
 export async function logBodyFat(
   userId: number,
   percentage: number,
-  waistCm: number,
-  neckCm: number,
+  waistCm: number | null,
+  neckCm: number | null,
   hipCm: number | null,
   measuredAt: string | Date,
 ): Promise<BodyFatEntry> {
@@ -123,8 +85,8 @@ export async function logBodyFat(
     userId,
     [
       { metric: METRICS.bodyFatPct, value: percentage },
-      { metric: METRICS.waistCm, value: waistCm },
-      { metric: METRICS.neckCm, value: neckCm },
+      ...(waistCm ? [{ metric: METRICS.waistCm, value: waistCm }] : []),
+      ...(neckCm ? [{ metric: METRICS.neckCm, value: neckCm }] : []),
       ...(hipCm ? [{ metric: METRICS.hipCm, value: hipCm }] : []),
     ],
     measuredAt,

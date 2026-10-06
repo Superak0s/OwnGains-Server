@@ -30,7 +30,7 @@ export const healthConsentGuard = (
  * (soreness_follow_up, progress_photo_muscles, progress_photo_blobs,
  * supplement_intake) go with their parent via ON DELETE CASCADE.
  */
-export const HEALTH_TABLES = {
+const HEALTH_TABLES = {
   tracking: [
     "measurements",
     "metric_definitions",

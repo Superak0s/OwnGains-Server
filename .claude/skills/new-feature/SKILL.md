@@ -113,4 +113,4 @@ Add the import and the `app.use("/api/...", ...)` line to `src/routes.ts`, insid
 
 Add `src/features/<path>/__tests__/<name>.routes.test.ts`, modelled on a neighbouring test. The suite
 drives the real `app` through supertest against a live MySQL that `src/tests/global-setup.ts` drops and
-rebuilds, so `pnpm test` needs the `.env` credentials. Run it and report the actual output.
+rebuilds, so `bun run test` needs the `.env` credentials. Run it and report the actual output.

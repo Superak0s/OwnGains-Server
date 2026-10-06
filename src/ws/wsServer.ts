@@ -6,7 +6,7 @@ import path from "node:path"
 import jwt from "jsonwebtoken"
 import type { RowDataPacket } from "mysql2/promise"
 import { pool } from "../config/database.js"
-import { envInt, readTrustProxyHops } from "../config/env.js"
+import { envInt } from "../config/env.js"
 import { findUserForAuth } from "../features/auth/auth.model.js"
 import { logger } from "../utils/logger.js"
 import {
@@ -67,7 +67,7 @@ export interface WsServerOptions {
   maxConnections?: number
   /** Sockets (pending auth + open) per client IP. Default: WS_MAX_CONNECTIONS_PER_IP or 20. */
   maxConnectionsPerIp?: number
-  /** Time an unauthenticated socket gets to complete `auth`. Default: WS_AUTH_TIMEOUT_MS or 2000. */
+  /** Time an unauthenticated socket gets to complete `auth`. Default 2s. */
   authTimeoutMs?: number
   /** Authenticated sockets one user may hold at once. Default: WS_MAX_SOCKETS_PER_USER or 5. */
   maxSocketsPerUser?: number
@@ -89,11 +89,6 @@ const msgCount = new Map<string, number>()
 
 const MAX_PRE_AUTH_MESSAGES = 10
 const MAX_MSG_PER_SEC = 20
-
-// Revalidation reads token versions for this many users per query. pool.query
-// (text protocol, client-side escaping) rather than execute, so a varying
-// IN-list length never turns into a new server-side prepared statement.
-const REVALIDATE_CHUNK = 500
 
 function send(ws: WebSocket | undefined, type: string, payload: object): void {
   if (ws?.readyState === WebSocket.OPEN)
@@ -124,7 +119,7 @@ export function hasOtherClients(userUuid: string): boolean {
  * X-Forwarded-For, trusting `hops` entries, and take the first untrusted one.
  * With 0 hops the header is ignored, since it's entirely caller-supplied.
  */
-export function clientIp(req: http.IncomingMessage, hops: number): string {
+function clientIp(req: http.IncomingMessage, hops: number): string {
   const remote = req.socket.remoteAddress ?? "unknown"
   if (hops === 0) return remote
   const header = req.headers["x-forwarded-for"]
@@ -309,8 +304,10 @@ export function notifyJointProgress(
 }
 
 /**
- * Current token_version for each uuid, one query per chunk. Missing from the
- * map = the account no longer exists.
+ * Current token_version for each uuid, in one query. Missing from the map =
+ * the account no longer exists. pool.query (text protocol, client-side
+ * escaping) rather than execute, so a varying IN-list length never turns into
+ * a new server-side prepared statement.
  */
 async function fetchTokenVersions(uuids: string[]): Promise<Map<string, number>> {
   const versions = new Map<string, number>()
@@ -354,13 +351,12 @@ export function createWsServer(
   httpServer: http.Server,
   options: WsServerOptions = {},
 ): WebSocketServer {
-  const trustProxyHops = options.trustProxyHops ?? readTrustProxyHops()
+  const trustProxyHops = options.trustProxyHops ?? envInt("TRUST_PROXY_HOPS", 0)
   const maxConnections =
     options.maxConnections ?? envInt("WS_MAX_CONNECTIONS", 1000, 1)
   const maxConnectionsPerIp =
     options.maxConnectionsPerIp ?? envInt("WS_MAX_CONNECTIONS_PER_IP", 20, 1)
-  const authTimeoutMs =
-    options.authTimeoutMs ?? envInt("WS_AUTH_TIMEOUT_MS", 2000, 100)
+  const authTimeoutMs = options.authTimeoutMs ?? 2000
   const maxSocketsPerUser =
     options.maxSocketsPerUser ?? envInt("WS_MAX_SOCKETS_PER_USER", 5, 1)
   const heartbeatMs = options.heartbeatMs ?? 30_000
@@ -449,30 +445,24 @@ export function createWsServer(
    * as it remains open. So `owngains passwd` (which bumps token_version and prints
    * "all existing sessions were signed out"), a deleted account, and an expired
    * JWT were all invisible to an already-open connection. Re-checked here, on
-   * the sweep that is already walking every socket: one batched query per
-   * chunk of users, run one after another, so the sweep uses at most one pool
-   * connection at a time instead of one query per socket all at once.
+   * the sweep that is already walking every socket: one batched query for
+   * every connected user (at most WS_MAX_CONNECTIONS), so the sweep uses one
+   * pool connection instead of one query per socket.
    */
   async function revalidate(sockets: ExtendedWebSocket[]): Promise<void> {
-    const uuids = [...new Set(sockets.map((s) => s._userId!))]
-    for (let i = 0; i < uuids.length; i += REVALIDATE_CHUNK) {
-      const chunk = uuids.slice(i, i + REVALIDATE_CHUNK)
-      let versions: Map<string, number>
-      try {
-        versions = await fetchTokenVersions(chunk)
-      } catch (err) {
-        // A DB blip must not sign everyone out. The next sweep retries.
-        logger.error("[WS] revalidation failed:", (err as Error).message)
-        return
-      }
-      const inChunk = new Set(chunk)
-      for (const ext of sockets) {
-        if (!inChunk.has(ext._userId!)) continue
-        if (ext.readyState !== WebSocket.OPEN) continue
-        if (versions.get(ext._userId!) !== ext._tokenVersion) {
-          logger.warn(`[WS] revoked session, closing uid=${ext._userId}`)
-          ext.close(4001, "Unauthorized: Token has been revoked")
-        }
+    let versions: Map<string, number>
+    try {
+      versions = await fetchTokenVersions([...new Set(sockets.map((s) => s._userId!))])
+    } catch (err) {
+      // A DB blip must not sign everyone out. The next sweep retries.
+      logger.error("[WS] revalidation failed:", (err as Error).message)
+      return
+    }
+    for (const ext of sockets) {
+      if (ext.readyState !== WebSocket.OPEN) continue
+      if (versions.get(ext._userId!) !== ext._tokenVersion) {
+        logger.warn(`[WS] revoked session, closing uid=${ext._userId}`)
+        ext.close(4001, "Unauthorized: Token has been revoked")
       }
     }
   }

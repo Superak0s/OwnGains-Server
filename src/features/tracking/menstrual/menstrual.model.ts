@@ -14,7 +14,7 @@ import {
 import { requireStringList } from "@/middleware/validation.js"
 import { getUserSettings } from "@/features/settings/settings.model.js"
 
-export interface MenstrualEntry extends RowDataPacket {
+interface MenstrualEntry extends RowDataPacket {
   id: number
   cycleStart: string
   cycleEnd: string | null

@@ -1,14 +1,19 @@
 import { Request, Response, NextFunction } from "express"
 import os from "os"
-import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks"
-import { envBool, envInt } from "@/config/env.js"
+import {
+  createHistogram,
+  monitorEventLoopDelay,
+  type IntervalHistogram,
+  type RecordableHistogram,
+} from "node:perf_hooks"
+import { envBool } from "@/config/env.js"
 import { setErrorLogSink } from "@/utils/logger.js"
 import { getWsStats } from "@/ws/wsServer.js"
 
 // In-process counters behind GET /api/admin/metrics and the /admin/metrics
 // page. Like every other limiter and counter on this box they live in memory,
 // reset on restart, and assume one process. Every structure here is
-// bounded (fixed buckets, capped maps, ring buffers), so memory remains flat
+// bounded (fixed-size histograms, capped maps, ring buffers), so memory remains flat
 // however long the server runs or whatever a client throws at it.
 
 /** Master switch: off means no collector middleware, no API, no page (404). */
@@ -17,15 +22,14 @@ export const metricsEnabled = envBool("METRICS_ENABLED", true)
 export const metricsPageEnabled =
   metricsEnabled && envBool("METRICS_PAGE_ENABLED", true)
 /** A request at least this slow is added to the slow-request log. */
-export const slowRequestMs = envInt("METRICS_SLOW_MS", 1000, 1)
+const SLOW_REQUEST_MS = 1000
 
-// Upper bounds in ms, roughly logarithmic. Fixed buckets instead of stored
-// samples: constant memory per route, and a percentile interpolated inside
-// its bucket is well within what a dashboard needs.
-const BUCKETS_MS = [
-  1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000,
-  1500, 2000, 3000, 5000, 7500, 10000, 20000, 30000, 60000, Infinity,
-]
+// Latencies are recorded in µs into HDR histograms. Two significant figures
+// (about 1% error) and a 60s ceiling (the HTTP request timeout) keep each one
+// near 20 KB, so even MAX_ROUTES of them stay a few MB.
+const MAX_LATENCY_US = 60_000_000
+const newHistogram = () =>
+  createHistogram({ lowest: 1, highest: MAX_LATENCY_US, figures: 2 })
 
 // Distinct route labels kept. A scanner probing random paths never gets a
 // label (only requests that matched a route do), but ids that slip past
@@ -46,29 +50,21 @@ const MAX_STACK_LINES = 12
 const HISTORY_POINTS = 60
 const HISTORY_INTERVAL_MS = 60_000
 
-const newBuckets = () => new Array<number>(BUCKETS_MS.length).fill(0)
-
 interface RouteStat {
-  count: number
   clientErrors: number
   serverErrors: number
-  totalMs: number
-  maxMs: number
-  buckets: number[]
+  latency: RecordableHistogram
   byStatus: Map<number, number>
 }
 
 interface MinuteBucket {
-  requests: number
   clientErrors: number
   serverErrors: number
   rateLimited: number
-  totalMs: number
-  maxMs: number
-  buckets: number[]
+  latency: RecordableHistogram
 }
 
-export interface HistoryPoint {
+interface HistoryPoint {
   /** Minute end, ISO-8601. */
   at: string
   requests: number
@@ -97,7 +93,7 @@ interface ErrorGroup {
   routes: Map<string, number>
 }
 
-export interface ErrorEvent {
+interface ErrorEvent {
   at: string
   status: number
   method: string
@@ -118,7 +114,7 @@ export interface ErrorEvent {
   stack: string | null
 }
 
-export interface SlowRequest {
+interface SlowRequest {
   at: string
   method: string
   route: string
@@ -129,7 +125,7 @@ export interface SlowRequest {
   user: string | null
 }
 
-export interface LogError {
+interface LogError {
   at: string
   message: string
 }
@@ -137,25 +133,19 @@ export interface LogError {
 const startedAt = new Date()
 
 const newMinute = (): MinuteBucket => ({
-  requests: 0,
   clientErrors: 0,
   serverErrors: 0,
   rateLimited: 0,
-  totalMs: 0,
-  maxMs: 0,
-  buckets: newBuckets(),
+  latency: newHistogram(),
 })
 
 const totals = {
-  requests: 0,
   inFlight: 0,
   aborted: 0,
   byClass: { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 } as Record<string, number>,
   byStatus: new Map<number, number>(),
   byMethod: {} as Record<string, number>,
-  buckets: newBuckets(),
-  totalMs: 0,
-  maxMs: 0,
+  latency: newHistogram(),
   bytesOut: 0,
 }
 const routes = new Map<string, RouteStat>()
@@ -204,37 +194,19 @@ function bump<K>(map: Map<K, number>, key: K): void {
   map.set(key, (map.get(key) ?? 0) + 1)
 }
 
-const bucketIndex = (ms: number) => BUCKETS_MS.findIndex((b) => ms <= b)
+const usToMs = (us: number) => round(us / 1000)
 
-/**
- * The p-th percentile from a bucket histogram, interpolated linearly inside
- * the bucket it falls in, and never above the largest value actually seen.
- */
-export function percentileOf(buckets: number[], p: number, maxMs: number): number | null {
-  const count = buckets.reduce((a, b) => a + b, 0)
-  if (count === 0) return null
-  const target = Math.max(1, Math.ceil(count * p))
-  let seen = 0
-  for (let i = 0; i < buckets.length; i++) {
-    if (buckets[i] === 0) continue
-    if (seen + buckets[i] >= target) {
-      const lower = i === 0 ? 0 : BUCKETS_MS[i - 1]
-      const upper = Number.isFinite(BUCKETS_MS[i]) ? BUCKETS_MS[i] : maxMs
-      const fraction = (target - seen) / buckets[i]
-      return round(Math.min(maxMs, lower + (upper - lower) * fraction))
-    }
-    seen += buckets[i]
-  }
-  return round(maxMs)
-}
+/** The p-th percentile in ms, never above the largest value actually seen. */
+const percentile = (h: RecordableHistogram, p: number) =>
+  h.count ? usToMs(Math.min(h.percentile(p), h.max)) : null
 
-const latencySummary = (buckets: number[], totalMs: number, count: number, maxMs: number) => ({
-  avg: count ? round(totalMs / count) : null,
-  p50: percentileOf(buckets, 0.5, maxMs),
-  p90: percentileOf(buckets, 0.9, maxMs),
-  p95: percentileOf(buckets, 0.95, maxMs),
-  p99: percentileOf(buckets, 0.99, maxMs),
-  max: count ? round(maxMs) : null,
+const latencySummary = (h: RecordableHistogram) => ({
+  avg: h.count ? usToMs(h.mean) : null,
+  p50: percentile(h, 50),
+  p90: percentile(h, 90),
+  p95: percentile(h, 95),
+  p99: percentile(h, 99),
+  max: h.count ? usToMs(h.max) : null,
 })
 
 /** What went wrong, from the error errorHandler saw or the JSON body sent. */
@@ -320,11 +292,8 @@ function recordError(req: Request, res: Response, route: string, ms: number): vo
 
 function record(req: Request, res: Response, ms: number): void {
   const status = res.statusCode
-  const bi = bucketIndex(ms)
-  totals.requests++
-  totals.totalMs += ms
-  totals.maxMs = Math.max(totals.maxMs, ms)
-  totals.buckets[bi]++
+  const us = Math.min(MAX_LATENCY_US, Math.max(1, Math.round(ms * 1000)))
+  totals.latency.record(us)
   const cls = `${Math.floor(status / 100)}xx`
   if (cls in totals.byClass) totals.byClass[cls]++
   bump(totals.byStatus, status)
@@ -332,10 +301,7 @@ function record(req: Request, res: Response, ms: number): void {
   const length = Number(res.getHeader("content-length"))
   if (Number.isFinite(length)) totals.bytesOut += length
 
-  minute.requests++
-  minute.totalMs += ms
-  minute.maxMs = Math.max(minute.maxMs, ms)
-  minute.buckets[bi]++
+  minute.latency.record(us)
   if (status === 429) minute.rateLimited++
   if (status >= 500) minute.serverErrors++
   else if (status >= 400) minute.clientErrors++
@@ -347,19 +313,16 @@ function record(req: Request, res: Response, ms: number): void {
   if (!routes.has(label) && routes.size >= MAX_ROUTES) label = OTHER
   let stat = routes.get(label)
   if (!stat) {
-    stat = { count: 0, clientErrors: 0, serverErrors: 0, totalMs: 0, maxMs: 0, buckets: newBuckets(), byStatus: new Map() }
+    stat = { clientErrors: 0, serverErrors: 0, latency: newHistogram(), byStatus: new Map() }
     routes.set(label, stat)
   }
-  stat.count++
-  stat.totalMs += ms
-  stat.maxMs = Math.max(stat.maxMs, ms)
-  stat.buckets[bi]++
+  stat.latency.record(us)
   bump(stat.byStatus, status)
   if (status >= 500) stat.serverErrors++
   else if (status >= 400) stat.clientErrors++
 
   if (status >= 400) recordError(req, res, label, ms)
-  if (ms >= slowRequestMs)
+  if (ms >= SLOW_REQUEST_MS)
     push(
       recentSlow,
       {
@@ -447,19 +410,20 @@ function cpuPercentSinceLast(): number {
   return round(((cpu.user + cpu.system) / elapsedUs) * 100)
 }
 
-function rollMinute(): void {
+/** Closes the current minute. Exported so a test needn't wait for the timer. */
+export function rollMinute(): void {
   const mem = process.memoryUsage()
   push(
     history,
     {
       at: new Date().toISOString(),
-      requests: minute.requests,
+      requests: minute.latency.count,
       clientErrors: minute.clientErrors,
       serverErrors: minute.serverErrors,
       rateLimited: minute.rateLimited,
-      avgMs: minute.requests ? round(minute.totalMs / minute.requests) : null,
-      p95Ms: percentileOf(minute.buckets, 0.95, minute.maxMs),
-      p99Ms: percentileOf(minute.buckets, 0.99, minute.maxMs),
+      avgMs: latencySummary(minute.latency).avg,
+      p95Ms: percentile(minute.latency, 95),
+      p99Ms: percentile(minute.latency, 99),
       eventLoopP99Ms: loopDelay && loopDelay.count > 0 ? nsToMs(loopDelay.percentile(99)) : null,
       rssMb: mb(mem.rss),
       heapUsedMb: mb(mem.heapUsed),
@@ -499,13 +463,14 @@ export function processSnapshot() {
   const cpu = process.cpuUsage()
   const topRoutes = [...routes.entries()]
     .map(([route, s]) => {
-      const lat = latencySummary(s.buckets, s.totalMs, s.count, s.maxMs)
+      const lat = latencySummary(s.latency)
+      const count = s.latency.count
       return {
         route,
-        count: s.count,
+        count,
         clientErrors: s.clientErrors,
         serverErrors: s.serverErrors,
-        errorRate: round(((s.clientErrors + s.serverErrors) / s.count) * 100, 2),
+        errorRate: round(((s.clientErrors + s.serverErrors) / count) * 100, 2),
         avgMs: lat.avg,
         p50Ms: lat.p50,
         p95Ms: lat.p95,
@@ -571,15 +536,15 @@ export function processSnapshot() {
       uptimeSeconds: Math.round(os.uptime()),
     },
     http: {
-      totalRequests: totals.requests,
+      totalRequests: totals.latency.count,
       inFlight: totals.inFlight,
       aborted: totals.aborted,
       bytesOutMb: mb(totals.bytesOut),
       byStatusClass: { ...totals.byClass },
       byStatus: statusObject(totals.byStatus),
       byMethod: { ...totals.byMethod },
-      latencyMs: latencySummary(totals.buckets, totals.totalMs, totals.requests, totals.maxMs),
-      slowThresholdMs: slowRequestMs,
+      latencyMs: latencySummary(totals.latency),
+      slowThresholdMs: SLOW_REQUEST_MS,
       routes: topRoutes,
       slowRequests: [...recentSlow].reverse(),
     },
@@ -607,57 +572,18 @@ export function clearErrors(): void {
   errorsSince = new Date()
 }
 
-/** Test hook: forget everything counted so far. */
-export function resetMetrics(): void {
-  totals.requests = 0
-  totals.aborted = 0
-  totals.totalMs = 0
-  totals.maxMs = 0
-  totals.bytesOut = 0
-  totals.byClass = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 }
-  totals.byStatus.clear()
-  totals.byMethod = {}
-  totals.buckets.fill(0)
-  routes.clear()
-  history.length = 0
-  minute = newMinute()
-  clearErrors()
-}
-
-/** Test hook: close the current minute now instead of waiting for the timer. */
-export const rollMinuteForTest = rollMinute
-
-/**
- * The boot banner that tells the operator the dashboard exists and where. A
- * box rather than a line, so it can't scroll past unnoticed among the boot
- * logs. ASCII inside the box: emoji widths vary by terminal and would break
- * the right-hand border.
- */
+/** The boot log line that tells the operator the dashboard exists and where. */
 export function metricsBanner(opts: { port: string | number; lanIp?: string; fqdn?: string }): string {
-  if (!metricsEnabled)
-    return "📊 Admin metrics are OFF (METRICS_ENABLED=false). Set it to true to get the /admin/metrics dashboard"
-
-  const lines: string[] = []
-  if (metricsPageEnabled) {
-    lines.push("ADMIN METRICS DASHBOARD IS ON", "")
-    lines.push(`  Local:   http://localhost:${opts.port}/admin/metrics`)
-    if (opts.lanIp) lines.push(`  LAN:     http://${opts.lanIp}:${opts.port}/admin/metrics`)
-    if (opts.fqdn) lines.push(`  Domain:  https://${opts.fqdn.replace(/^https?:\/\//, "")}/admin/metrics`)
-    lines.push("", "Sign in with an ADMIN account (the app's username + password).")
-  } else {
-    lines.push("ADMIN METRICS ARE ON (web page off: METRICS_PAGE_ENABLED=false)")
-  }
-  lines.push(
-    "App / scripts: GET /api/admin/metrics with an admin's Bearer token",
-    `Slow-request threshold: ${slowRequestMs} ms (METRICS_SLOW_MS)`,
-    "Turn off: METRICS_ENABLED=false  |  page only: METRICS_PAGE_ENABLED=false",
-  )
-
-  const width = Math.max(...lines.map((l) => l.length)) + 4
-  const bar = "═".repeat(width)
-  return [
-    `╔${bar}╗`,
-    ...lines.map((l) => `║  ${l.padEnd(width - 2)}║`),
-    `╚${bar}╝`,
-  ].join("\n")
+  if (!metricsEnabled) return "📊 Admin metrics are off (METRICS_ENABLED=false)"
+  if (!metricsPageEnabled)
+    return "📊 Admin metrics: GET /api/admin/metrics with an admin's token (page off: METRICS_PAGE_ENABLED=false)"
+  const urls = [
+    `http://localhost:${opts.port}`,
+    opts.lanIp && `http://${opts.lanIp}:${opts.port}`,
+    opts.fqdn && `https://${opts.fqdn.replace(/^https?:\/\//, "")}`,
+  ]
+  return `📊 Admin metrics dashboard (sign in as an admin): ${urls
+    .filter(Boolean)
+    .map((u) => `${u}/admin/metrics`)
+    .join("  ")}`
 }

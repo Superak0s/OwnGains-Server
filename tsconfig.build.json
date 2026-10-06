@@ -1,5 +1,5 @@
 {
-  // `pnpm build` compiles from here. Tests stay out of dist/: they are dead
+  // `bun run build` compiles from here. Tests stay out of dist/: they are dead
   // weight in the image, and src/tests/global-setup.ts drops a database.
   // tsconfig.json keeps including them so the typecheck covers the suite.
   "extends": "./tsconfig.json",

@@ -8,7 +8,7 @@ import { ValidationError } from "@/middleware/errorHandler.js"
  * Per-user ceiling. Every summary read joins every supplement against a year of
  * intake, so the list has to remain bounded. Nobody takes a hundred.
  */
-export const MAX_SUPPLEMENTS_PER_USER = 100
+const MAX_SUPPLEMENTS_PER_USER = 100
 
 /** "HH:MM" from the client → a MySQL TIME literal. */
 const simpleTimeToMySQL = (t: string): string => {

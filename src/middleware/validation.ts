@@ -91,10 +91,10 @@ export function queryLimit(
 export const validateEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
 export const validateUsername = (v: string) => /^[a-zA-Z0-9_]{3,20}$/.test(v)
 
-export const PASSWORD_MIN_LENGTH = 8
+const PASSWORD_MIN_LENGTH = 8
 /** bcrypt only reads the first 72 bytes. Anything past that was silently ignored. */
-export const PASSWORD_MAX_BYTES = 72
-export const PASSWORD_POLICY_MESSAGE = `Password must be at least ${PASSWORD_MIN_LENGTH} characters and at most ${PASSWORD_MAX_BYTES} bytes`
+const PASSWORD_MAX_BYTES = 72
+const PASSWORD_POLICY_MESSAGE = `Password must be at least ${PASSWORD_MIN_LENGTH} characters and at most ${PASSWORD_MAX_BYTES} bytes`
 
 /**
  * The policy for a NEW password (signup, change, CLI create/reset), never

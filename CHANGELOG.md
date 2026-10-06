@@ -6,6 +6,29 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-06
+
+### Changed
+
+- `POST /api/tracking/bodystats/bodyfat/log` accepts a percentage with no tape measurements (`measurements` null or absent), as Health Connect readings send. The entry is stored with null `waist`, `neck` and `hip`, which `GET /api/tracking/bodystats/bodyfat/log` returns as is. A request without `percentage` now fails with "percentage is required".
+
+- `BCRYPT_MAX_CONCURRENCY` must be an integer of at least 1. A malformed value now fails at boot instead of quietly falling back to 2.
+- Latency figures in `GET /api/admin/metrics` and on the metrics page (`avgMs`, `p50Ms` to `p99Ms`) now come from Node's built-in HDR histograms, accurate to about 1%, so they can differ slightly from the old fixed-bucket estimates. The boot banner for the metrics page is now one log line instead of a box.
+
+### Removed
+
+- The `DB_CONNECT_TIMEOUT_MS`, `HTTP_KEEPALIVE_TIMEOUT_MS`, `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `WS_AUTH_TIMEOUT_MS` and `METRICS_SLOW_MS` variables. Their defaults (10s, 65s, 66s, 60s, 2s and 1s) are now fixed, and a value set in `.env` is ignored.
+
+### Internal
+
+- Removed `scripts/reset-changelog.mjs` and `pnpm changelog:reset`.
+- Removed dead code (`areFriends`, `resetMetrics`, `clearDbSnapshotCache`, `rollMinuteForTest`, `readTrustProxyHops`), the one-line weight wrappers in `bodyStats.model.ts`, the 500-user chunking in WebSocket token revalidation, and `export` from about 40 symbols only used in their own file.
+- Switched the package manager and the Docker image runtime from pnpm and Node to bun (`bun.lock`, docs, typecheck hook, scripts, and the image now runs `bun dist/server.js`). The build copies assets with `scripts/copy-assets.mjs` so it also works under Bun on Windows.
+- `scripts/release.sh` output is colored like the app's release script, with a summary header. A failed or Ctrl+C'd run now restores `package.json` from a copy (it used to `git checkout` it, discarding uncommitted edits, and Ctrl+C reverted nothing).
+- `config/database.ts` uses `import.meta.dirname` instead of building `__dirname` from `fileURLToPath`.
+
+- `scripts/loadtest.k6.js` now defaults to a realistic `lifter` mode (app launch fetches, a WebSocket held for the visit, ~45 min workouts, token refresh, friends spectating) that ramps up in plateaus and aborts at the first one that breaks, to find max concurrent users (or, with `DURATION`, starts all users at once for that long). The old every-feature loop remains as `MODE=coverage`, and teardown now signs in again so accounts are deleted after runs longer than the token lifetime.
+
 ## [0.2.0] - 2026-10-05
 
 ### Internal
@@ -61,7 +84,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.2.0
 [0.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.1.1

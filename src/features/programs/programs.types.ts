@@ -1,5 +1,5 @@
 /** Per-machine note and pin/seat setting, keyed by machine name. */
-export interface MachineMeta {
+interface MachineMeta {
   note?: string
   setting?: string
 }
@@ -41,7 +41,7 @@ interface ExerciseWithSets {
   setsBySplit: Record<string, number>
 }
 
-export interface SplitWorkout {
+interface SplitWorkout {
   exercises: Exercise[]
   totalSets: number
 }

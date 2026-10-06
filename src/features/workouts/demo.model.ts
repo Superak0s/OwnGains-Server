@@ -5,20 +5,20 @@ import { formatDateForMySQL, withTransaction } from "@/config/database.js"
 import { readLocalOnlyFeatures } from "@/config/env.js"
 import { findOrCreateExercise, findProgramDayId } from "./workouts.model.js"
 
-export interface DemoExercise {
+interface DemoExercise {
   name: string
   sets: number
   primaryMuscles?: string[]
   secondaryMuscles?: string[]
 }
 
-export interface DemoDay {
+interface DemoDay {
   dayNumber: number
   dayTitle: string
   exercises: DemoExercise[]
 }
 
-export interface DemoFillResult {
+interface DemoFillResult {
   sessions: number
   sets: number
   friends: number
@@ -29,7 +29,7 @@ const DAY_MS = 86_400_000
 const SET_MS = 45_000
 const REST_MS = 150_000
 const DAYS_BETWEEN_SESSIONS = 2
-export const DEMO_SESSION_COUNT = 18
+const DEMO_SESSION_COUNT = 18
 const FRIEND_SESSION_COUNT = 12
 
 const FRIEND_DAYS: DemoDay[] = [

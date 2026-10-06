@@ -32,7 +32,7 @@ export const INTEGER_SETTING_KEYS: ReadonlySet<SettingKey> = new Set([
   "cycleLengthDays",
 ])
 
-export type UserSettings = Record<SettingKey, number> & {
+type UserSettings = Record<SettingKey, number> & {
   updatedAt: Date | string | null
 }
 

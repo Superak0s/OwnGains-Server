@@ -27,7 +27,7 @@
           {
             "type": "command",
             "statusMessage": "Typechecking...",
-            "command": "f=$(node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s||'{}').tool_input||{};process.stdout.write(t.file_path||'')})\"); case \"$f\" in *.ts) out=$(pnpm exec tsc --noEmit 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 2; } ;; esac"
+            "command": "f=$(node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s||'{}').tool_input||{};process.stdout.write(t.file_path||'')})\"); case \"$f\" in *.ts) out=$(bunx tsc --noEmit 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 2; } ;; esac"
           }
         ]
       }

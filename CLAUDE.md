@@ -9,19 +9,19 @@ The optional backend for the OwnGains fitness app (sibling repo `../OwnGains-App
 ## Commands
 
 ```bash
-pnpm install
-pnpm dev              # tsx watch src/server.ts, hot reload dev server
-pnpm build             # tsc + copies src/config/schema.sql and src/migrations/ into dist/
-pnpm start             # node dist/server.js (run after build)
-pnpm owngains list|add|remove <username>   # tsx src/owngains.ts: list every user, manage admins (docker: `docker exec <container> owngains ...`)
-pnpm owngains passwd <username> <newpw>   # reset a password, the only recovery path, since a self-hosted instance may have no mail server
-pnpm owngains reports [limit]             # list user reports filed on this instance
-pnpm owngains purge-local-only [--yes]    # delete every user's server copy of LOCAL_ONLY_FEATURES data (dry run without --yes)
-pnpm owngains backup create|list|verify|restore|prune   # src/utils/backup.ts: mysqldump backups in BACKUP_DIR, restore needs --yes
-pnpm smoke [url] [--min-version x.y.z]   # scripts/smoke.mjs: live HTTP+WS smoke test against a running server, creates and deletes a throwaway account
+bun install
+bun run dev              # tsx watch src/server.ts, hot reload dev server
+bun run build             # tsc + copies src/config/schema.sql and src/migrations/ into dist/
+bun run start             # node dist/server.js (run after build)
+bun run owngains list|add|remove <username>   # tsx src/owngains.ts: list every user, manage admins (docker: `docker exec <container> owngains ...`)
+bun run owngains passwd <username> <newpw>   # reset a password, the only recovery path, since a self-hosted instance may have no mail server
+bun run owngains reports [limit]             # list user reports filed on this instance
+bun run owngains purge-local-only [--yes]    # delete every user's server copy of LOCAL_ONLY_FEATURES data (dry run without --yes)
+bun run owngains backup create|list|verify|restore|prune   # src/utils/backup.ts: mysqldump backups in BACKUP_DIR, restore needs --yes
+bun run smoke [url] [--min-version x.y.z]   # scripts/smoke.mjs: live HTTP+WS smoke test against a running server, creates and deletes a throwaway account
 ```
 
-`pnpm test` runs the vitest suite (`vitest run`, add `--coverage` when you want a report). It needs a live MySQL: `src/tests/global-setup.ts` drops and rebuilds an `owngains_test` database from `.env` credentials, and route tests drive the real `app` through supertest. There is no linter, so don't invent `pnpm lint`.
+`bun run test` runs the vitest suite (`vitest run`, add `--coverage` when you want a report). It needs a live MySQL: `src/tests/global-setup.ts` drops and rebuilds an `owngains_test` database from `.env` credentials, and route tests drive the real `app` through supertest. There is no linter, so don't invent `bun run lint`.
 
 Requires a `.env`, loaded by Node itself via `--env-file-if-exists=.env` in the `dev`/`start`/`owngains` scripts. There is no `dotenv` dependency, so any _new_ entry point must pass that flag too. See README.md for the full variable table. At minimum `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` (≥32 chars), and `ALLOWED_ORIGINS` must be set or the server throws on boot (`src/server.ts`). The DB and schema auto-provision on first connect against a fresh database.
 
@@ -45,13 +45,13 @@ Requires a `.env`, loaded by Node itself via `--env-file-if-exists=.env` in the 
 
 **Background jobs**: `jobs/sessionCleanup.ts` auto-ends workout sessions idle >30min. It runs on boot then every 5min. Runs never overlap (an in-flight promise, which `stopStaleSessionCleanup()` returns for shutdown to await), and `GET_LOCK('owngains_session_cleanup', 0)` keeps two processes from sweeping at once. Each batch of 500 is `SELECT … FOR UPDATE` then `UPDATE` by id in one transaction, backed by `idx_w_open`. The same job purges expired idempotency keys. Each ended workout gets a `session_auto_ended` WS event pushed to its owner, so the app doesn't discover it as a 404 that eats the set the user just did.
 
-**Database**: schema is defined in `src/config/schema.sql`, entirely `CREATE TABLE IF NOT EXISTS` statements, re-run idempotently on every boot. New tables go straight into `schema.sql` as another `CREATE TABLE IF NOT EXISTS` block. It re-runs on every boot, so an existing deployment picks them up without a migration. Changes to _existing_ tables (new columns, indexes) go in a new `src/migrations/NNN_description.sql` file instead. `runMigrations()` (`config/database.ts`) applies each one at most once, tracked in a `_migrations` table, in filename order on every boot, under `GET_LOCK('owngains_migrate:<db>')`. A fresh database stamps every migration as applied _without running it_, so each migration must also be mirrored into the matching `schema.sql` block, otherwise new installs (and the test DB) never get the change. `pnpm build` copies `src/migrations/` into `dist/` alongside `schema.sql`. `src/migrations/README.md` lists every file and its minimum supported prior schema, so add a note there with every new file. An older, pre-`001` set of migrations was deleted: it targeted the pre-rename `sessions`/`set_timings` tables, so a live database from before the rename to `workouts` still cannot be upgraded by migration and must be re-created.
+**Database**: schema is defined in `src/config/schema.sql`, entirely `CREATE TABLE IF NOT EXISTS` statements, re-run idempotently on every boot. New tables go straight into `schema.sql` as another `CREATE TABLE IF NOT EXISTS` block. It re-runs on every boot, so an existing deployment picks them up without a migration. Changes to _existing_ tables (new columns, indexes) go in a new `src/migrations/NNN_description.sql` file instead. `runMigrations()` (`config/database.ts`) applies each one at most once, tracked in a `_migrations` table, in filename order on every boot, under `GET_LOCK('owngains_migrate:<db>')`. A fresh database stamps every migration as applied _without running it_, so each migration must also be mirrored into the matching `schema.sql` block, otherwise new installs (and the test DB) never get the change. `bun run build` copies `src/migrations/` into `dist/` alongside `schema.sql`. `src/migrations/README.md` lists every file and its minimum supported prior schema, so add a note there with every new file. An older, pre-`001` set of migrations was deleted: it targeted the pre-rename `sessions`/`set_timings` tables, so a live database from before the rename to `workouts` still cannot be upgraded by migration and must be re-created.
 
 **Uploads**: `multer` memory storage for photos only (stored as `LONGBLOB` in MySQL, 10MB cap, image-only, magic-byte checked). The original is re-encoded to a metadata-free JPEG of at most 2048px, and `sharp` bakes a 400px JPEG thumbnail. Decodes are bounded: multer field/part limits, a 40MP pixel cap checked from the header, `sharp.concurrency(1)`, and two process-wide decode slots (503 when full). Per-user quota is checked inside the insert transaction, and `PHOTO_TOTAL_QUOTA_GB` caps the instance (507). Workout program spreadsheets are parsed client-side in the app. The server only validates the resulting JSON (2MB cap, plus structural caps in `validateProgramUpload` checked before the transaction opens) and unpacks it into `programs`/`program_days`/`program_exercises`, rebuilding the same JSON shape on read.
 
 **Module system**: ESM (`"type": "module"` in package.json). Local imports must use explicit `.js` extensions even though source is `.ts` (NodeNext resolution), e.g. `import { findUserByEmail } from "../auth/user.model.js"`.
 
-**Path aliases**: `@/*` maps to `src/` (`paths` in `tsconfig.json`, with no `baseUrl`, which is deprecated in TypeScript 6). Source is under `src/` (`migrations/` and `schema.sql` included, so dev and `dist/` resolve them the same way). `package.json` remains at the root and is read at runtime by `config/version.ts`. Anything that would climb two or more levels uses the alias (`import { pool } from "@/config/database.js"`), while one `../` to a sibling remains relative. The `.js` extension is still required on aliased specifiers. `tsx` resolves `paths` natively in dev, but `tsc` does _not_ rewrite them on emit, so `pnpm build` runs `tsc && tsc-alias`: `tsc-alias` turns every `@/` back into a relative path inside `dist/`. Any new build or entry point must keep that second step, or the emitted JS will import a specifier Node cannot resolve.
+**Path aliases**: `@/*` maps to `src/` (`paths` in `tsconfig.json`, with no `baseUrl`, which is deprecated in TypeScript 6). Source is under `src/` (`migrations/` and `schema.sql` included, so dev and `dist/` resolve them the same way). `package.json` remains at the root and is read at runtime by `config/version.ts`. Anything that would climb two or more levels uses the alias (`import { pool } from "@/config/database.js"`), while one `../` to a sibling remains relative. The `.js` extension is still required on aliased specifiers. `tsx` resolves `paths` natively in dev, but `tsc` does _not_ rewrite them on emit, so `bun run build` runs `tsc && tsc-alias`: `tsc-alias` turns every `@/` back into a relative path inside `dist/`. Any new build or entry point must keep that second step, or the emitted JS will import a specifier Node cannot resolve.
 
 ## Releasing
 
@@ -86,7 +86,7 @@ Applies to Markdown, `CHANGELOG.md` entries, code comments, and the error, log a
 
 ## Claude Code tooling
 
-- **Typecheck hook**: a `PostToolUse` hook runs `pnpm exec tsc --noEmit` after every `Edit`/`Write` to a `.ts` file and blocks the edit if it fails. It catches the two silent breakages this layout invites: a missing `.js` extension on a local import, and a `@/` alias that doesn't resolve. TypeScript 7's native compiler does the whole project in well under a second, so it costs nothing per edit.
+- **Typecheck hook**: a `PostToolUse` hook runs `bunx tsc --noEmit` after every `Edit`/`Write` to a `.ts` file and blocks the edit if it fails. It catches the two silent breakages this layout invites: a missing `.js` extension on a local import, and a `@/` alias that doesn't resolve. TypeScript 7's native compiler does the whole project in well under a second, so it costs nothing per edit.
 - **`/new-feature`**: user-invoked skill that walks the feature trio (`<name>.{routes,model}.ts`), the `registerRoutes` mount, the schema-vs-migration decision, and the test file. It does not self-invoke.
 - **`security-reviewer`** and **`sql-reviewer`** subagents: launched on request, not automatically. The first audits auth, WebSocket, rate-limit/proxy-trust and upload paths. The second checks placeholder discipline in `pool.execute` calls and whether a schema change belongs in `schema.sql` or a new migration.
 - **MCP servers** (local scope, this project only): `context7` for live docs on the recent majors here (Express 5, helmet 8, multer 2), and `mysql-test`, a read-only connection to `owngains_test`, useful because there is no ORM and so no generated types to read the live schema from.

@@ -14,7 +14,7 @@ A Node.js / TypeScript REST + WebSocket API, backed by MySQL, Docker-first and s
 
 ## Tech stack
 
-- **Runtime:** Node.js (Docker image `node:24-alpine`), **TypeScript 7**, compiled with `tsc` (+ `tsc-alias` for the `@/*` path alias), run via `tsx watch` in dev.
+- **Runtime:** Bun (Docker image `oven/bun:1-alpine`), **TypeScript 7**, compiled with `tsc` (+ `tsc-alias` for the `@/*` path alias), run via `tsx watch` in dev.
 - **Framework:** **Express 5**.
 - **Database:** **MySQL** via `mysql2` (`mysql2/promise` connection pool). No ORM: hand-written SQL with an idempotent `schema.sql` plus numbered migrations.
 - **Auth:** **JWT** access tokens (`jsonwebtoken`, HS256) + opaque rotating refresh tokens, native **bcrypt** (12 salt rounds, run on the libuv threadpool behind a concurrency cap) for password hashing.
@@ -23,8 +23,8 @@ A Node.js / TypeScript REST + WebSocket API, backed by MySQL, Docker-first and s
 - **Security:** `helmet`, `cors`, `express-rate-limit`.
 - **Compression:** `compression`: gzip on JSON responses over 1 kb (already-compressed types like photo BLOBs are skipped).
 - **Discovery:** `bonjour-service`: the server advertises itself on the LAN as `_owngains._tcp`.
-- **Tests:** **vitest** + `supertest` against a real MySQL (`pnpm test`).
-- **Package manager:** **pnpm**.
+- **Tests:** **vitest** + `supertest` against a real MySQL (`bun run test`).
+- **Package manager:** **Bun**.
 
 ---
 
@@ -32,7 +32,7 @@ A Node.js / TypeScript REST + WebSocket API, backed by MySQL, Docker-first and s
 
 Request pipeline (`src/server.ts`): `helmet` (CSP `default-src 'none'`, pure JSON API) → `cors` (locked to `ALLOWED_ORIGINS`) → `compression` (gzip, 1 kb threshold) → per-request UUID + logger → rate limiters → `express.json` (50 kb, while `/api/program/upload` and `/api/sharing/permissions` get a 2 MB parser mounted first, behind `authenticateToken`) → `GET /healthz` → routes → 404 → global error handler. Body parsing sits _after_ the rate limiters, and the 2 MB parser behind auth, so a flood is rejected before the server pays to buffer and parse the payload.
 
-- **Fails fast** on boot if `DB_USER`/`DB_PASSWORD`/`DB_NAME` are missing, `JWT_SECRET` is missing/`<32` chars, `ALLOWED_ORIGINS` is unset or contains `*`, `TRUST_PROXY_HOPS` is not a non-negative integer, `LOCAL_ONLY_FEATURES` names an unknown feature, or any numeric/boolean variable read through the shared parser is malformed (a few, such as `DB_PORT`, `BCRYPT_MAX_CONCURRENCY`, `RATE_LIMIT_BYPASS_LOCAL_IPS` and `AUTH_LEGACY_*`, only accept the exact value and otherwise fall back). Booleans accept `true/false/1/0/yes/no/on/off`, case-insensitive.
+- **Fails fast** on boot if `DB_USER`/`DB_PASSWORD`/`DB_NAME` are missing, `JWT_SECRET` is missing/`<32` chars, `ALLOWED_ORIGINS` is unset or contains `*`, `TRUST_PROXY_HOPS` is not a non-negative integer, `LOCAL_ONLY_FEATURES` names an unknown feature, or any numeric/boolean variable read through the shared parser is malformed (a few, such as `DB_PORT`, `RATE_LIMIT_BYPASS_LOCAL_IPS` and `AUTH_LEGACY_*`, only accept the exact value and otherwise fall back). Booleans accept `true/false/1/0/yes/no/on/off`, case-insensitive.
 - **Rate limits (per IP):** failed `signin` / `password` / `DELETE account` / `DELETE account/data` attempts = 20 / 15 min, `signup` = 20 / 15 min, and all of `/api` = 200 req / 60 s. Bodies over 50 kB on the 2 MB routes = 20 / 15 min per user. Photo uploads = 60 / 15 min per account (not tunable). All limiters are skipped under vitest.
 - **Feature-first layout:** code is in `src/features/<domain>/<name>.{routes,model,types}.ts`, and every router is mounted in `src/routes.ts`.
 - `GET /healthz` is unauthenticated, outside the `/api` limiters, and reports `{ status, fqdn, localOnlyFeatures }`, or `503 DOWN` if a cached (5 s) `SELECT 1` against MySQL fails.
@@ -113,7 +113,7 @@ Every tracking router requires auth. Writes also need recorded health consent (`
 
 - **Friends:** `GET /search` (`?q=` username prefix, ≥3 characters, `?limit=` default 10, max 20), `GET /` (`?include=requests` adds `pendingRequests` and `sentRequests`), `GET /requests/{pending,sent}`, `POST /request`, `POST /request/:friendshipId/{accept,reject}`, `DELETE /:friendId`. A declined request can't be re-sent to the same person for 30 days (1 hour if the sender cancelled it).
 - **Blocking:** `POST`/`DELETE /block/:userId` and `GET /blocked`. A block tears down the friendship, every sharing permission in both directions, and any outstanding joint invite, then hides each user from the other's search and blocks new requests.
-- **Reporting:** `POST /report` (`userId`, `reason`, optional `details`). Reports are stored on the instance for its operator to review with `pnpm owngains reports` or `GET /api/admin/reports`. Nothing is forwarded to another server.
+- **Reporting:** `POST /report` (`userId`, `reason`, optional `details`). Reports are stored on the instance for its operator to review with `bun run owngains reports` or `GET /api/admin/reports`. Nothing is forwarded to another server.
 - **Sharing permissions:** `POST /permissions` (grant), `GET /permissions/{granted,received}`, `GET /permissions/:permissionId/payload`, `DELETE /permissions/:permissionId`. Types: `history`, `analytics`, `program`, `joint_session`, `watch_session`, `trainer`. Grants need `{ friendId (uuid), permissionType, payload? }` and a friendship (403 otherwise). A `program` grant needs `payload.programData`, capped at 256 KB (`413 PAYLOAD_TOO_LARGE`). The `granted`/`received` lists omit payloads unless `?includePayload=true`.
 - **Shared reads:** `GET /sessions/friend/:friendId` (`?includeTimings=true` adds each session's `setTimings`, and it pages with `?before=<nextCursor>` like `GET /api/sessions`) and `/sessions/friend/:friendId/:sessionId`. Sets are listed in the order they were performed.
 - **Joint sessions:** `GET /joint-sessions/friend/:friendId/status` (deprecated: use the batch route), `GET /joint-sessions/status?friendIds=<uuid>,…` (up to 100 friends at once, non-friends omitted, and a friend reads as idle unless they granted the caller `watch_session`, `joint_session` or `trainer`), `POST /joint-sessions/invite` (the invitee must have granted the caller `joint_session`, 403 otherwise), `POST /joint-sessions/invites/:inviteId/{accept,decline}`, `PATCH /joint-sessions/:id/progress`, `DELETE /joint-sessions/:id/leave`, for two friends working out in sync. Leaving (here or with the WS `leave_joint_session` frame) sends the partner both `joint_session_ended` and `invite_status { status: "session_ended" }`.
@@ -185,8 +185,8 @@ Set these environment variables. A `.env` file is read by Node directly. The `de
 | `ALLOWED_ORIGINS`             | **yes**  | none                                                                  | Comma-separated CORS origins, matched exactly. `*` is **not** a wildcard here and is refused at boot, so list origins explicitly                                                                                                                                                                                                                                          |
 | `NODE_ENV`                    | no       | none (Docker image: `production`)                                     | `production` masks error details, `development` shows stack traces                                                                                                                                                                                                                                                                                                        |
 | `SERVER_FQDN`                 | no       | none                                                                  | Public domain name, advertised over mDNS (`_owngains._tcp`) and echoed on `GET /healthz`, so clients that find this server on the LAN can connect via this FQDN instead of the raw IP                                                                                                                                                                                     |
-| `RATE_LIMIT_BYPASS_LOCAL_IPS` | no       | `false`                                                               | `true` skips the rate limiters for loopback/private-range client IPs (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)                                                                                                                                                                                                                                             |
 | `TRUST_PROXY_HOPS`            | no       | `0`                                                                   | Number of trusted reverse-proxy hops in front of the server. Must be a non-negative integer: `TRUST_PROXY_HOPS=true` is refused at boot rather than silently behaving like `0`. **Set this to `1` if you run behind nginx/Caddy/Traefik**, or the rate limiters will key every client into one shared bucket. Leave at `0` when the container's port is exposed directly  |
+| `RATE_LIMIT_BYPASS_LOCAL_IPS` | no       | `false`                                                               | `true` skips the rate limiters for loopback/private-range client IPs (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)                                                                                                                                                                                                                                             |
 | `PHOTO_TOTAL_QUOTA_GB`        | no       | `0`                                                                   | Instance-wide progress-photo cap across every user, in GB (`0` disables). Once reached, uploads get `507` and an error is logged. Set it below the free space of the MySQL data directory on any box with open signup                                                                                                                                                     |
 | `PHOTO_QUOTA_MB`              | no       | `1024`                                                                | Per-user progress-photo storage cap, in MB (`0` disables). Photo bytes are the only unbounded growth path on the box, and a full MySQL data directory fails every write on the instance, not just uploads                                                                                                                                                                 |
 | `LOCAL_ONLY_FEATURES`         | no       | none                                                                  | Comma-separated features this deployment refuses to store, to save disk: `tracking`, `supplements` (case-insensitive, and an unrecognised name is refused at boot). Their routes answer `410` with `code: "FEATURE_LOCAL_ONLY"` and the `feature`, and the list is published on `GET /healthz`, which the app reads to keep those features logging on-device instead      |
@@ -201,7 +201,6 @@ Set these environment variables. A `.env` file is read by Node directly. The `de
 | `REPORT_RETENTION_DAYS`       | no       | `365`                                                                 | User reports older than this are deleted by the cleanup job, and `0` keeps them forever                                                                                                                                                                                                                                                                                   |
 | `DB_POOL_SIZE`                | no       | `8`                                                                   | MySQL connection pool size. Raise it for a busier deployment                                                                                                                                                                                                                                                                                                              |
 | `DB_QUEUE_LIMIT`              | no       | `200`                                                                 | Queries allowed to wait for a pool connection. Past this, and on a DB timeout, lock-wait timeout or deadlock, requests get `503` with `Retry-After` instead of a `500`                                                                                                                                                                                                    |
-| `DB_CONNECT_TIMEOUT_MS`       | no       | `10000`                                                               | Timeout for opening a MySQL connection                                                                                                                                                                                                                                                                                                                                    |
 | `DB_QUERY_TIMEOUT_MS`         | no       | `30000`                                                               | Server-side per-statement timeout (`0` disables): `max_execution_time` on MySQL (SELECTs only), `max_statement_time` on MariaDB (every statement). Boot-time schema and migration DDL runs without it                                                                                                                                                                     |
 | `DB_SSL`                      | no       | `false`                                                               | `true` connects to MySQL over TLS, verifying the server certificate against Node's bundled CAs                                                                                                                                                                                                                                                                            |
 | `DB_SSL_CA`                   | no       | none                                                                  | Path to a PEM CA bundle for the MySQL server certificate. Setting it implies `DB_SSL=true`                                                                                                                                                                                                                                                                                |
@@ -209,13 +208,9 @@ Set these environment variables. A `.env` file is read by Node directly. The `de
 | `SIGNUP_RATE_LIMIT`           | no       | `20`                                                                  | Per IP, per 15 min: `POST /api/auth/signup` attempts, successful or not                                                                                                                                                                                                                                                                                                   |
 | `API_RATE_LIMIT`              | no       | `200`                                                                 | Per IP, per minute, across all of `/api`                                                                                                                                                                                                                                                                                                                                  |
 | `LARGE_BODY_RATE_LIMIT`       | no       | `20`                                                                  | Per user, per 15 min: requests with a body over 50 kB to the 2 MB-body routes (`/api/program/upload`, `/api/sharing/permissions`)                                                                                                                                                                                                                                         |
-| `HTTP_KEEPALIVE_TIMEOUT_MS`   | no       | `65000`                                                               | Idle keep-alive timeout. Keep it above your reverse proxy's upstream idle timeout (usually 60s), or the proxy reuses closed sockets and returns intermittent 502s                                                                                                                                                                                                         |
-| `HTTP_HEADERS_TIMEOUT_MS`     | no       | `66000`                                                               | Must be above `HTTP_KEEPALIVE_TIMEOUT_MS`                                                                                                                                                                                                                                                                                                                                 |
-| `HTTP_REQUEST_TIMEOUT_MS`     | no       | `60000`                                                               | Longest one request (including a photo upload) may take to arrive                                                                                                                                                                                                                                                                                                         |
 | `MDNS_ENABLED`                | no       | `true`                                                                | Advertise `_owngains._tcp` over mDNS for LAN discovery. **Set `false` on a cloud VM or any host with a public NIC**, where there is no LAN to discover it on and the responder would answer on the public interface                                                                                                                                                       |
 | `WS_MAX_CONNECTIONS`          | no       | `1000`                                                                | WebSocket sockets (authenticated or not) across the server. Past it the upgrade gets `503`                                                                                                                                                                                                                                                                                |
 | `WS_MAX_CONNECTIONS_PER_IP`   | no       | `20`                                                                  | WebSocket sockets (authenticated or not) per client IP, resolved via `TRUST_PROXY_HOPS` like `req.ip`. Past it the upgrade gets `429`                                                                                                                                                                                                                                     |
-| `WS_AUTH_TIMEOUT_MS`          | no       | `2000`                                                                | Time a new WebSocket has to send a valid `auth` frame                                                                                                                                                                                                                                                                                                                     |
 | `WS_MAX_SOCKETS_PER_USER`     | no       | `5`                                                                   | Simultaneous authenticated WebSockets per user (devices). Events go to all of them. Past the cap the oldest is closed with `1000 Replaced by new connection`. `1` restores the old one-device behaviour                                                                                                                                                                   |
 | `BOOTSTRAP_ADMIN_USERNAME`    | no       | none                                                                  | When set, only the account with this username becomes admin on signup. When unset, the first-ever user does (the self-hosted default). **Set it on any publicly reachable instance**, or whoever signs up first gets `/api/admin`                                                                                                                                         |
 | `AUTH_LEGACY_REFRESH`         | no       | `false`                                                               | Re-enables `POST /api/auth/refresh` without a `refreshToken` (an access token renewing itself). Only for app builds that predate refresh tokens. A stolen access token never expires while it is on                                                                                                                                                                       |
@@ -224,7 +219,6 @@ Set these environment variables. A `.env` file is read by Node directly. The `de
 | `HISTORY_TIMINGS_MAX`         | no       | `1000`                                                                | Page ceiling for `GET /api/sessions?includeTimings=true`. Lower it to `100` on a public instance once the app follows `nextCursor`. Older app builds fetch history in one 1000-session request                                                                                                                                                                            |
 | `METRICS_ENABLED`             | no       | `true`                                                                | Server metrics for admins: the request counters, `GET /api/admin/metrics` (JSON) and the `/admin/metrics` dashboard. `false` removes all three: nothing is counted, the page 404s and so does the endpoint (after the usual `/api/admin` auth check)                                                                                                                      |
 | `METRICS_PAGE_ENABLED`        | no       | `true`                                                                | The `/admin/metrics` HTML dashboard only. `false` keeps the JSON endpoint for the app but serves no page. Ignored when `METRICS_ENABLED=false`                                                                                                                                                                                                                            |
-| `METRICS_SLOW_MS`             | no       | `1000`                                                                | Requests at least this slow (ms) are listed under _Slow requests_ on the metrics page                                                                                                                                                                                                                                                                                     |
 
 > ⚠️ **Security:** do not commit real secrets. Rotate any credentials that have been checked into `.env`, and keep `.env` out of version control.
 
@@ -237,28 +231,28 @@ Set these environment variables. A `.env` file is read by Node directly. The `de
 ### Development
 
 ```bash
-pnpm install
-pnpm dev          # tsx watch, hot iteration
+bun install
+bun run dev          # tsx watch, hot iteration
 ```
 
 ### Tests
 
 ```bash
-pnpm test                 # vitest run
-pnpm test:watch           # vitest watch mode
-pnpm test -- --coverage   # with a coverage report (v8, coverage/ is gitignored)
-pnpm smoke [url]          # live end-to-end check of a running server (default http://localhost:5000, or SMOKE_URL)
+bun run test                 # vitest run
+bun run test:watch           # vitest watch mode
+bun run test --coverage   # with a coverage report (v8, coverage/ is gitignored)
+bun run smoke [url]          # live end-to-end check of a running server (default http://localhost:5000, or SMOKE_URL)
 ```
 
-The suite needs a live MySQL and a `.env` at the repo root (the DB user needs `CREATE`/`DROP DATABASE`). `src/tests/global-setup.ts` drops and rebuilds the `owngains_test` database (override with `TEST_DB_NAME`), and `src/tests/setup-env.ts` pins `JWT_SECRET`, `NODE_ENV`, rate limits and proxy settings so your `.env` tuning can't change results. The route tests drive the real Express app through supertest. Tests are in `src/features/**/__tests__/`, `src/__tests__/` and `src/tests/__tests__/`. There is no linter and no CI in this repo, so run `pnpm build && pnpm test` before releasing. `sonar-project.properties` is a local SonarQube config (localhost:9000) that reads `coverage/lcov.info`.
+The suite needs a live MySQL and a `.env` at the repo root (the DB user needs `CREATE`/`DROP DATABASE`). `src/tests/global-setup.ts` drops and rebuilds the `owngains_test` database (override with `TEST_DB_NAME`), and `src/tests/setup-env.ts` pins `JWT_SECRET`, `NODE_ENV`, rate limits and proxy settings so your `.env` tuning can't change results. The route tests drive the real Express app through supertest. Tests are in `src/features/**/__tests__/`, `src/__tests__/` and `src/tests/__tests__/`. There is no linter and no CI in this repo, so run `bun run build && bun run test` before releasing. `sonar-project.properties` is a local SonarQube config (localhost:9000) that reads `coverage/lcov.info`.
 
-`pnpm smoke` talks to an already-running server over real HTTP and WebSocket, the way the app does: health, sign-up/sign-in, refresh-token rotation and replay refusal, program upload, idempotent session start/set/end, WebSocket auth and account export. It signs up a throwaway `smoke_…` account and deletes it at the end, so it is safe to run against a live instance after an upgrade (mind the signup rate limit if you run it repeatedly). `--min-version x.y.z` also fails when the server is older than that. The app repo's `npm run check:all` builds and boots this server against a scratch `owngains_smoke` database and runs it for you.
+`bun run smoke` talks to an already-running server over real HTTP and WebSocket, the way the app does: health, sign-up/sign-in, refresh-token rotation and replay refusal, program upload, idempotent session start/set/end, WebSocket auth and account export. It signs up a throwaway `smoke_…` account and deletes it at the end, so it is safe to run against a live instance after an upgrade (mind the signup rate limit if you run it repeatedly). `--min-version x.y.z` also fails when the server is older than that. The app repo's `npm run check:all` builds and boots this server against a scratch `owngains_smoke` database and runs it for you.
 
 ### Production build
 
 ```bash
-pnpm build        # tsc + tsc-alias, copies src/config/schema.sql and src/migrations/ into dist/
-pnpm start        # node dist/server.js
+bun run build        # tsc + tsc-alias, copies src/config/schema.sql and src/migrations/ into dist/
+bun run start        # node dist/server.js
 ```
 
 ### Docker (recommended for self-hosting)
@@ -290,7 +284,7 @@ Security-relevant events are logged as warnings prefixed `[AUDIT]`: admin suspen
 
 With `LEGAL_PAGES_ENABLED=true` the policy pages are served by the same process, so a Traefik router that matches the whole host (``Host(`owngains.example.com`)``) needs no change. If yours matches ``PathPrefix(`/api`)`` or similar, add ``|| Path(`/privacy-policy.html`) || Path(`/terms-of-service.html`) || Path(`/delete-account.html`)`` to its rule.
 
-The image is a two-stage build (`node:24-alpine`, pnpm), runs as a non-root user under `tini`, exposes port 5000 and includes a `HEALTHCHECK` against `/healthz`. Point your MySQL env vars at a reachable database. The DB and schema auto-provision on first boot.
+The image is a two-stage build (`oven/bun:1-alpine` for both build and run), runs as a non-root user under `tini`, exposes port 5000 and includes a `HEALTHCHECK` against `/healthz`. Point your MySQL env vars at a reachable database. The DB and schema auto-provision on first boot.
 
 ### Backups
 
@@ -346,16 +340,16 @@ OwnGains and the official server at `owngains.superak0s.com` are built and run b
 - Manage the instance from the CLI (`list` shows every account with an `[admin]`
   marker, since `add`/`remove` need a username spelled exactly):
   ```bash
-  pnpm owngains list                       # every user, admins first
-  pnpm owngains create <username> <email> [pw] [--admin]   # omit the password to be prompted
-  pnpm owngains add <username>
-  pnpm owngains remove <username>          # refuses to demote the last admin
-  pnpm owngains passwd <username> [newpw]  # omit the password to be prompted
-  pnpm owngains reports [limit]            # user reports filed on this instance (max 1000)
-  pnpm owngains backup create|list|verify|restore|prune   # see Backups
-  pnpm owngains suspend <username> <reason>  # sign out everywhere and block sign-in (not admins), the reason is shown at sign-in
-  pnpm owngains unsuspend <username>
-  pnpm owngains purge-local-only [--yes]   # delete every user’s server copy of LOCAL_ONLY_FEATURES data
+  bun run owngains list                       # every user, admins first
+  bun run owngains create <username> <email> [pw] [--admin]   # omit the password to be prompted
+  bun run owngains add <username>
+  bun run owngains remove <username>          # refuses to demote the last admin
+  bun run owngains passwd <username> [newpw]  # omit the password to be prompted
+  bun run owngains reports [limit]            # user reports filed on this instance (max 1000)
+  bun run owngains backup create|list|verify|restore|prune   # see Backups
+  bun run owngains suspend <username> <reason>  # sign out everywhere and block sign-in (not admins), the reason is shown at sign-in
+  bun run owngains unsuspend <username>
+  bun run owngains purge-local-only [--yes]   # delete every user’s server copy of LOCAL_ONLY_FEATURES data
   ```
   `purge-local-only` is for data written before a feature became local-only:
   without `--yes` it only prints row counts.
@@ -394,7 +388,7 @@ Filters, sorting and expanded rows are kept across a refresh. Sections:
 - **Routes**: the top 100 routes (ids collapsed, e.g.
   `POST /api/sessions/:id/set`), sortable by requests, error %, 4xx, 5xx, avg,
   p50, p95, p99 and max, with each route's status codes.
-- **Slow requests**: the last 50 requests slower than `METRICS_SLOW_MS`.
+- **Slow requests**: the last 50 requests that took 1s or longer.
 - **Users & activity**: users (admins, suspended, new), active lifters
   (1/7/30 days), online now, workouts, sets, programs, friendships, reports,
   progress photos and their size, signed-in devices.

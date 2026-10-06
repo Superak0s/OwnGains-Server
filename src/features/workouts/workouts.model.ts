@@ -9,7 +9,7 @@ import {
 } from "@/middleware/errorHandler.js"
 
 /** The pool, or a connection holding an open transaction. */
-export type Queryable = Pool | PoolConnection
+type Queryable = Pool | PoolConnection
 
 /**
  * One recorded set as every read returns it. The pool runs with

@@ -41,7 +41,7 @@ export const METRICS = {
   waterMl: "water_ml",
 } as const
 
-export const BUILT_IN_METRICS: readonly string[] = Object.values(METRICS)
+const BUILT_IN_METRICS: readonly string[] = Object.values(METRICS)
 
 /**
  * Metrics where two entries at the same instant are two things that happened
@@ -76,7 +76,7 @@ export const MAX_METRICS_PER_QUERY = 10
 /** Most values one measuring session may include (POST `values`). */
 export const MAX_VALUES_PER_ENTRY = 20
 /** Most user-defined metrics per account. */
-export const MAX_DEFINITIONS_PER_USER = 50
+const MAX_DEFINITIONS_PER_USER = 50
 
 /**
  * `?, ?, …` for exactly `size` slots, and `values` padded to fill them by
@@ -108,7 +108,7 @@ function requireMetricKeyShape(metric: string): void {
     )
 }
 
-export interface MetricSample {
+interface MetricSample {
   metric: string
   value: number
 }
@@ -273,7 +273,7 @@ export async function deleteMeasurement(
  * A session from getMetricGroups: id, measuredAt, note, then one number-or-null
  * per alias (typed loosely, as the RowDataPacket it replaces was).
  */
-export type MetricGroup = { id: number; measuredAt: string; note: string | null; [alias: string]: any }
+type MetricGroup = { id: number; measuredAt: string; note: string | null; [alias: string]: any }
 
 /**
  * One row per measuring session, with the requested metrics pivoted into
@@ -381,7 +381,7 @@ export async function deleteMetricGroup(
 
 // ─── User-defined metrics ─────────────────────────────────────────────────────
 
-export interface MetricDefinition extends RowDataPacket {
+interface MetricDefinition extends RowDataPacket {
   id: number
   keyName: string
   label: string

@@ -701,7 +701,7 @@ pre {
 
   function renderSlow() {
     const h = data.http
-    $("slow").innerHTML = '<p class="meta">Requests that took ' + esc(ms(h.slowThresholdMs)) + ' or longer (METRICS_SLOW_MS), newest first.</p>' + table([
+    $("slow").innerHTML = '<p class="meta">Requests that took ' + esc(ms(h.slowThresholdMs)) + ' or longer, newest first.</p>' + table([
       { label: "Time", get: (r) => stamp(r.at) },
       { label: "Duration", num: true, get: (r) => '<strong>' + ms(r.durationMs) + '</strong>' },
       { label: "Status", get: (r) => badge(r.status) },

@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt"
 import { AppError } from "@/middleware/errorHandler.js"
+import { envInt } from "@/config/env.js"
 
 /**
  * Password hashing, kept off the event loop and bounded.
@@ -17,10 +18,7 @@ import { AppError } from "@/middleware/errorHandler.js"
 
 export const BCRYPT_COST = 12
 
-const MAX_CONCURRENT = Math.max(
-  1,
-  Number.parseInt(process.env.BCRYPT_MAX_CONCURRENCY ?? "", 10) || 2,
-)
+const MAX_CONCURRENT = envInt("BCRYPT_MAX_CONCURRENCY", 2, 1)
 const MAX_QUEUED = 100
 
 let active = 0

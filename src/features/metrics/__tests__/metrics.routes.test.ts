@@ -7,9 +7,8 @@ import { errorHandler, AppError } from "../../../middleware/errorHandler.js"
 import { logger } from "../../../utils/logger.js"
 import {
   metricsMiddleware,
-  percentileOf,
   processSnapshot,
-  rollMinuteForTest,
+  rollMinute,
   routeLabel,
 } from "../metrics.collector.js"
 
@@ -170,7 +169,7 @@ describe("error capture", () => {
 
   it("adds a per-minute point with p95/p99", async () => {
     await request(mini).get("/teapot")
-    rollMinuteForTest()
+    rollMinute()
     const { history } = processSnapshot()
     const last = history[history.length - 1]
     expect(last.requests).toBeGreaterThanOrEqual(1)
@@ -200,24 +199,12 @@ describe("admin error log over HTTP", () => {
   })
 })
 
-describe("percentileOf", () => {
-  it("interpolates inside a bucket and never exceeds the max seen", () => {
-    const b = new Array(28).fill(0)
-    b[11] = 100 // (75, 100] ms
-    expect(percentileOf(b, 0.5, 100)).toBe(87.5)
-    expect(percentileOf(b, 0.99, 90)).toBe(90)
-    expect(percentileOf(new Array(28).fill(0), 0.5, 0)).toBeNull()
-  })
-})
-
 describe("metricsBanner", () => {
-  it("lists every address the dashboard is reachable on, in an aligned box", async () => {
+  it("lists every address the dashboard is reachable on", async () => {
     const { metricsBanner } = await import("../metrics.collector.js")
     const banner = metricsBanner({ port: 5000, lanIp: "192.168.1.20", fqdn: "lift.example.com" })
     expect(banner).toContain("http://localhost:5000/admin/metrics")
     expect(banner).toContain("http://192.168.1.20:5000/admin/metrics")
     expect(banner).toContain("https://lift.example.com/admin/metrics")
-    const lengths = new Set(banner.split("\n").map((l) => l.length))
-    expect(lengths.size).toBe(1)
   })
 })

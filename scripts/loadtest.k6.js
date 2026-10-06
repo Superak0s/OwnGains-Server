@@ -1,24 +1,42 @@
-// k6 load test simulating lifters using every feature: account, settings, program,
-// workouts, analytics, friends, sharing, tracking and a WebSocket.
-//   k6 run -e BASE=http://localhost:5000 -e USERS=50 scripts/loadtest.k6.js
-// Point it at a throwaway instance. Raise API_RATE_LIMIT / SIGNUP_RATE_LIMIT /
-// WS_MAX_CONNECTIONS_PER_IP (or set RATE_LIMIT_BYPASS_LOCAL_IPS=true) on the
-// target first, since every VU shares one IP. Creates `k6_*` accounts; teardown deletes them.
-// Per-feature timings show up as `group_duration{group:::<name>}` in the summary.
-// Not covered: trainer mode, joint-session invite/accept (needs two live sessions
-// at once), photo upload, admin and metrics routes.
+// k6 load test for OwnGains-Server. Two modes:
+//
+//   lifter (default): each VU is one person with the app open, doing what the app
+//   really does: the launch fetches, a WebSocket held for the whole visit, a
+//   ~45 min workout of 12 to 20 sets, a token refresh when the access token nears
+//   expiry, and about 1 in 10 visits spent spectating a friend instead (the app
+//   polls the live view every 10s). VUs ramp up in STEPS plateaus to USERS and
+//   the run aborts at the first plateau where p95/p99/errors break. The last
+//   plateau that held is the max concurrent users.
+//     k6 run -e BASE=http://localhost:5000 -e USERS=500 scripts/loadtest.k6.js
+//   Then report requests per second at that level with one flat run:
+//     k6 run -e USERS=<max> -e STEPS=1 -e STEP=10m scripts/loadtest.k6.js
+//   Or skip the ramp: all USERS from the first second, for DURATION:
+//     k6 run -e USERS=5000 -e DURATION=5m scripts/loadtest.k6.js
+//
+//   coverage: every VU hits every feature each loop (account, program, social,
+//   tracking, supplements, workout, WS). A route regression test, not a capacity
+//   model: no real user touches all of it every few minutes.
+//     k6 run -e MODE=coverage -e USERS=50 scripts/loadtest.k6.js
+//
+// Point it at a throwaway instance with the same LOCAL_ONLY_FEATURES as the one
+// you are sizing (lifters skip local-only features like the app does). Raise
+// API_RATE_LIMIT / SIGNUP_RATE_LIMIT / WS_MAX_CONNECTIONS_PER_IP (or set
+// RATE_LIMIT_BYPASS_LOCAL_IPS=true) on the target first, since every VU shares one IP. Creates `k6_*` accounts, teardown signs them in again and deletes them.
+// Not covered: trainer mode, joint sessions, photo upload, admin and metrics routes.
 import http from "k6/http"
 import ws from "k6/ws"
+import { WebSocket } from "k6/websockets"
+import { setTimeout } from "k6/timers"
 import { check, group, sleep } from "k6"
 import { uuidv4 } from "https://jslib.k6.io/k6-utils/1.4.0/index.js"
 
 const BASE = __ENV.BASE || "http://localhost:5000"
 const USERS = Number(__ENV.USERS || 50)
+const MODE = __ENV.MODE || "lifter"
 const json = { "Content-Type": "application/json" }
 
-// PACE scales every think-time: 1 = real lifters, 0.05 = ~20x the request rate per
-// VU. All USERS VUs start at once and run for DURATION (default 5m), then the run
-// reports whether p95 < 500ms, p99 < 1s and errors < 1% held; it never aborts early.
+// PACE scales every wait: 1 = real time, 0.05 = ~20x the request rate per VU
+// (a quick smoke run, not a capacity number).
 const PACE = Number(__ENV.PACE || 1)
 const think = (s) => sleep(s * PACE)
 
@@ -26,16 +44,33 @@ const think = (s) => sleep(s * PACE)
 // that refusal is the correct answer there, not a failure.
 http.setResponseCallback(http.expectedStatuses({ min: 200, max: 299 }, 410))
 
+// STEPS plateaus of STEP each (1 min ramp before each), evenly up to USERS.
+const STEPS = Number(__ENV.STEPS || 5)
+const plateaus = Array.from({ length: STEPS }, (_, i) => Math.ceil((USERS * (i + 1)) / STEPS))
+const abort = (threshold) => ({ threshold, abortOnFail: true, delayAbortEval: "1m" })
+
+// DURATION in lifter mode skips the ramp: all USERS start at once, hold for
+// DURATION, and the run reports pass/fail at the end instead of aborting.
+const RAMP = MODE !== "coverage" && !__ENV.DURATION
+
 export const options = {
-  scenarios: {
-    lifters: { executor: "constant-vus", vus: USERS, duration: __ENV.DURATION || "5m" },
-  },
-  setupTimeout: "10m",
-  teardownTimeout: "10m",
-  thresholds: {
-    http_req_failed: ["rate<0.01"],
-    http_req_duration: ["p(95)<500", "p(99)<1000"],
-  },
+  scenarios: RAMP
+    ? {
+        lifters: {
+          executor: "ramping-vus",
+          exec: "lifter",
+          stages: plateaus.flatMap((target) => [
+            { target, duration: "1m" },
+            { target, duration: __ENV.STEP || "5m" },
+          ]),
+        },
+      }
+    : { [MODE]: { executor: "constant-vus", exec: MODE, vus: USERS, duration: __ENV.DURATION || "5m" } },
+  setupTimeout: "30m",
+  teardownTimeout: "30m",
+  thresholds: RAMP
+    ? { http_req_failed: [abort("rate<0.01")], http_req_duration: [abort("p(95)<500"), abort("p(99)<1000")] }
+    : { http_req_failed: ["rate<0.01"], http_req_duration: ["p(95)<500", "p(99)<1000"] },
 }
 
 const PROGRAM = {
@@ -98,6 +133,7 @@ export function setup() {
   ).forEach((r, k) => {
     if (r.status !== 201) throw new Error(`signup ${r.status} ${r.body}`)
     users[k].token = r.json("token")
+    users[k].refreshToken = r.json("refreshToken")
     users[k].uuid = r.json("user.id")
   })
 
@@ -126,22 +162,26 @@ export function setup() {
   batched(users.map((u) => post("/api/program/upload", PROGRAM, u.token))).forEach((r) => {
     if (r.status !== 200) throw new Error(`program upload ${r.status} ${r.body}`)
   })
-  return users.map(({ username, password, token, uuid, friend }) => ({ username, password, token, uuid, friend }))
+  if (RAMP)
+    console.log(`plateaus: ${plateaus.map((n, i) => `step ${i + 1} = ${n} users`).join(", ")} (${__ENV.STEP || "5m"} each)`)
+  return users.map(({ username, password, token, refreshToken, uuid, friend }) => ({ username, password, token, refreshToken, uuid, friend }))
 }
 
-// Remove the throwaway accounts so a run leaves nothing behind.
+// Remove the throwaway accounts so a run leaves nothing behind. The setup tokens
+// have expired by now (and lifters rotated the refresh tokens), so sign in again.
 export function teardown(users) {
+  const signins = batched(users.map((u) => post("/api/auth/signin", { username: u.username, password: u.password })))
   batched(
-    users.map((u) => ({
+    users.map((u, k) => ({
       method: "DELETE",
       url: `${BASE}/api/auth/account`,
       body: JSON.stringify({ password: u.password }),
-      params: { headers: authOf(u) },
+      params: { headers: { ...json, Authorization: `Bearer ${signins[k].json("token")}` } },
     })),
   )
 }
 
-export default function (users) {
+export function coverage(users) {
   const u = users[(__VU - 1) % users.length]
   const auth = authOf(u)
   const h = { headers: auth }
@@ -262,4 +302,136 @@ export default function (users) {
     })
   }
   think(60)
+}
+
+// ---- lifter mode ----
+
+const pause = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000 * PACE))
+const between = (lo, hi) => lo + Math.random() * (hi - lo)
+// Refresh a minute before the access token expires (JWT_EXPIRES_IN on the target).
+const TOKEN_TTL_MS = Number(__ENV.TOKEN_TTL_MIN || 15) * 60e3
+const EXERCISES = ["Bench Press", "Incline Dumbbell Press", "Overhead Press", "Lateral Raise", "Triceps Pushdown"]
+
+// Refresh tokens rotate on every use, so each VU owns one account and keeps its
+// tokens here across iterations instead of reusing setup()'s copy.
+let me = null
+
+function refresh() {
+  const r = http.post(`${BASE}/api/auth/refresh`, JSON.stringify({ refreshToken: me.refreshToken }), {
+    headers: json,
+    tags: { name: "/api/auth/refresh" },
+  })
+  if (r.status === 200) {
+    me.token = r.json("token")
+    me.refreshToken = r.json("refreshToken")
+  } else {
+    // A dead refresh token logs the user out: they sign in again.
+    const s = http.post(`${BASE}/api/auth/signin`, JSON.stringify({ username: me.username, password: me.password }), {
+      headers: json,
+      tags: { name: "/api/auth/signin" },
+    })
+    me.token = s.json("token")
+    me.refreshToken = s.json("refreshToken")
+  }
+  me.refreshAt = Date.now() + TOKEN_TTL_MS - 60e3
+}
+
+export async function lifter(users) {
+  me ??= { ...users[__VU - 1] }
+  let sock = null
+  const fresh = () => {
+    if (Date.now() < me.refreshAt) return
+    refresh()
+    if (sock?.readyState === 1) sock.send(JSON.stringify({ type: "auth.refresh", token: me.token }))
+  }
+  const req = (method, path, body = null, { name = path.split("?")[0], idem = false, ok } = {}) => {
+    fresh()
+    const headers = { ...json, Authorization: `Bearer ${me.token}` }
+    if (idem) headers["Idempotency-Key"] = uuidv4()
+    const params = { headers, tags: { name } }
+    if (ok) params.responseCallback = http.expectedStatuses(...ok)
+    return http.request(method, `${BASE}${path}`, body && JSON.stringify(body), params)
+  }
+  const get = (path, opts) => req("GET", path, null, opts)
+
+  // App launch: the stored access token is stale, so the first call is a refresh.
+  const health = http.get(`${BASE}/healthz`, { tags: { name: "/healthz" } })
+  const localOnly = (health.status === 200 && health.json("localOnlyFeatures")) || []
+  me.refreshAt = 0
+  get("/api/version")
+  get("/api/auth/me")
+  get("/api/settings")
+  get("/api/program")
+  get("/api/program/current-day")
+  get("/api/sessions?split=push&dayNumber=1&limit=10&includeTimings=false")
+  get("/api/sessions/exercise-records")
+  get("/api/analytics?split=push&dayNumber=1&days=365")
+  get("/api/friends")
+  get("/api/friends/requests/pending")
+  get("/api/sharing/permissions/received?includePayload=true")
+  if (me.friend) get(`/api/sharing/joint-sessions/status?friendIds=${me.friend}`)
+
+  // The app holds one socket for as long as it is in the foreground.
+  sock = new WebSocket(`${BASE.replace(/^http/, "ws")}/ws`)
+  sock.onopen = () => sock.send(JSON.stringify({ type: "auth", token: me.token }))
+  sock.onmessage = (e) => {
+    const type = JSON.parse(e.data).type
+    if (type === "auth_success" || type === "error") check(type, { "ws auth": (t) => t === "auth_success" })
+  }
+  sock.onerror = () => check(null, { "ws auth": () => false })
+  await pause(between(5, 20))
+
+  const spectate = me.friend && Math.random() < 0.1
+  const active = spectate && get(`/api/sharing/watch/friend/${me.friend}/active`, { name: "watch active", ok: [200, 404] })
+  if (active && active.status === 200) {
+    // Watch until the friend finishes or we lose interest, polling like the app.
+    const sid = active.json("session.sessionId")
+    const until = Date.now() + between(5, 15) * 60e3 * PACE
+    while (Date.now() < until) {
+      const live = get(`/api/sharing/watch/friend/${me.friend}/session/${sid}/live`, { name: "watch live", ok: [200, 404] })
+      if (live.status !== 200) break
+      await pause(10)
+    }
+  } else {
+    const start = req("POST", "/api/sessions/start", { dayNumber: 1, dayTitle: "Push Day", split: "push", startTime: new Date().toISOString() }, { idem: true })
+    if (check(start, { "start 200": (r) => r.status === 200 })) {
+      const id = start.json("session.id")
+      let setIndex = 0
+      for (const exerciseName of EXERCISES.slice(0, 4 + Math.floor(Math.random() * 2))) {
+        const sets = 3 + Math.floor(Math.random() * 2)
+        for (let i = 0; i < sets; i++) {
+          await pause(between(90, 180)) // rest, or walking to the next machine
+          const end = Date.now()
+          req(
+            "POST",
+            `/api/sessions/${id}/set`,
+            {
+              exerciseName,
+              setIndex: setIndex++,
+              startTime: new Date(end - between(20, 60) * 1000).toISOString(),
+              endTime: new Date(end).toISOString(),
+              weight: 60,
+              reps: 8,
+              primaryMuscles: ["chest"],
+              secondaryMuscles: [],
+            },
+            { name: "session set", idem: true },
+          )
+        }
+      }
+      req("POST", `/api/sessions/${id}/end`, {}, { name: "session end", idem: true })
+      get("/api/analytics?split=push&dayNumber=1&days=365")
+      get("/api/sessions?split=push&dayNumber=1&limit=10&includeTimings=false")
+    }
+  }
+
+  // Some people log their weight and water once a visit, unless this server
+  // keeps tracking on-device (then the app never calls it).
+  if (!localOnly.includes("tracking") && Math.random() < 0.3) {
+    req("POST", "/api/tracking/bodystats/weight", { weightKg: 80 })
+    req("POST", "/api/tracking/hydration", { amountMl: 500 }, { idem: true })
+  }
+
+  await pause(between(5, 30))
+  sock.close()
 }

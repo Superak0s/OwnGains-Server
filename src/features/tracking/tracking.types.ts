@@ -8,8 +8,8 @@ export interface BodyFatEntry {
   // metric series of their own now. This block is kept because the app reads a
   // body-fat entry as one object.
   measurements: {
-    waist: number
-    neck: number
+    waist: number | null
+    neck: number | null
     hip: number | null
     unit: string
   }

@@ -298,20 +298,7 @@ export async function getSentRequests(
   return rows
 }
 
-export async function areFriends(
-  userId1: number,
-  userId2: number,
-): Promise<boolean> {
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id FROM friendships
-     WHERE user_id = LEAST(?, ?) AND friend_id = GREATEST(?, ?)
-       AND status = 'accepted'`,
-    [userId1, userId2, userId1, userId2],
-  )
-  return rows.length > 0
-}
-
-export const SEARCH_MIN_LENGTH = 3
+const SEARCH_MIN_LENGTH = 3
 
 /**
  * Find people to add, by USERNAME PREFIX only.
@@ -476,7 +463,7 @@ export async function reportUser(
   return result.insertId
 }
 
-export interface ReportRow extends RowDataPacket {
+interface ReportRow extends RowDataPacket {
   id: number
   reason: string
   details: string | null

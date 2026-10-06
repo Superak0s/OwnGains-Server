@@ -26,7 +26,7 @@ build/
 # SonarQube scanner cache
 .scannerwork/
 
-# npm lockfile (this repo standardizes on pnpm)
+# npm lockfile (this repo standardizes on bun)
 package-lock.json
 
 coverage/

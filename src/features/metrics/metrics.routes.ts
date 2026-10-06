@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express"
 import { version } from "@/config/version.js"
 import { authenticateToken, requireAdmin } from "@/middleware/auth.js"
-import { envBool, readLocalOnlyFeatures, readTrustProxyHops } from "@/config/env.js"
+import { envBool, envInt, readLocalOnlyFeatures } from "@/config/env.js"
 import { getWsStats } from "@/ws/wsServer.js"
 import { decodesInUse, MAX_CONCURRENT_DECODES } from "@/middleware/imageUpload.js"
 import { clearErrors, metricsPageEnabled, processSnapshot } from "./metrics.collector.js"
@@ -16,20 +16,19 @@ const router: Router = Router()
 
 router.use(authenticateToken, requireAdmin)
 
-// Operator-facing settings to show at a glance. Only switches and
-// counts: nothing secret (no DB credentials, no JWT secret, no origins list).
-function configSummary() {
-  return {
-    nodeEnv: process.env.NODE_ENV ?? null,
-    localOnlyFeatures: readLocalOnlyFeatures(),
-    trustProxyHops: readTrustProxyHops(),
-    mdnsEnabled: envBool("MDNS_ENABLED", true),
-    serverFqdn: process.env.SERVER_FQDN || null,
-    bootstrapAdminSet: !!process.env.BOOTSTRAP_ADMIN_USERNAME,
-    authLegacyRefresh: process.env.AUTH_LEGACY_REFRESH === "true",
-    authLegacyDataWipe: process.env.AUTH_LEGACY_DATA_WIPE === "true",
-    metricsPageEnabled,
-  }
+// Operator-facing settings to show at a glance, read once at boot like the
+// server itself does. Only switches and counts: nothing secret (no DB
+// credentials, no JWT secret, no origins list).
+const config = {
+  nodeEnv: process.env.NODE_ENV ?? null,
+  localOnlyFeatures: readLocalOnlyFeatures(),
+  trustProxyHops: envInt("TRUST_PROXY_HOPS", 0),
+  mdnsEnabled: envBool("MDNS_ENABLED", true),
+  serverFqdn: process.env.SERVER_FQDN || null,
+  bootstrapAdminSet: !!process.env.BOOTSTRAP_ADMIN_USERNAME,
+  authLegacyRefresh: process.env.AUTH_LEGACY_REFRESH === "true",
+  authLegacyDataWipe: process.env.AUTH_LEGACY_DATA_WIPE === "true",
+  metricsPageEnabled,
 }
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -46,7 +45,7 @@ router.get("/", async (_req: Request, res: Response) => {
       maxConcurrentDecodes: MAX_CONCURRENT_DECODES,
     },
     database: { pool: poolStats(), ...db },
-    config: configSummary(),
+    config,
   })
 })
 

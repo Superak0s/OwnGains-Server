@@ -3,14 +3,9 @@ import fs from "fs";
 import path from "path";
 import type { RowDataPacket } from "mysql2/promise";
 import type { Connection as CoreConnection } from "mysql2";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 import { logger } from "../utils/logger.js";
 import { ValidationError } from "../middleware/errorHandler.js";
 import { envBool, envInt } from "./env.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -39,9 +34,6 @@ function sslOptions(): { ca?: string; rejectUnauthorized: true } | undefined {
 
 const ssl = sslOptions();
 
-// mysql2's own default, env-tunable for a far-away database.
-const connectTimeout = envInt("DB_CONNECT_TIMEOUT_MS", 10_000, 1);
-
 /**
  * Server-side statement timeout in ms (0 disables). A runaway query otherwise
  * ties up one of the pool's few connections for as long as it runs, and every
@@ -69,7 +61,6 @@ export const pool: Pool = mysql.createPool({
   // fail fast with an error the client can retry (errorHandler turns it into
   // 503 + Retry-After), not queue indefinitely and pile up memory/timeouts.
   queueLimit: envInt("DB_QUEUE_LIMIT", 200),
-  connectTimeout,
   // pool.execute prepares one server-side statement per distinct SQL text per
   // connection, and MySQL's global max_prepared_stmt_count (16,382 by default)
   // is shared by every connection. mysql2's per-connection default of 16,000
@@ -132,12 +123,6 @@ pool.on("connection", (conn) => {
 });
 
 /**
- * Formats a Date or date string as a MySQL DATETIME string (YYYY-MM-DD HH:MM:SS).
- * Uses UTC methods so the stored value matches UTC regardless of the server's
- * local timezone setting. Ensure MySQL is also configured to use UTC
- * (set time_zone = '+00:00' in my.cnf or via SET GLOBAL time_zone).
- */
-/**
  * Run `fn` inside a transaction on one pooled connection: commit when it
  * resolves, roll back when it throws, release either way. Every multi-statement
  * write used to hand-roll this getConnection/begin/commit/rollback/release
@@ -190,8 +175,7 @@ async function createDatabaseIfNotExists(): Promise<void> {
     user: requireEnv("DB_USER"),
     password: requireEnv("DB_PASSWORD"),
     port: Number(process.env.DB_PORT) || 3306,
-    connectTimeout,
-    ...(ssl ? { ssl } : {}),
+      ...(ssl ? { ssl } : {}),
   });
   try {
     // DB_NAME is the operator's own, not user input, but an unescaped backtick
@@ -235,7 +219,7 @@ async function isEmptyDatabase(conn: PoolConnection): Promise<boolean> {
 }
 
 async function initializeTables(conn: PoolConnection): Promise<void> {
-  const schemaPath = path.join(__dirname, "schema.sql");
+  const schemaPath = path.join(import.meta.dirname, "schema.sql");
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`schema.sql not found at ${schemaPath}.`);
   }
@@ -269,7 +253,7 @@ async function runMigrations(
   conn: PoolConnection,
   isFresh: boolean,
 ): Promise<void> {
-  const migrationsDir = path.join(__dirname, "..", "migrations");
+  const migrationsDir = path.join(import.meta.dirname, "..", "migrations");
   if (!fs.existsSync(migrationsDir)) return;
 
   await conn.execute(`

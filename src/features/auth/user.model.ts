@@ -360,7 +360,7 @@ export async function exportUserData(
  * The caller's rows of every table keyed to them (directly or through a parent),
  * with users.id columns rewritten to uuids.
  */
-export async function exportTableRows(
+async function exportTableRows(
   userId: number,
 ): Promise<Record<string, RowDataPacket[]>> {
   const data: Record<string, RowDataPacket[]> = {}

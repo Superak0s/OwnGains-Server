@@ -1,3 +1,0 @@
-allowBuilds:
-  bcrypt: false
-  esbuild: true

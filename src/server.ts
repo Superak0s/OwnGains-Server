@@ -11,7 +11,7 @@ import { Bonjour, type Service } from "bonjour-service"
 import { version } from "@/config/version.js"
 import { startStaleSessionCleanup, stopStaleSessionCleanup } from "./jobs/sessionCleanup.js"
 import { logger } from "./utils/logger.js"
-import { envBool, envInt, readTrustProxyHops } from "./config/env.js"
+import { envBool, envInt } from "./config/env.js"
 import {
   metricsBanner,
   metricsEnabled,
@@ -41,8 +41,9 @@ if (allowedOrigins.includes("*"))
     "ALLOWED_ORIGINS does not support \"*\". List the origins explicitly, comma-separated (e.g. https://yourapp.com,http://localhost:3000)",
   )
 
-// Fails at boot on a malformed value (see readTrustProxyHops).
-const trustProxyHops = readTrustProxyHops()
+// Fails at boot on a malformed value: Number("true") is NaN, and Express's
+// trust-proxy check is false for NaN, so a typo would silently act like 0.
+const trustProxyHops = envInt("TRUST_PROXY_HOPS", 0)
 
 import { testDatabaseConnection, pool } from "./config/database.js"
 import { createWsServer, closeWsServer } from "./ws/wsServer.js"
@@ -296,9 +297,9 @@ const server = http.createServer(app)
 // upload (up to 10 MB) for five minutes. Set as properties, not
 // createServer() options: the latter refuses headersTimeout > requestTimeout,
 // but the request timer already bounds the headers, so the order is moot.
-server.keepAliveTimeout = envInt("HTTP_KEEPALIVE_TIMEOUT_MS", 65_000)
-server.headersTimeout = envInt("HTTP_HEADERS_TIMEOUT_MS", 66_000)
-server.requestTimeout = envInt("HTTP_REQUEST_TIMEOUT_MS", 60_000)
+server.keepAliveTimeout = 65_000
+server.headersTimeout = 66_000
+server.requestTimeout = 60_000
 
 // LAN discovery is how a self-hosted box is found without knowing its IP, so
 // it stays on by default. On a cloud VM or bare-metal host with a public NIC
@@ -330,7 +331,7 @@ let mdnsService: Service | undefined
 
 async function start() {
   await testDatabaseConnection()
-  createWsServer(server, { trustProxyHops })
+  createWsServer(server)
   const b = mdnsEnabled
     ? new Bonjour({
         interface: getLanInterface(),
@@ -341,14 +342,12 @@ async function start() {
     logger.info(`🚀 OwnGains Server v${version} running on port ${PORT}`)
     startStaleSessionCleanup()
     startMetricsCollector()
-    // Own line break first, so the box starts at column 0 under the timestamp.
     logger.info(
-      "📊\n" +
-        metricsBanner({
-          port: PORT,
-          lanIp: getLanInterface(),
-          fqdn: process.env.SERVER_FQDN || undefined,
-        }),
+      metricsBanner({
+        port: PORT,
+        lanIp: getLanInterface(),
+        fqdn: process.env.SERVER_FQDN || undefined,
+      }),
     )
 
     if (!b) return void logger.info("📡 mDNS advertising disabled (MDNS_ENABLED=false)")

@@ -125,7 +125,7 @@ export async function createUser(
  * that needs an emailed verification step, which a box with no mail server
  * can't send.
  */
-export const ACCOUNT_CONFLICT_MESSAGE = "That username or email is unavailable"
+const ACCOUNT_CONFLICT_MESSAGE = "That username or email is unavailable"
 
 export function asDuplicateUserError(err: unknown): unknown {
   const e = err as { errno?: number; message?: string }
@@ -519,7 +519,7 @@ export async function purgeExpiredRefreshTokens(batch = 5000): Promise<number> {
   return r.affectedRows
 }
 
-export type RotateResult =
+type RotateResult =
   | { ok: true; userId: number; userUuid: string; tokenVersion: number; token: string }
   | { ok: false; reused: boolean }
 

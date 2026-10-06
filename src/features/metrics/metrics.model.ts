@@ -9,7 +9,7 @@ import { pool } from "@/config/database.js"
 
 const DB_CACHE_MS = 15_000
 
-export interface AppCounts {
+interface AppCounts {
   users: { total: number; admins: number; suspended: number; new7d: number; new30d: number }
   activeUsers: { day: number; week: number; month: number }
   workouts: { total: number; inProgress: number; last24h: number; last7d: number }
@@ -23,7 +23,7 @@ export interface AppCounts {
   idempotencyKeys: number
 }
 
-export interface DbSnapshot {
+interface DbSnapshot {
   collectedAt: string
   app: AppCounts | null
   server: {
@@ -194,11 +194,6 @@ export async function getDbSnapshot(): Promise<DbSnapshot> {
       pending = null
     })
   return pending
-}
-
-/** Test hook. */
-export function clearDbSnapshotCache(): void {
-  cached = null
 }
 
 /**

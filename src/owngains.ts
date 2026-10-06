@@ -4,9 +4,9 @@
   Operator CLI: list users, grant/revoke admin, reset passwords, read reports,
   suspend accounts.
   Usage (dev):
-    pnpm owngains list
-    pnpm owngains add <username>
-    pnpm owngains remove <username>
+    bun run owngains list
+    bun run owngains add <username>
+    bun run owngains remove <username>
   Usage (docker, after build):
     docker exec <container> node dist/owngains.js list
 */

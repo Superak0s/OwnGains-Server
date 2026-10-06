@@ -110,7 +110,7 @@ export async function createBackup(): Promise<string> {
   return out
 }
 
-export interface BackupFile {
+interface BackupFile {
   name: string
   path: string
   bytes: number

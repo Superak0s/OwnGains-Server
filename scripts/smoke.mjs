@@ -4,7 +4,7 @@
 // deletes it again at the end, so it is safe to point at a live instance.
 //
 //   node scripts/smoke.mjs [baseUrl] [--min-version x.y.z]
-//   pnpm smoke http://localhost:5000
+//   bun run smoke http://localhost:5000
 //
 // Exit 0 when every check passes, 1 otherwise.
 

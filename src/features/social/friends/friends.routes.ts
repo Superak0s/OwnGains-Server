@@ -170,7 +170,7 @@ router.delete("/block/:userId", async (req: Request, res: Response) => {
  * POST /api/friends/report
  *
  * Body: { userId, reason, details? }. Reports are stored for this instance's
- * operator to review (`pnpm owngains reports`). A self-hosted deployment has
+ * operator to review (`bun run owngains reports`). A self-hosted deployment has
  * no central moderation team to forward them to.
  */
 router.post("/report", async (req: Request, res: Response) => {

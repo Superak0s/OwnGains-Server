@@ -13,14 +13,14 @@ import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
 import { requireOptionalNote } from "@/middleware/validation.js"
 
 /** Follow-ups returned per episode: the most recent ones, oldest first. */
-export const FOLLOW_UPS_PER_EPISODE = 20
+const FOLLOW_UPS_PER_EPISODE = 20
 /** Ceiling on GET /active: open episodes, not a history. */
 export const MAX_ACTIVE_EPISODES = 100
 
-export type FollowUpStatus = "still_sore" | "better" | "recovered"
-export type SorenessStatus = "active" | "recovering" | "recovered"
+type FollowUpStatus = "still_sore" | "better" | "recovered"
+type SorenessStatus = "active" | "recovering" | "recovered"
 
-export interface SorenessFollowUp {
+interface SorenessFollowUp {
   id: number
   sorenessId: number
   intensity: number
@@ -29,7 +29,7 @@ export interface SorenessFollowUp {
   createdAt: string
 }
 
-export interface SorenessEntry {
+interface SorenessEntry {
   id: number
   muscleGroup: string
   intensity: number
@@ -42,7 +42,7 @@ export interface SorenessEntry {
   followUps: SorenessFollowUp[]
 }
 
-export interface SorenessStats {
+interface SorenessStats {
   totalActiveSoreness: number
   totalRecoveryEpisodes: number
   averageRecoveryDays: number

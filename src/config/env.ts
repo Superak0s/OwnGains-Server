@@ -24,24 +24,8 @@ export function envBool(name: string, fallback: boolean): boolean {
   throw new Error(`${name} must be true or false (got "${process.env[name]}")`)
 }
 
-/**
- * Number("true") is NaN, and Express's trust-proxy check (`hop < value`) is
- * false for NaN, so a misspelled value silently behaves like 0 and collapses
- * every client into one rate-limit bucket. Fail at boot instead. Read by both
- * Express (`trust proxy`) and the WebSocket server's per-IP connection cap, so
- * the two can never disagree about who the client is.
- */
-export function readTrustProxyHops(): number {
-  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 0)
-  if (!Number.isInteger(hops) || hops < 0)
-    throw new Error(
-      `TRUST_PROXY_HOPS must be a non-negative integer (got "${process.env.TRUST_PROXY_HOPS}"): 0 when the port is exposed directly, 1 behind one reverse proxy`,
-    )
-  return hops
-}
-
 // Features a deployment can refuse to store, to keep its disk footprint down.
-export const KNOWN_LOCAL_ONLY = ["tracking", "supplements"] as const
+const KNOWN_LOCAL_ONLY = ["tracking", "supplements"] as const
 
 /**
  * LOCAL_ONLY_FEATURES, validated and lowercased: registerRoutes matches it

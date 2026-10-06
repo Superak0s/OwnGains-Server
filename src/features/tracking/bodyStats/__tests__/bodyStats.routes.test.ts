@@ -42,11 +42,25 @@ describe("bodyStats routes", () => {
   })
 
   it("logs bodyfat with validation and deletes it", async () => {
-    const noMeasure = await request(app)
+    const noPct = await request(app)
       .post("/api/tracking/bodystats/bodyfat/log")
       .set(auth(u.token))
-      .send({ percentage: 15 })
-    expect(noMeasure.status).toBe(400)
+      .send({ measurements: null })
+    expect(noPct.status).toBe(400)
+
+    // Health Connect: percentage only, stored with null circumferences.
+    const pctOnly = await request(app)
+      .post("/api/tracking/bodystats/bodyfat/log")
+      .set(auth(u.token))
+      .send({ percentage: 21.4, measurements: null, measuredAt: "2026-01-05T07:00:00.000Z" })
+    expect(pctOnly.status).toBe(200)
+    expect(pctOnly.body.entry.measurements).toMatchObject({ waist: null, neck: null, hip: null })
+    const pctOnlyHistory = await request(app).get("/api/tracking/bodystats/bodyfat/log").set(auth(u.token))
+    expect(pctOnlyHistory.body.entries[0]).toMatchObject({
+      percentage: 21.4,
+      measurements: { waist: null, neck: null, hip: null },
+    })
+    await request(app).delete(`/api/tracking/bodystats/bodyfat/log/${pctOnly.body.entry.id}`).set(auth(u.token))
 
     const badPct = await request(app)
       .post("/api/tracking/bodystats/bodyfat/log")

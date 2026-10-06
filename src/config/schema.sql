@@ -660,7 +660,7 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- A self-hosted instance has no central moderator, so reports are stored here
--- for the operator to read with `pnpm owngains reports`. Intentional.
+-- for the operator to read with `bun run owngains reports`. Intentional.
 CREATE TABLE IF NOT EXISTS user_reports (
   id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
   -- Both NULL-able and SET NULL on delete: a report outlives either account,

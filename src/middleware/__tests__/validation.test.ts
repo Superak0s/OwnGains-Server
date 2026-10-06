@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import type { NextFunction, Request, Response } from "express"
 import {
   parseIntParam,
   queryLimit,
@@ -14,7 +15,7 @@ import {
 } from "../validation.js"
 import { ValidationError } from "../errorHandler.js"
 
-type Mw = (req: any, res: any, next: (err?: unknown) => void) => void
+type Mw = (req: Request, res: Response, next: NextFunction) => void
 
 function run(
   mw: Mw,
@@ -23,7 +24,11 @@ function run(
 ) {
   let nextCalled = false
   try {
-    mw({ body, query, params: {} }, {}, () => (nextCalled = true))
+    mw(
+      { body, query, params: {} } as unknown as Request,
+      {} as Response,
+      () => (nextCalled = true),
+    )
   } catch (e) {
     // The per-field text is in ValidationError.details, not .message, so
     // flatten both so an assertion can search one string.

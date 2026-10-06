@@ -1,16 +1,25 @@
 import mysql from "mysql2/promise"
 import path from "node:path"
 import fs from "node:fs"
+import { parseEnv } from "node:util"
 
 // Runs once in the main vitest process before any worker starts.
 // Wipes and rebuilds the scratch DB from schema.sql + migrations.
 export default async function setup() {
-  const dbName = process.env.TEST_DB_NAME || "owngains_test"
-  if (!/^\w+$/.test(dbName)) throw new Error("TEST_DB_NAME must be a plain identifier")
-  process.env.DB_NAME = dbName
   const envPath = path.join(process.cwd(), ".env")
   if (!fs.existsSync(envPath))
     throw new Error("tests require a .env file at the repo root")
+  const envDbName = parseEnv(fs.readFileSync(envPath, "utf8")).DB_NAME
+  // Same default as setup-env.ts: the .env DB_NAME plus "_test".
+  const dbName = process.env.TEST_DB_NAME || `${envDbName || "owngains"}_test`
+  if (!/^\w+$/.test(dbName)) throw new Error("TEST_DB_NAME must be a plain identifier")
+  // The suite drops this database. If the dev server uses it too, every run
+  // wipes the developer's real accounts.
+  if (envDbName === dbName)
+    throw new Error(
+      `.env DB_NAME is "${dbName}", the database the tests drop. Point DB_NAME at another database or set TEST_DB_NAME.`,
+    )
+  process.env.DB_NAME = dbName
   process.loadEnvFile(envPath)
 
   const conn = await mysql.createConnection({

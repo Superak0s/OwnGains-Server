@@ -153,9 +153,9 @@ function checkMaxLength(
 /**
  * Check an optional muscle-group array (primaryMuscles / secondaryMuscles):
  * an array of at most MUSCLE_GROUPS_MAX non-empty strings, each capped like the
- * old single-group field. These are stored in the shared `exercises` catalog, where
- * they can never be rewritten (backfillMuscles only fills blanks), so a bad
- * shape has to stop here on every path that reaches it.
+ * old single-group field. These are stored as the user's own labels
+ * (user_exercise_muscles) and shown in friend views, so a bad shape has to
+ * stop here on every path that reaches it.
  */
 const MUSCLE_GROUPS_MAX = 20
 

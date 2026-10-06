@@ -48,7 +48,7 @@ describe("admin routes and moderation", () => {
 
     const list = await request(app).get("/api/admin/reports?limit=500").set(auth(admin.token))
     expect(list.status).toBe(200)
-    const report = list.body.reports.find((r: any) => r.details === "kept")
+    const report = list.body.reports.find((r: { details: string }) => r.details === "kept")
     expect(report).toBeTruthy()
     expect(report.reported).toMatchObject({
       id: target.user.id,

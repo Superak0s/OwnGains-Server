@@ -102,7 +102,7 @@ fi
 # [1/5] Version bump
 step 1/5 "Version"
 
-CURRENT_VERSION=$(node -p "require('./package.json').version")
+CURRENT_VERSION=$(bun -p "require('./package.json').version")
 IFS='.' read -r CUR_MAJOR CUR_MINOR CUR_PATCH <<< "$CURRENT_VERSION"
 AUTO_PATCH_VERSION="$CUR_MAJOR.$CUR_MINOR.$((CUR_PATCH + 1))"
 AUTO_MINOR_VERSION="$CUR_MAJOR.$((CUR_MINOR + 1)).0"
@@ -131,7 +131,7 @@ fi
 # Keeping the version re-releases what's already stamped, so it skips this.
 STAMP_CHANGELOG=false
 if [ "$KEEP_VERSION" = false ]; then
-    if node scripts/changelog.mjs check "$NEW_VERSION"; then CHANGELOG_STATUS=0; else CHANGELOG_STATUS=$?; fi
+    if bun scripts/changelog.mjs check "$NEW_VERSION"; then CHANGELOG_STATUS=0; else CHANGELOG_STATUS=$?; fi
     case "$CHANGELOG_STATUS" in
         0) STAMP_CHANGELOG=true; info "CHANGELOG.md: [Unreleased] will be stamped as [$NEW_VERSION]" ;;
         2) warn "CHANGELOG.md: [Unreleased] is empty, leaving it untouched. The release gets default notes." ;;
@@ -148,7 +148,7 @@ fi
 BACKUP_DIR="$(mktemp -d)"
 cp package.json CHANGELOG.md "$BACKUP_DIR/"
 
-NEW_VERSION="$NEW_VERSION" node -e '
+NEW_VERSION="$NEW_VERSION" bun -e '
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync("./package.json", "utf8"));
 pkg.version = process.env.NEW_VERSION;
@@ -158,7 +158,7 @@ fs.writeFileSync("./package.json", JSON.stringify(pkg, null, 2) + "\n");
 # Stamped before the build, so the release commit carries this version's notes
 # and a failed build reverts them along with the bump.
 if [ "$STAMP_CHANGELOG" = true ]; then
-    node scripts/changelog.mjs stamp "$NEW_VERSION" "$(date +%Y-%m-%d)"
+    bun scripts/changelog.mjs stamp "$NEW_VERSION" "$(date +%Y-%m-%d)"
 fi
 ok "Version $CURRENT_VERSION -> ${B}$NEW_VERSION${R}"
 
@@ -215,7 +215,7 @@ else
         # This version's CHANGELOG.md section becomes the release notes.
         if command -v gh >/dev/null 2>&1; then
             NOTES_FILE="$(mktemp)"
-            if ! node scripts/changelog.mjs notes "$NEW_VERSION" "$NOTES_FILE" 2>/dev/null; then
+            if ! bun scripts/changelog.mjs notes "$NEW_VERSION" "$NOTES_FILE" 2>/dev/null; then
                 info "No [$NEW_VERSION] notes in CHANGELOG.md, using the default release text"
                 echo "Release $TAG built on $(date '+%Y-%m-%d %H:%M')" > "$NOTES_FILE"
             fi

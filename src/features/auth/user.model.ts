@@ -1,5 +1,5 @@
 import { pool, withTransaction } from "@/config/database.js"
-import type { RowDataPacket } from "mysql2"
+import type { ResultSetHeader, RowDataPacket } from "mysql2"
 import { NotFoundError, ValidationError } from "@/middleware/errorHandler.js"
 import type { UserBodyData } from "./user.types.js"
 import { asDuplicateUserError } from "./auth.model.js"
@@ -88,6 +88,14 @@ export async function getUserBodyData(userId: number): Promise<UserBodyData> {
  * wiping, and their hashes have no business in a data export.
  */
 const EXCLUDED_TABLES = new Set(["refresh_tokens"])
+
+// Columns holding a users.id with no FK to declare it, so the schema walk
+// can't see them. idempotency_keys.actor_id is the acting trainer (0 = the
+// owner), and without this the trainee's export carried the trainer's
+// internal id.
+const UNDECLARED_USER_COLUMNS: Record<string, string[]> = {
+  idempotency_keys: ["actor_id"],
+}
 
 // user_blocks and user_reports point at users in BOTH directions (I block you
 // / you block me). Following every FK column would delete and export the other
@@ -260,6 +268,8 @@ function getUserTables(): Promise<UserTables> {
       }
       owned.set(table, [...(owned.get(table) ?? []), String(r.columnName)])
     }
+    for (const [table, cols] of Object.entries(UNDECLARED_USER_COLUMNS))
+      userColumns.set(table, [...(userColumns.get(table) ?? []), ...cols])
     const children = buildChildExports(
       fkRows as ForeignKeyRow[],
       owned,
@@ -366,6 +376,10 @@ async function exportTableRows(
   const data: Record<string, RowDataPacket[]> = {}
   const { owned, userColumns, children } = await getUserTables()
   for (const [table, columns] of owned) {
+    // users is "owned" through demo_owner_id: the caller's demo friends. Those
+    // are synthetic accounts, and their raw rows (internal id, token_version,
+    // password_hash) are no one's data. The wipe still deletes them.
+    if (table === "users") continue
     const [rows] = await pool.execute<RowDataPacket[]>(
       `SELECT * FROM ${table} WHERE ${ownershipClause(columns)} LIMIT ${EXPORT_ROW_CAP}`,
       columns.map(() => userId),
@@ -381,6 +395,30 @@ async function exportTableRows(
   }
   await idsToUuids(data, userColumns)
   return data
+}
+
+/**
+ * Deletes sign-ups that never got past the consent screen. Only empty
+ * accounts: a row in any table the user owns (the same schema-derived list
+ * "Clear All Data" uses) makes it a real account, from before the consent
+ * screen or from a box with REQUIRE_TERMS_ACCEPTANCE=false. Checking only
+ * programs and workouts deleted accounts that held just body stats or photos.
+ */
+export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
+  const owned = await getUserOwnedTables()
+  const empty = [...owned]
+    .map(
+      ([table, cols]) =>
+        `AND NOT EXISTS (SELECT 1 FROM ${table} x WHERE ${cols.map((c) => `x.${c} = u.id`).join(" OR ")})`,
+    )
+    .join("\n       ")
+  const [r] = await pool.execute<ResultSetHeader>(
+    `DELETE u FROM users u
+     WHERE u.terms_accepted_at IS NULL AND u.is_admin = 0
+       AND u.created_at < NOW() - INTERVAL ${days | 0} DAY
+       ${empty}`,
+  )
+  return r.affectedRows
 }
 
 /**

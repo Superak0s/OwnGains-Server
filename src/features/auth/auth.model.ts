@@ -167,11 +167,13 @@ export async function findUserByCredentials(
     : null
 }
 
+/** `activeOnly` skips suspended (and demo) accounts. The CLI needs to find them. */
 export async function findUserByUsername(
   username: string,
+  { activeOnly = false } = {},
 ): Promise<AuthUser | null> {
   const [users] = await pool.execute<AuthUserRow[]>(
-    `SELECT ${USER_COLS} FROM users WHERE username = ?`,
+    `SELECT ${USER_COLS} FROM users WHERE username = ?${activeOnly ? " AND disabled_at IS NULL" : ""}`,
     [username],
   )
   return users[0] ? toAuthUser(users[0]) : null
@@ -371,15 +373,30 @@ export async function deleteUser(userId: number): Promise<void> {
       "INSERT IGNORE INTO deleted_accounts (uuid) SELECT uuid FROM users WHERE id = ?",
       [userId],
     )
+    // Only exercises this user referenced are swept. Sweeping every orphan
+    // also caught other users' just-created names and failed their inserts.
+    const [used] = await conn.execute<(RowDataPacket & { id: number })[]>(
+      `SELECT ws.exercise_id AS id FROM workout_sets ws
+         JOIN workouts w ON w.id = ws.workout_id WHERE w.user_id = ?
+       UNION SELECT pe.exercise_id FROM program_exercises pe
+         JOIN program_days pd ON pd.id = pe.program_day_id
+         JOIN programs p ON p.id = pd.program_id WHERE p.user_id = ?
+       UNION SELECT exercise_id FROM user_exercise_muscles WHERE user_id = ?`,
+      [userId, userId, userId],
+    )
     await conn.execute("DELETE FROM users WHERE id = ?", [userId])
+    if (!used.length) return
     // A custom exercise name can identify its author, and the catalog row
     // would otherwise remain after they are gone.
-    // ponytail: a set logged against a just-created exercise in the same instant
-    // can lose this race and fail its insert. The app's offline queue retries it.
-    await conn.execute(
+    // ponytail: another user creating the same name in that instant can still
+    // lose this race and fail its insert. The app's offline queue retries it.
+    await conn.query(
       `DELETE e FROM exercises e
-       WHERE NOT EXISTS (SELECT 1 FROM workout_sets ws WHERE ws.exercise_id = e.id)
-         AND NOT EXISTS (SELECT 1 FROM program_exercises pe WHERE pe.exercise_id = e.id)`,
+       WHERE e.id IN (?)
+         AND NOT EXISTS (SELECT 1 FROM workout_sets ws WHERE ws.exercise_id = e.id)
+         AND NOT EXISTS (SELECT 1 FROM program_exercises pe WHERE pe.exercise_id = e.id)
+         AND NOT EXISTS (SELECT 1 FROM user_exercise_muscles uem WHERE uem.exercise_id = e.id)`,
+      [used.map((r) => r.id)],
     )
   })
 }
@@ -397,22 +414,6 @@ export async function purgeDeletedAccounts(
   )
   await pool.execute(
     `DELETE FROM deleted_accounts WHERE deleted_at < NOW() - INTERVAL ${(days + 2) | 0} DAY`,
-  )
-  return r.affectedRows
-}
-
-/**
- * Deletes sign-ups that never got past the consent screen. Only empty
- * accounts: one that predates the consent screen and holds a program or
- * workouts is a real account, not an abandoned sign-up.
- */
-export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
-  const [r] = await pool.execute<ResultSetHeader>(
-    `DELETE u FROM users u
-     WHERE u.terms_accepted_at IS NULL AND u.is_admin = 0
-       AND u.created_at < NOW() - INTERVAL ${days | 0} DAY
-       AND NOT EXISTS (SELECT 1 FROM programs p WHERE p.user_id = u.id)
-       AND NOT EXISTS (SELECT 1 FROM workouts w WHERE w.user_id = u.id)`,
   )
   return r.affectedRows
 }

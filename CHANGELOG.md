@@ -6,6 +6,47 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-06
+
+### Changed
+
+- Running from source now needs only Bun, not Node. `bun run start`, `dev`, `owngains`, `smoke`, `build` and `test` all run on Bun, the same runtime as the Docker image, and Bun loads `.env` from the repo root by itself.
+- `POST /api/sessions/:id/set` on a workout that has already ended now stores the set and answers `200`, moving the workout's end time forward, where it answered `409 SESSION_ALREADY_ENDED`. The app drops a queued set on that error, so a set logged just after the 30-minute auto-end was lost. A trainer posting for a trainee still gets the `409`.
+- `owngains backup restore` now verifies the backup and saves the current database as a new backup before replacing it. A truncated file stops the restore, and restoring the wrong backup can be undone.
+- `HISTORY_TIMINGS_MAX` now defaults to `100` (was `1000`). The app follows `nextCursor`, so an app build that fetches history in one request gets only its newest 100 workouts unless the operator raises it.
+- `POST /api/tracking/bodystats/bodyfat/log` now answers `201`, like the other tracking creates, where it answered `200`.
+
+### Removed
+
+- `AUTH_LEGACY_REFRESH` and `AUTH_LEGACY_DATA_WIPE`. `POST /api/auth/refresh` always needs a `refreshToken`, and `DELETE /api/auth/account/data` always needs `password` (`400 PASSWORD_REQUIRED` without one). The admin metrics no longer report the two flags.
+
+### Fixed
+
+- Deleting any account (including the throwaway one `bun run smoke` creates) no longer erases other users' own muscle labels for exercises they have labelled but not used in a logged set or their current program.
+- Removing demo data no longer clears a user's real height when it happens to be the demo value of 178 cm. It is cleared only when the demo filled it in.
+- The daily purge of accounts that never accepted the Terms no longer deletes accounts older than 30 days that hold any data (body tracking, photos, settings and the like). It used to check programs and workouts only.
+- Two users uploading programs that share an exercise name at the same moment no longer deadlock, which answered one of them `503`.
+- `owngains backup prune` now exits with code `1` and prints an error when it leaves no backups, so a cron job reports that backups stopped being written. Backups are now ordered by the timestamp in their file name, not file modification time.
+
+### Security
+
+- `GET /api/auth/account/export` no longer includes the internal user id of a trainer who acted on the account (`idempotency_keys.actor_id` is now a uuid, or null for the owner) or the raw account rows of the caller's demo friends.
+- `POST /api/friends/request` to a suspended or demo account now answers `404`, like an unknown username, so it no longer confirms the account exists.
+- Muscle labels sent with a set or a program upload are stored only as the sender's own. They no longer fill the shared exercise catalog, so one account can't choose the labels other users see. Users who never labelled an exercise see the labels already in the catalog, or none.
+- Deleting an account only removes catalog exercises that account used, so another user's set or program saved at the same moment no longer fails.
+- Every database connection now runs with `STRICT_TRANS_TABLES` added to `sql_mode`, so a value too long or out of range for its column is refused instead of being silently cut and stored. MySQL and MariaDB already default to it, so this only changes servers whose `my.cnf` turned it off.
+
+### Internal
+
+- `bun run test` now refuses to start when `.env` `DB_NAME` is the test database (`TEST_DB_NAME`). The suite drops that database, so it was erasing the dev server's accounts on every run.
+- The test database now defaults to the `.env` `DB_NAME` plus `_test` instead of `owngains_test`.
+- Removed `tsx`. Added `bunfig.toml` with `[run] bun = true`, so tool shims (vitest, tsc-alias) run on Bun too, and moved `release.sh`, `changelog.mjs` and the `.claude/` hooks off `node`.
+- Added data-isolation regression tests (`exportIsolation.test.ts`, `suspendedTarget.test.ts`, plus cases in `exerciseCatalog.test.ts` and `auth.routes.test.ts`).
+- Added data-loss regression tests (`workouts/__tests__/dataLoss.test.ts`, `auth/__tests__/unconsentedPurge.test.ts`).
+- Moved `purgeUnconsentedAccounts` to `user.model.ts`, which now builds its "holds no data" check from the schema's user-owned tables.
+- Deleted `report.html`, a k6 load-test report committed by mistake.
+- Replaced every explicit `any` in `src/` (models and tests) with concrete types. `getMetricGroups` now returns its metrics under `values` instead of as loose top-level keys.
+
 ## [0.3.0] - 2026-10-06
 
 ### Changed
@@ -84,7 +125,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.2.0
 [0.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.1.2

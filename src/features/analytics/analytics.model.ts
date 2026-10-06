@@ -26,7 +26,7 @@ export async function getAnalytics(
     LEFT JOIN workout_sets ws ON w.id = ws.workout_id
     WHERE w.user_id = ? AND w.end_time IS NOT NULL AND w.is_demo = 0
       AND w.start_time >= (NOW() - INTERVAL ? DAY)`
-  const params: any[] = [userId, days]
+  const params: (string | number)[] = [userId, days]
   if (split) {
     q += ` AND w.split = ?`
     params.push(split)

@@ -3,6 +3,7 @@ import { main } from "../owngains.js"
 import { uniqueName } from "../tests/helpers.js"
 import { createUser } from "../features/auth/auth.model.js"
 import { reportUser } from "../features/social/friends/friends.model.js"
+import type { RowDataPacket } from "mysql2"
 import { pool } from "../config/database.js"
 
 async function runCli(args: string[]): Promise<{ code: number; out: string }> {
@@ -44,8 +45,8 @@ describe("owngains CLI", () => {
     expect(add.code).toBe(0)
     expect(add.out).toContain(`admin=true`)
 
-    let [rows] = await pool.query("SELECT is_admin FROM users WHERE username = ?", [username])
-    expect((rows as any[])[0].is_admin).toBe(1)
+    let [rows] = await pool.query<(RowDataPacket & { is_admin: number })[]>("SELECT is_admin FROM users WHERE username = ?", [username])
+    expect(rows[0]!.is_admin).toBe(1)
 
     // Removing the last admin is refused, since this CLI is the only way back in.
     // Other test files share this database and may have made their own admins
@@ -54,11 +55,11 @@ describe("owngains CLI", () => {
     // The demotion is database-wide, so the admins other files made are put
     // back straight after the one CLI call that needs it. Left demoted, the
     // admin and metrics suites running in parallel failed with 403s.
-    const [others] = await pool.query(
+    const [others] = await pool.query<(RowDataPacket & { id: number })[]>(
       "SELECT id FROM users WHERE is_admin = 1 AND username <> ?",
       [username],
     )
-    const otherIds = (others as any[]).map((r) => r.id)
+    const otherIds = others.map((r) => r.id)
     await pool.query("UPDATE users SET is_admin = 0 WHERE username <> ?", [username])
     let lastOne: Awaited<ReturnType<typeof runCli>>
     try {
@@ -78,8 +79,8 @@ describe("owngains CLI", () => {
     expect(remove.code).toBe(0)
     expect(remove.out).toContain(`admin=false`)
 
-    ;[rows] = await pool.query("SELECT is_admin FROM users WHERE username = ?", [username])
-    expect((rows as any[])[0].is_admin).toBe(0)
+    ;[rows] = await pool.query<(RowDataPacket & { is_admin: number })[]>("SELECT is_admin FROM users WHERE username = ?", [username])
+    expect(rows[0]!.is_admin).toBe(0)
   })
 
   it("create validates input, creates the user, and refuses duplicates", async () => {
@@ -94,8 +95,8 @@ describe("owngains CLI", () => {
     // 8 characters, no digit or letter required.
     const ok = await runCli(["create", username, email, "!!!!!!!!", "--admin"])
     expect(ok.code).toBe(0)
-    const [rows] = await pool.query("SELECT is_admin FROM users WHERE username = ?", [username])
-    expect((rows as any[])[0].is_admin).toBe(1)
+    const [rows] = await pool.query<(RowDataPacket & { is_admin: number })[]>("SELECT is_admin FROM users WHERE username = ?", [username])
+    expect(rows[0]!.is_admin).toBe(1)
 
     expect((await runCli(["create", username, email, "Valid12345"])).code).toBe(1)
   })
@@ -112,8 +113,8 @@ describe("owngains CLI", () => {
     expect(ok.code).toBe(0)
     expect(ok.out).toContain("All existing sessions were signed out")
 
-    const [rows] = await pool.query("SELECT password_hash FROM users WHERE username = ?", [username])
-    const hash = (rows as any[])[0].password_hash as string
+    const [rows] = await pool.query<(RowDataPacket & { password_hash: string })[]>("SELECT password_hash FROM users WHERE username = ?", [username])
+    const hash = rows[0]!.password_hash
     const bcrypt = (await import("bcrypt")).default ?? (await import("bcrypt"))
     expect(await bcrypt.compare("NewPass9999", hash)).toBe(true)
   })
@@ -137,9 +138,9 @@ describe("owngains CLI", () => {
     const b = uniqueName("rep-b")
     await createUser(a, `${a}@test.local`, "Passw0rd-123")
     await createUser(b, `${b}@test.local`, "Passw0rd-123")
-    const [rep] = await pool.query("SELECT id FROM users WHERE username = ?", [a])
-    const [repd] = await pool.query("SELECT id FROM users WHERE username = ?", [b])
-    await reportUser((rep as any[])[0].id, (repd as any[])[0].id, "spam", "test report")
+    const [rep] = await pool.query<(RowDataPacket & { id: number })[]>("SELECT id FROM users WHERE username = ?", [a])
+    const [repd] = await pool.query<(RowDataPacket & { id: number })[]>("SELECT id FROM users WHERE username = ?", [b])
+    await reportUser(rep[0]!.id, repd[0]!.id, "spam", "test report")
 
     const reports = await runCli(["reports"])
     expect(reports.code).toBe(0)

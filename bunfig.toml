@@ -1,0 +1,3 @@
+# Every package.json script and bin shim that calls `node` runs on Bun instead.
+[run]
+bun = true

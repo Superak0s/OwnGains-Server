@@ -270,10 +270,15 @@ export async function deleteMeasurement(
 }
 
 /**
- * A session from getMetricGroups: id, measuredAt, note, then one number-or-null
- * per alias (typed loosely, as the RowDataPacket it replaces was).
+ * A session from getMetricGroups: id, measuredAt, note, and one number-or-null
+ * per requested alias in `values`.
  */
-type MetricGroup = { id: number; measuredAt: string; note: string | null; [alias: string]: any }
+type MetricGroup = {
+  id: number
+  measuredAt: string
+  note: string | null
+  values: Record<string, number | null>
+}
 
 /**
  * One row per measuring session, with the requested metrics pivoted into
@@ -337,16 +342,16 @@ export async function getMetricGroups(
   for (const r of rows) {
     let g = groups.get(r.measuredAt)
     if (!g) {
-      g = { id: r.id, measuredAt: r.measuredAt, note: null } as MetricGroup
-      for (const a of aliases) g[a] = null
+      g = { id: r.id, measuredAt: r.measuredAt, note: null, values: {} }
+      for (const a of aliases) g.values[a] = null
       groups.set(r.measuredAt, g)
     }
     if (r.id < g.id) g.id = r.id
     if (r.note != null && (g.note == null || r.note > g.note)) g.note = r.note
     for (const a of aliases) {
       if (metrics[a] !== r.metric) continue
-      const current = g[a] as number | null
-      if (current == null || r.value > current) g[a] = r.value
+      const current = g.values[a]
+      if (current == null || r.value > current) g.values[a] = r.value
     }
   }
   return [...groups.values()]

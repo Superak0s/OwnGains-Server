@@ -14,8 +14,8 @@ import { purgeExpiredIdempotencyKeys } from "../middleware/idempotency.js"
 import {
   purgeDeletedAccounts,
   purgeExpiredRefreshTokens,
-  purgeUnconsentedAccounts,
 } from "../features/auth/auth.model.js"
+import { purgeUnconsentedAccounts } from "../features/auth/user.model.js"
 import { purgeStaleThrottles } from "../features/auth/throttle.model.js"
 import { purgeJointSessions } from "../features/social/sharing/sharing.model.js"
 import {
@@ -60,10 +60,9 @@ export async function runStaleSessionCleanup(): Promise<void> {
     const ended = await endStaleSessions(INACTIVITY_THRESHOLD_MINUTES)
     if (ended.length > 0) {
       logger.info(`[SESSION_CLEANUP] Auto-ended ${ended.length} session(s)`)
-      // Tell the owner's device. Without this the app's first sign that the
-      // workout is gone is a 404 on the next set it posts, and that set is
-      // lost, because recordSetTiming's ownership guard includes end_time IS
-      // NULL. A user with no open socket misses it and re-syncs on next launch.
+      // Tell the owner's device, so it can show the workout as ended. A set it
+      // still posts is kept: recordSetTiming accepts it and moves end_time
+      // forward. A user with no open socket misses it and re-syncs on next launch.
       // Only workouts this sweep actually ended are listed.
       for (const { id, userId } of ended)
         sendToUser(userId, "session_auto_ended", { sessionId: id })

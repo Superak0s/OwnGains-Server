@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const c=(JSON.parse(s||'{}').tool_input||{}).command||'';if(c.includes('release.sh'))console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'deny',permissionDecisionReason:'scripts/release.sh pushes to origin main and publishes to Docker Hub. Releases are run by the user, not by Claude.'}}))})\""
+            "command": "bun -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const c=(JSON.parse(s||'{}').tool_input||{}).command||'';if(c.includes('release.sh'))console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'deny',permissionDecisionReason:'scripts/release.sh pushes to origin main and publishes to Docker Hub. Releases are run by the user, not by Claude.'}}))})\""
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.mjs\""
+            "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.mjs\""
           }
         ]
       }
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "statusMessage": "Typechecking...",
-            "command": "f=$(node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s||'{}').tool_input||{};process.stdout.write(t.file_path||'')})\"); case \"$f\" in *.ts) out=$(bunx tsc --noEmit 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 2; } ;; esac"
+            "command": "f=$(bun -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s||'{}').tool_input||{};process.stdout.write(t.file_path||'')})\"); case \"$f\" in *.ts) out=$(bunx tsc --noEmit 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 2; } ;; esac"
           }
         ]
       }

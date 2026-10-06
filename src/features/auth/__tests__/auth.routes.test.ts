@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import request from "supertest"
-import { app, signup, auth } from "../../../tests/helpers.js"
+import { app, signup, auth, uniqueName } from "../../../tests/helpers.js"
+import type { ResultSetHeader, RowDataPacket } from "mysql2"
 import { pool } from "@/config/database.js"
 import { purgeDeletedAccounts } from "../auth.model.js"
 
@@ -111,18 +112,6 @@ describe("auth routes", () => {
     const res = await request(app).post("/api/auth/refresh").set(auth(u.token))
     expect(res.status).toBe(401)
     expect(res.body.code).toBe("REFRESH_TOKEN_REQUIRED")
-  })
-
-  it("POST /refresh keeps the legacy bearer path behind AUTH_LEGACY_REFRESH", async () => {
-    process.env.AUTH_LEGACY_REFRESH = "true"
-    try {
-      const res = await request(app).post("/api/auth/refresh").set(auth(u.token))
-      expect(res.status).toBe(200)
-      const me = await request(app).get("/api/auth/me").set(auth(res.body.token))
-      expect(me.status).toBe(200)
-    } finally {
-      delete process.env.AUTH_LEGACY_REFRESH
-    }
   })
 
   it("rotates the refresh token, and a replay kills the whole family", async () => {
@@ -437,26 +426,6 @@ describe("auth routes", () => {
     expect(stillIn.status).toBe(200)
   })
 
-  it("DELETE /account/data takes no password only behind AUTH_LEGACY_DATA_WIPE", async () => {
-    const w = await signup("legwipe")
-    process.env.AUTH_LEGACY_DATA_WIPE = "true"
-    try {
-      const res = await request(app)
-        .delete("/api/auth/account/data")
-        .set(auth(w.token))
-        .send({ confirmDelete: "DELETE_ALL_DATA" })
-      expect(res.status).toBe(200)
-      // A password that is sent is still checked.
-      const wrong = await request(app)
-        .delete("/api/auth/account/data")
-        .set(auth(w.token))
-        .send({ confirmDelete: "DELETE_ALL_DATA", password: "WrongPass12" })
-      expect(wrong.status).toBe(403)
-    } finally {
-      delete process.env.AUTH_LEGACY_DATA_WIPE
-    }
-  })
-
   it("Clear All Data keeps the reports the user filed, without their name", async () => {
     const r = await signup("wiperep")
     const t = await signup("wipetgt")
@@ -472,11 +441,11 @@ describe("auth routes", () => {
       .send({ confirmDelete: "DELETE_ALL_DATA", password: r.password })
     expect(wipe.status).toBe(200)
 
-    const [rows] = await pool.query<any[]>(
+    const [rows] = await pool.query<(RowDataPacket & { reporter_id: number | null })[]>(
       "SELECT reporter_id FROM user_reports WHERE details = 'wipe-kept'",
     )
     expect(rows).toHaveLength(1)
-    expect(rows[0].reporter_id).toBeNull()
+    expect(rows[0]!.reporter_id).toBeNull()
   })
 
   // getUserOwnedTables() discovers every table with a user column, so the two
@@ -556,9 +525,37 @@ describe("auth routes", () => {
     expect(me.status).toBe(401)
   })
 
+  it("DELETE /account leaves other users' exercise muscle labels alone", async () => {
+    const keeper = await signup("keeper")
+    const keeperId = (await pool.query<(RowDataPacket & { id: number })[]>("SELECT id FROM users WHERE uuid = ?", [keeper.user.id]))[0][0]!.id
+    const [ex] = await pool.query<ResultSetHeader>("INSERT INTO exercises (name) VALUES (?)", [`Labelled ${keeper.username}`])
+    await pool.query(
+      "INSERT INTO user_exercise_muscles (user_id, exercise_id, primary_muscles) VALUES (?, ?, JSON_ARRAY('chest'))",
+      [keeperId, ex.insertId],
+    )
+
+    const gone = await signup("gone")
+    await request(app).delete("/api/auth/account").set(auth(gone.token)).send({ password: gone.password }).expect(200)
+
+    const [left] = await pool.query<RowDataPacket[]>("SELECT 1 FROM user_exercise_muscles WHERE user_id = ?", [keeperId])
+    expect(left).toHaveLength(1)
+  })
+
+  // Another user's insert can sit between creating the name and attaching it.
+  // Sweeping every orphan deleted that row and failed their insert.
+  it("DELETE /account only sweeps exercises the deleted user referenced", async () => {
+    const [ex] = await pool.query<ResultSetHeader>("INSERT INTO exercises (name) VALUES (?)", [uniqueName("inflight")])
+
+    const gone = await signup("gone")
+    await request(app).delete("/api/auth/account").set(auth(gone.token)).send({ password: gone.password }).expect(200)
+
+    const [left] = await pool.query<RowDataPacket[]>("SELECT 1 FROM exercises WHERE id = ?", [ex.insertId])
+    expect(left).toHaveLength(1)
+  })
+
   it("re-deletes an account that a backup restore brings back", async () => {
     const res = await signup("restored")
-    const [[row]] = await pool.query<any[]>("SELECT * FROM users WHERE uuid = ?", [res.user.id])
+    const [[row]] = await pool.query<RowDataPacket[]>("SELECT * FROM users WHERE uuid = ?", [res.user.id])
 
     await request(app)
       .delete("/api/auth/account")
@@ -569,9 +566,9 @@ describe("auth routes", () => {
     // Simulate restoring a backup taken before the deletion.
     await pool.query("INSERT INTO users SET ?", [row])
     expect(await purgeDeletedAccounts()).toBe(1)
-    const [left] = await pool.query<any[]>("SELECT 1 FROM users WHERE uuid = ?", [res.user.id])
+    const [left] = await pool.query<RowDataPacket[]>("SELECT 1 FROM users WHERE uuid = ?", [res.user.id])
     expect(left).toHaveLength(0)
-    const [tomb] = await pool.query<any[]>("SELECT 1 FROM deleted_accounts WHERE uuid = ?", [res.user.id])
+    const [tomb] = await pool.query<RowDataPacket[]>("SELECT 1 FROM deleted_accounts WHERE uuid = ?", [res.user.id])
     expect(tomb).toHaveLength(1)
   })
 })

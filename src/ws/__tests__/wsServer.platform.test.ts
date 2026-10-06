@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken"
 import WebSocket, { type WebSocketServer } from "ws"
 import { createWsServer, sendToUser, type WsServerOptions } from "../wsServer.js"
 import { createUser, findUserById } from "../../features/auth/auth.model.js"
+import type { ResultSetHeader, RowDataPacket } from "mysql2"
 import { pool } from "../../config/database.js"
 import { uniqueName } from "../../tests/helpers.js"
 
@@ -52,7 +53,9 @@ function connect(port: number, headers: Record<string, string> = {}): Promise<We
   })
 }
 
-function nextMessage(ws: WebSocket, timeoutMs = 5000): Promise<any> {
+type WsMessage = { type: string; [key: string]: unknown }
+
+function nextMessage(ws: WebSocket, timeoutMs = 5000): Promise<WsMessage> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timed out waiting for message")), timeoutMs)
     ws.once("message", (raw) => {
@@ -265,17 +268,17 @@ describe("leave_joint_session", () => {
     const a = await makeUser()
     const b = await makeUser()
     const [[ra], [rb]] = await Promise.all(
-      [a, b].map((u) => pool.execute<any[]>("SELECT id FROM users WHERE uuid = ?", [u.userId])),
+      [a, b].map((u) => pool.execute<(RowDataPacket & { id: number })[]>("SELECT id FROM users WHERE uuid = ?", [u.userId])),
     )
-    const [js] = await pool.execute<any>("INSERT INTO joint_sessions (created_by) VALUES (?)", [ra[0].id])
+    const [js] = await pool.execute<ResultSetHeader>("INSERT INTO joint_sessions (created_by) VALUES (?)", [ra[0]!.id])
     await pool.execute(
       "INSERT INTO joint_session_participants (joint_session_id, user_id) VALUES (?, ?), (?, ?)",
-      [js.insertId, ra[0].id, js.insertId, rb[0].id],
+      [js.insertId, ra[0]!.id, js.insertId, rb[0]!.id],
     )
 
     const wsA = await authed(port, a.token)
     const wsB = await authed(port, b.token)
-    const got: any[] = []
+    const got: WsMessage[] = []
     const both = new Promise<void>((resolve) =>
       wsB.on("message", (raw) => {
         got.push(JSON.parse(raw.toString()))
@@ -286,8 +289,8 @@ describe("leave_joint_session", () => {
     await both
 
     expect(got.map((m) => m.type).sort()).toEqual(["invite_status", "joint_session_ended"])
-    expect(got.find((m) => m.type === "invite_status").status).toBe("session_ended")
-    const [rows] = await pool.execute<any[]>("SELECT status FROM joint_sessions WHERE id = ?", [js.insertId])
-    expect(rows[0].status).toBe("ended")
+    expect(got.find((m) => m.type === "invite_status")?.status).toBe("session_ended")
+    const [rows] = await pool.execute<(RowDataPacket & { status: string })[]>("SELECT status FROM joint_sessions WHERE id = ?", [js.insertId])
+    expect(rows[0]!.status).toBe("ended")
   })
 })

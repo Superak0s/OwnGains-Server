@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import request from "supertest"
 import { app, signup, auth } from "../../../tests/helpers.js"
+import type { RowDataPacket } from "mysql2"
+import { pool } from "../../../config/database.js"
 
 describe("workout lifecycle", () => {
   let a: Awaited<ReturnType<typeof signup>>
@@ -48,8 +50,8 @@ describe("workout lifecycle", () => {
       .send({ endTime: 12345 })
     expect(notADate.status).toBe(400)
 
-    // A set posted after the end is a conflict the client can reconcile, not a
-    // silent append into a finished workout.
+    // A set posted after the end is kept (an offline phone replaying its
+    // queue), and the workout's end moves forward to cover it.
     const late = await request(app)
       .post(`/api/sessions/${id}/set`)
       .set(auth(a.token))
@@ -61,8 +63,15 @@ describe("workout lifecycle", () => {
         weight: 60,
         reps: 8,
       })
-    expect(late.status).toBe(409)
-    expect(late.body.code).toBe("SESSION_ALREADY_ENDED")
+    expect(late.status).toBe(200)
+    const [[row]] = await pool.execute<(RowDataPacket & { end_time: string; completed_sets: number })[]>(
+      "SELECT end_time, completed_sets FROM workouts WHERE id = ?",
+      [id],
+    )
+    expect(new Date(`${row.end_time}Z`).getTime()).toBeGreaterThanOrEqual(
+      Date.parse("2024-02-01T09:00:30Z"),
+    )
+    expect(row.completed_sets).toBeGreaterThanOrEqual(1)
   })
 
   it("rejects an end before the workout started", async () => {

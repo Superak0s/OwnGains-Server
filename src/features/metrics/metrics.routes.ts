@@ -26,8 +26,6 @@ const config = {
   mdnsEnabled: envBool("MDNS_ENABLED", true),
   serverFqdn: process.env.SERVER_FQDN || null,
   bootstrapAdminSet: !!process.env.BOOTSTRAP_ADMIN_USERNAME,
-  authLegacyRefresh: process.env.AUTH_LEGACY_REFRESH === "true",
-  authLegacyDataWipe: process.env.AUTH_LEGACY_DATA_WIPE === "true",
   metricsPageEnabled,
 }
 

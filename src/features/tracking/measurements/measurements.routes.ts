@@ -129,12 +129,7 @@ router.get("/", async (req: Request, res: Response) => {
   )
   res.json({
     success: true,
-    data: rows.map(({ id, measuredAt, note, ...values }) => ({
-      id,
-      measuredAt,
-      note,
-      values,
-    })),
+    data: rows,
   })
 })
 

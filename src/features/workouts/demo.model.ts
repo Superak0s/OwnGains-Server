@@ -330,7 +330,9 @@ async function insertTracking(conn: PoolConnection, userId: number, now: number)
 
 async function deleteDemoData(conn: PoolConnection, userId: number) {
   await conn.execute(
-    `UPDATE users SET height_cm = NULL WHERE id = ? AND EXISTS
+    // Only while it still holds the demo's 178: a height the user entered
+    // after the fill is theirs.
+    `UPDATE users SET height_cm = NULL WHERE id = ? AND height_cm = 178 AND EXISTS
        (SELECT 1 FROM demo_rows WHERE user_id = ? AND table_name = 'users')`,
     [userId, userId],
   )

@@ -155,7 +155,7 @@ describe("soreness routes", () => {
     expect(byPath.body.data).toHaveLength(2)
 
     const byQuery = await request(app).get("/api/tracking/soreness?muscle=calves").set(auth(s2.token))
-    expect(byQuery.body.data.map((e: any) => e.muscleGroup)).toEqual(["calves"])
+    expect(byQuery.body.data.map((e: { muscleGroup: string }) => e.muscleGroup)).toEqual(["calves"])
 
     const activeQuads = await request(app)
       .get("/api/tracking/soreness?muscle=quads&status=active")

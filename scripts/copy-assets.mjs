@@ -1,4 +1,4 @@
-// Copies the non-TS runtime files into dist/. Plain Node so `bun run build` works on Windows too (Bun's shell cp has no -r).
+// Copies the non-TS runtime files into dist/. A script rather than a cp line because Bun's shell cp has no -r on Windows.
 import { cpSync, mkdirSync } from "node:fs";
 
 mkdirSync("dist/config", { recursive: true });

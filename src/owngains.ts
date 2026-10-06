@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /*
   owngains.ts
   Operator CLI: list users, grant/revoke admin, reset passwords, read reports,
@@ -8,7 +8,7 @@
     bun run owngains add <username>
     bun run owngains remove <username>
   Usage (docker, after build):
-    docker exec <container> node dist/owngains.js list
+    docker exec <container> owngains list
 */
 
 
@@ -288,6 +288,12 @@ export async function main(): Promise<number> {
       if (sub === "prune") {
         const pruned = await pruneBackups()
         console.log(pruned.length ? `Deleted ${pruned.join(", ")}` : "Nothing to prune")
+        // Every backup was past retention, so none has been written lately.
+        // Exit non-zero so a cron job reports it.
+        if (!(await listBackups()).length) {
+          console.error(`No backups left in ${backupDir()}: check that backup create is running`)
+          return 1
+        }
         return 0
       }
       if ((sub === "verify" || sub === "restore") && args[2] && args[2] !== "--identity") {
@@ -304,8 +310,14 @@ export async function main(): Promise<number> {
           )
           return 2
         }
+        // A truncated dump would drop every table and then stop partway, so
+        // check it first. The current database is backed up before it's
+        // replaced, so restoring the wrong file can itself be undone.
+        await verifyBackup(path, identity)
+        const before = await createBackup()
+        console.log(`Saved the current database to ${before}`)
         await restoreBackup(path, identity)
-        logger.warn("[AUDIT] cli backup restore", { path })
+        logger.warn("[AUDIT] cli backup restore", { path, before })
         console.log(`Restored ${path}. Accounts deleted since it was taken are erased again on the next cleanup run.`)
         return 0
       }

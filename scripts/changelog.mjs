@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // CHANGELOG.md helpers for scripts/release.sh.
 //
-//   node scripts/changelog.mjs check <version>          exit 0 if [Unreleased] has entries,
+//   bun scripts/changelog.mjs check <version>          exit 0 if [Unreleased] has entries,
 //                                                        2 if it is empty, 1 on error
-//   node scripts/changelog.mjs stamp <version> <date>   rename [Unreleased] to [<version>] - <date>,
+//   bun scripts/changelog.mjs stamp <version> <date>   rename [Unreleased] to [<version>] - <date>,
 //                                                        add a fresh [Unreleased] and fix the links
-//   node scripts/changelog.mjs notes <version> <file>   write that version's section to <file>;
+//   bun scripts/changelog.mjs notes <version> <file>   write that version's section to <file>;
 //                                                        exit 2 if it is missing or empty
 import fs from "node:fs";
 import path from "node:path";

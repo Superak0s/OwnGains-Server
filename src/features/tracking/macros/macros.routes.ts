@@ -79,9 +79,7 @@ router.post("/log", idempotent, async (req: Request, res: Response) => {
     note,
   )
 
-  // 201, like the other tracking creates (POST /bodystats/bodyfat/log still
-  // answers 200, kept for app builds that check for it). `entry` is the legacy
-  // key. See the note on the envelope in bodyStats.routes.ts.
+  // `entry` is the legacy key. See the note on the envelope in bodyStats.routes.ts.
   res.status(201).json({ success: true, data: entry, entry })
 })
 

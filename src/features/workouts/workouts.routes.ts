@@ -39,13 +39,10 @@ import { getLiveAudience } from "../social/sharing/sharing.model.js"
 const router: Router = Router()
 
 /**
- * Page size ceiling for GET /api/sessions?includeTimings=true. Defaults to the
- * old 1000 because the app's offline migration (SettingsScreen.migrateUserData)
- * still asks for 1000 at once and doesn't follow `nextCursor` yet, so a lower cap
- * would silently drop older history. Set HISTORY_TIMINGS_MAX=100 on a public
- * instance once the app pages. Read per request so a test can change it.
+ * Page size ceiling for GET /api/sessions?includeTimings=true. The app follows
+ * `nextCursor`, so 100 is enough. Read per request so a test can change it.
  */
-const historyTimingsMax = () => envInt("HISTORY_TIMINGS_MAX", 1000, 1)
+const historyTimingsMax = () => envInt("HISTORY_TIMINGS_MAX", 100, 1)
 
 router.use(authenticateToken, applyTrainerContext, healthConsentGuard)
 
@@ -201,6 +198,7 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
     secondaryMuscles ?? [],
     machineName || null,
     rir ?? null,
+    { openWorkoutOnly: !!req.trainer },
   )
 
   // Watchers get just the set that was recorded. The old push re-read the

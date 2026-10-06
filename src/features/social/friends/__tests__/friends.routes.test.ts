@@ -4,6 +4,7 @@ import request from "supertest"
 import { app, signup, auth, internalId, uniqueName } from "../../../../tests/helpers.js"
 import { findUserByUsername } from "../../../../features/auth/auth.model.js"
 import { MAX_PENDING_SENT } from "../friends.model.js"
+import type { ResultSetHeader } from "mysql2"
 import { pool } from "../../../../config/database.js"
 
 describe("friends routes", () => {
@@ -27,13 +28,13 @@ describe("friends routes", () => {
       .get(`/api/friends/search?q=${b.username.slice(0, -1)}`)
       .set(auth(a.token))
     expect(res.status).toBe(200)
-    expect(res.body.users.some((u: any) => u.username === b.username)).toBe(true)
+    expect(res.body.users.some((u: { username: string }) => u.username === b.username)).toBe(true)
 
     // Infix and real-name matches are gone: those made search a member directory.
     const infix = await request(app)
       .get(`/api/friends/search?q=${b.username.slice(-4)}`)
       .set(auth(a.token))
-    expect(infix.body.users.some((u: any) => u.username === b.username)).toBe(false)
+    expect(infix.body.users.some((u: { username: string }) => u.username === b.username)).toBe(false)
 
     // A LIKE wildcard in the term is a literal, not a pattern.
     const wild = await request(app).get("/api/friends/search?q=%25%25%25").set(auth(a.token))
@@ -107,7 +108,7 @@ describe("friends routes", () => {
     expect(accept.status).toBe(200)
 
     const friends = await request(app).get("/api/friends").set(auth(a.token))
-    expect(friends.body.friends.some((f: any) => f.username === b.username)).toBe(true)
+    expect(friends.body.friends.some((f: { username: string }) => f.username === b.username)).toBe(true)
   })
 
   it("lets the receiver reject a request", async () => {
@@ -170,11 +171,11 @@ describe("friends routes", () => {
     const ids: number[] = []
     for (let i = 0; i < MAX_PENDING_SENT; i++) {
       const name = uniqueName("capr")
-      const [res] = await pool.query(
+      const [res] = await pool.query<ResultSetHeader>(
         "INSERT INTO users (uuid, username, email, password_hash, name) VALUES (UUID(), ?, ?, 'x', ?)",
         [name, `${name}@test.local`, name],
       )
-      ids.push((res as any).insertId)
+      ids.push(res.insertId)
     }
     await pool.query(
       `INSERT INTO friendships (user_id, friend_id, requested_by)
@@ -229,7 +230,7 @@ describe("friends routes", () => {
     expect(block.status).toBe(200)
 
     const blocked = await request(app).get("/api/friends/blocked").set(auth(b.token))
-    expect(blocked.body.blocked.some((u: any) => u.username === a.username)).toBe(true)
+    expect(blocked.body.blocked.some((u: { username: string }) => u.username === a.username)).toBe(true)
 
     const unblock = await request(app)
       .delete(`/api/friends/block/${aRow!.uuid}`)
@@ -253,7 +254,7 @@ describe("friends routes", () => {
       .set(auth(a.token))
       .send({ username: b.username })
     const pending = await request(app).get("/api/friends/requests/pending").set(auth(b.token))
-    const fromA = pending.body.requests.find((r: any) => r.username === a.username)
+    const fromA = pending.body.requests.find((r: { username: string }) => r.username === a.username)
     if (fromA)
       await request(app).post(`/api/friends/request/${fromA.friendshipId}/accept`).set(auth(b.token))
 
@@ -264,7 +265,7 @@ describe("friends routes", () => {
     expect(del.status).toBe(200)
 
     const friends = await request(app).get("/api/friends").set(auth(a.token))
-    expect(friends.body.friends.some((f: any) => f.username === b.username)).toBe(false)
+    expect(friends.body.friends.some((f: { username: string }) => f.username === b.username)).toBe(false)
   })
 
   // Regression: unfriending used to delete only the friendship row, leaving
@@ -285,7 +286,7 @@ describe("friends routes", () => {
       .get("/api/friends/requests/pending")
       .set(auth(trainer.token))
     const req = pending.body.requests.find(
-      (r: any) => r.username === trainee.username,
+      (r: { username: string }) => r.username === trainee.username,
     )
     await request(app)
       .post(`/api/friends/request/${req.friendshipId}/accept`)
@@ -314,7 +315,7 @@ describe("friends routes", () => {
       .get("/api/sharing/permissions/granted")
       .set(auth(trainee.token))
     expect(
-      granted.body.permissions.some((p: any) => p.permissionType === "trainer"),
+      granted.body.permissions.some((p: { permissionType: string }) => p.permissionType === "trainer"),
     ).toBe(false)
 
     // and trainer mode no longer resolves

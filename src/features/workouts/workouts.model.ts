@@ -149,43 +149,6 @@ export function parseMuscleGroups(raw: unknown): string[] {
 }
 
 /**
- * `exercises` is shared by everyone on the instance and keyed by name, so the
- * first client to log a name decides its muscle groups. When that client sent
- * none, the row remains label-less forever even though every later log has
- * them, so fill in the blanks.
- *
- * Only the blanks: overwriting a non-empty value would relabel the exercise
- * under every other user's history. That is the same reason
- * renameExerciseInHistory re-points rows instead of mutating the shared one.
- */
-export async function backfillMuscles(
-  row: RowDataPacket,
-  primaryMuscles: string[],
-  secondaryMuscles: string[],
-  db: Queryable = pool,
-): Promise<void> {
-  const fills: string[] = []
-  const params: string[] = []
-  if (!parseMuscleGroups(row.primaryMuscles).length && primaryMuscles.length) {
-    fills.push("primary_muscles = ?")
-    params.push(JSON.stringify(primaryMuscles))
-  }
-  if (
-    !parseMuscleGroups(row.secondaryMuscles).length &&
-    secondaryMuscles.length
-  ) {
-    fills.push("secondary_muscles = ?")
-    params.push(JSON.stringify(secondaryMuscles))
-  }
-  if (fills.length === 0) return
-
-  await db.execute(`UPDATE exercises SET ${fills.join(", ")} WHERE id = ?`, [
-    ...params,
-    row.id,
-  ])
-}
-
-/**
  * Catalog id for a name, creating the row on first sighting. The only copy of
  * this helper: the set paths and the program edits share it.
  *
@@ -207,9 +170,7 @@ export async function findOrCreateExercise(
   // row lock per set, for nothing. The caller's own labels come back with it,
   // so an unchanged label costs no write either.
   const [hit] = await db.execute<RowDataPacket[]>(
-    `SELECT e.id, e.primary_muscles AS primaryMuscles,
-            e.secondary_muscles AS secondaryMuscles,
-            uem.primary_muscles AS ownPrimary,
+    `SELECT e.id, uem.primary_muscles AS ownPrimary,
             uem.secondary_muscles AS ownSecondary
      FROM exercises e
      LEFT JOIN user_exercise_muscles uem ON uem.exercise_id = e.id AND uem.user_id = ?
@@ -217,10 +178,10 @@ export async function findOrCreateExercise(
     [userId ?? 0, name],
   )
   let id: number
+  // A user's labels are stored as their own only, never on the shared row:
+  // the catalog's labels are every other user's fallback, and filling them
+  // from a request let any account choose what everyone else saw.
   if (hit[0]) {
-    // Fill blanks only: the catalog's labels are every other user's fallback,
-    // so overwriting here would relabel the exercise in their history.
-    await backfillMuscles(hit[0], primaryMuscles, secondaryMuscles, db)
     id = hit[0].id
   } else {
     // First sighting of this name. LAST_INSERT_ID(id) makes the duplicate-key
@@ -231,9 +192,9 @@ export async function findOrCreateExercise(
     // connection and return another request's id (or 0), attaching the set to
     // a stranger's exercise.
     const [result] = await db.execute<ResultSetHeader>(
-      `INSERT INTO exercises (name, primary_muscles, secondary_muscles) VALUES (?, ?, ?)
+      `INSERT INTO exercises (name) VALUES (?)
        ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
-      [name, JSON.stringify(primaryMuscles), JSON.stringify(secondaryMuscles)],
+      [name],
     )
     id = result.insertId
   }
@@ -336,6 +297,7 @@ export async function recordSetTiming(
   secondaryMuscles: string[] = [],
   machineName: string | null = null,
   rir: number | null = null,
+  { openWorkoutOnly = false }: { openWorkoutOnly?: boolean } = {},
 ): Promise<RecordSetResult> {
   const start = new Date(startTime)
   const end = new Date(endTime)
@@ -349,28 +311,36 @@ export async function recordSetTiming(
       // exists, not that the caller owns it. completed_sets always changes, so
       // affectedRows === 0 means no such workout for this user, full stop.
       //
-      // end_time IS NULL is part of it: without that guard a set posted after
-      // the workout was ended (by a double-tapped end, or by sessionCleanup
-      // closing a workout the user was mid-rest on) was saved silently inside a
-      // finished workout, with timestamps after its own endTime.
+      // An ended workout still takes the set. sessionCleanup ends a workout
+      // after 30 minutes the server can't see, which is exactly when a phone
+      // with no signal is still logging offline, and the app drops a queued set
+      // the server refuses. A late set moves end_time forward to its own end so
+      // no set sits after its workout's end. Assignments run left to right, so
+      // total_duration sees the new end_time.
       const [owned] = await connection.execute<ResultSetHeader>(
-        `UPDATE workouts SET completed_sets = completed_sets + 1
-         WHERE id = ? AND user_id = ? AND end_time IS NULL`,
-        [sessionId, userId],
+        `UPDATE workouts SET completed_sets = completed_sets + 1,
+           end_time = IF(end_time IS NULL, NULL, GREATEST(end_time, ?)),
+           total_duration = IF(end_time IS NULL, total_duration,
+                               TIMESTAMPDIFF(SECOND, start_time, end_time))
+         WHERE id = ? AND user_id = ?${openWorkoutOnly ? " AND end_time IS NULL" : ""}`,
+        [formatDateForMySQL(endTime), sessionId, userId],
       )
       // Thrown, not rolled back here. The catch below handles the rollback.
       if (owned.affectedRows === 0) {
-        // Which of the two it was decides whether the client should reconcile
-        // (409, the workout is closed) or stop retrying (403, not theirs).
-        const [exists] = await connection.execute<RowDataPacket[]>(
-          `SELECT id FROM workouts WHERE id = ? AND user_id = ?`,
-          [sessionId, userId],
-        )
-        if (exists.length)
-          throw new ConflictError(
-            "Session has already ended",
-            "SESSION_ALREADY_ENDED",
+        // A trainer may only log into the workout in progress. Which of the two
+        // it was decides whether the client should reconcile (409, the workout
+        // is closed) or stop retrying (403, not theirs).
+        if (openWorkoutOnly) {
+          const [exists] = await connection.execute<RowDataPacket[]>(
+            `SELECT id FROM workouts WHERE id = ? AND user_id = ?`,
+            [sessionId, userId],
           )
+          if (exists.length)
+            throw new ConflictError(
+              "Session has already ended",
+              "SESSION_ALREADY_ENDED",
+            )
+        }
         throw new ForbiddenError("Session not found or unauthorized", "SESSION_NOT_FOUND")
       }
 
@@ -786,7 +756,7 @@ export async function getSessionHistory(
       w.completed_sets AS setCount
      ${WORKOUT_FROM} JOIN users u ON w.user_id = u.id
      WHERE w.user_id = ?`
-  const params: any[] = [userId]
+  const params: (string | number)[] = [userId]
   if (split) {
     q += ` AND w.split = ?`
     params.push(split)

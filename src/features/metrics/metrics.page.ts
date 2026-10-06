@@ -796,7 +796,6 @@ pre {
       ["mDNS", c.mdnsEnabled ? "on" : "off"],
       ["Server FQDN", c.serverFqdn || "—"],
       ["Bootstrap admin", c.bootstrapAdminSet ? "set" : "first user"],
-      ["Legacy refresh", c.authLegacyRefresh ? "on" : "off"],
       ["Metrics page", c.metricsPageEnabled ? "on" : "off"],
       ["Slow request threshold", ms(data.http.slowThresholdMs)],
     ])

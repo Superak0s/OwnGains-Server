@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, onTestFinished } from "vitest"
+import { describe, it, expect, beforeAll } from "vitest"
 import request from "supertest"
 import { pool } from "../../../config/database.js"
 import { app, signup, auth, internalId } from "../../../tests/helpers.js"
@@ -52,11 +52,7 @@ describe("GET /api/sessions paging", () => {
     expect(all.body.nextCursor).toBeNull()
   })
 
-  it("caps a page with timings at HISTORY_TIMINGS_MAX and rejects a malformed cursor", async () => {
-    process.env.HISTORY_TIMINGS_MAX = "100"
-    onTestFinished(() => {
-      delete process.env.HISTORY_TIMINGS_MAX
-    })
+  it("caps a page with timings at the HISTORY_TIMINGS_MAX default of 100 and rejects a malformed cursor", async () => {
     const big = await request(app)
       .get("/api/sessions?includeTimings=true&limit=1000")
       .set(auth(u.token))

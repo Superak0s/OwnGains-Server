@@ -236,49 +236,51 @@ function toProgramData(
  * the payload's spelling left the lookup undefined, which mysql2 rejects, so
  * the whole upload 500'd on a casing difference.
  *
- * Muscle groups fill the catalog's blanks only, never overwrite: its labels are
- * every other user's fallback (same rule as backfillMuscles). The uploader's
- * own labels go to user_exercise_muscles.
+ * Muscle groups never reach the catalog: its labels are every other user's
+ * fallback (same rule as findOrCreateExercise). The uploader's own labels go
+ * to user_exercise_muscles.
  */
 async function catalogIds(
+  exercises: Map<
+    string,
+    { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
+  >,
+): Promise<Map<string, number>> {
+  const names = [...exercises.keys()].sort()
+  if (!names.length) return new Map()
+
+  // Autocommit on the pool, before the upload's transaction opens. Inside it,
+  // these shared rows stayed locked until commit, so two users uploading
+  // overlapping exercise names deadlocked and one got a 503. A row left behind
+  // by a failed upload is harmless (it is only a name). Sorted so concurrent
+  // batches take their locks in the same order. Account deletion pruning a row
+  // in the gap before the transaction uses it is the race auth.model.ts
+  // already accepts for findOrCreateExercise.
+  await pool.execute(
+    `INSERT INTO exercises (name) VALUES ${names.map(() => "(?)").join(", ")}
+     ON DUPLICATE KEY UPDATE id = id`,
+    names.map((name) => exercises.get(name)!.name),
+  )
+
+  const [rows] = await pool.execute<
+    (RowDataPacket & { id: number; name: string })[]
+  >(
+    `SELECT id, name FROM exercises WHERE name IN (${names.map(() => "?").join(", ")})`,
+    names.map((n) => exercises.get(n)!.name),
+  )
+  return new Map(rows.map((r) => [catalogKey(r.name), r.id]))
+}
+
+/** The uploader's muscle labels, inside the upload's transaction. */
+async function saveUploadMuscles(
   connection: PoolConnection,
   userId: number,
   exercises: Map<
     string,
     { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
   >,
-): Promise<Map<string, number>> {
-  const names = [...exercises.keys()]
-  if (!names.length) return new Map()
-
-  await connection.execute(
-    `INSERT INTO exercises (name, primary_muscles, secondary_muscles) VALUES
-     ${names.map(() => "(?, ?, ?)").join(", ")}
-     ON DUPLICATE KEY UPDATE
-       primary_muscles = IF(JSON_LENGTH(primary_muscles) = 0
-                            AND JSON_LENGTH(VALUES(primary_muscles)) > 0,
-                            VALUES(primary_muscles), primary_muscles),
-       secondary_muscles = IF(JSON_LENGTH(secondary_muscles) = 0
-                              AND JSON_LENGTH(VALUES(secondary_muscles)) > 0,
-                              VALUES(secondary_muscles), secondary_muscles)`,
-    names.flatMap((name) => {
-      const e = exercises.get(name)!
-      return [
-        e.name,
-        JSON.stringify(e.primaryMuscles),
-        JSON.stringify(e.secondaryMuscles),
-      ]
-    }),
-  )
-
-  const [rows] = await connection.execute<
-    (RowDataPacket & { id: number; name: string })[]
-  >(
-    `SELECT id, name FROM exercises WHERE name IN (${names.map(() => "?").join(", ")})`,
-    names.map((n) => exercises.get(n)!.name),
-  )
-  const ids = new Map(rows.map((r) => [catalogKey(r.name), r.id]))
-
+  ids: Map<string, number>,
+): Promise<void> {
   // The uploader's labels become their own (user_exercise_muscles), whatever
   // the catalog already held. Upload is rare, so this is one unconditional
   // upsert rather than saveOwnMuscles' compare-first dance.
@@ -304,7 +306,6 @@ async function catalogIds(
         ]),
       ],
     )
-  return ids
 }
 
 /**
@@ -363,6 +364,8 @@ export async function upsertProgram(
         })
       }
 
+  const ids = await catalogIds(catalog)
+
   await withTransaction(async (connection) => {
     const [programResult] = await connection.execute<ResultSetHeader>(
       `INSERT INTO programs (user_id, original_filename, split_order)
@@ -373,7 +376,7 @@ export async function upsertProgram(
       [userId, originalFilename, JSON.stringify(programData.split ?? [])],
     )
     const programId = programResult.insertId
-    const ids = await catalogIds(connection, userId, catalog)
+    await saveUploadMuscles(connection, userId, catalog, ids)
 
     // A fixed number of statements whatever the program's size (the route's
     // validator caps that size too): one upsert for every day, one read of

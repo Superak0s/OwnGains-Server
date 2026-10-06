@@ -112,6 +112,17 @@ pool.on("connection", (conn) => {
         (err as Error).message,
       );
   });
+  // Without strict mode a too-long or out-of-range value is silently cut down
+  // and stored with a warning, so a user's data is changed instead of refused.
+  // MySQL and MariaDB default to strict, but a my.cnf can turn it off.
+  connection.query(
+    "SET sql_mode = IF(FIND_IN_SET('STRICT_TRANS_TABLES', @@sql_mode), @@sql_mode, " +
+      "CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'STRICT_TRANS_TABLES'))",
+    (err) => {
+      if (err)
+        logger.warn("Could not enable strict sql_mode:", (err as Error).message)
+    },
+  );
   if (queryTimeoutMs > 0)
     connection.query(statementTimeoutSql(conn, queryTimeoutMs), (err) => {
       if (err)

@@ -16,8 +16,8 @@ async function user(): Promise<number> {
   return createUser(name, `${name}@test.local`, "Passw0rd-123")
 }
 
-async function insert(sql: string, params: unknown[]): Promise<number> {
-  const [r] = await pool.execute<ResultSetHeader>(sql, params as any[])
+async function insert(sql: string, params: (string | number)[]): Promise<number> {
+  const [r] = await pool.execute<ResultSetHeader>(sql, params)
   return r.insertId
 }
 

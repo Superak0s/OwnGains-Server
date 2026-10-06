@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import type { Request } from "express"
 import {
   errorHandler,
   ValidationError,
@@ -11,19 +12,19 @@ import {
 function makeRes() {
   return {
     code: 0 as number,
-    body: null as any,
+    body: {} as Record<string, unknown>,
     status(code: number) {
       this.code = code
       return this
     },
-    json(o: any) {
+    json(o: Record<string, unknown>) {
       this.body = o
       return this
     },
   }
 }
 
-const req = { path: "/api/test", method: "GET", reqId: "test" } as any
+const req = { path: "/api/test", method: "GET", reqId: "test" } as Request
 
 function handle(err: unknown) {
   const res = makeRes()

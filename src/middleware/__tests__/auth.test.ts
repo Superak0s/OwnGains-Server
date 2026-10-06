@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
+import type { Request } from "express"
 import jwt from "jsonwebtoken"
 import { randomUUID } from "node:crypto"
 import { authenticateToken } from "../auth.js"
@@ -6,9 +7,9 @@ import { signup, auth } from "../../tests/helpers.js"
 
 async function run(token?: string) {
   const next = vi.fn()
-  const req: any = {
+  const req = {
     headers: token ? { authorization: `Bearer ${token}` } : {},
-  }
+  } as Request
   await authenticateToken(req, ({} as unknown) as never, next as never)
   return { next, req }
 }
@@ -21,7 +22,7 @@ describe("authenticateToken", () => {
 
   it("rejects a malformed header", async () => {
     const next = vi.fn()
-    const req: any = { headers: { authorization: "Bearer" } }
+    const req = { headers: { authorization: "Bearer" } } as Request
     await authenticateToken(req, ({} as unknown) as never, next as never)
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ message: "Access token required" }))
   })
@@ -62,6 +63,6 @@ describe("authenticateToken", () => {
     const u = await signup("ok")
     const { next, req } = await run(u.token)
     expect(next).toHaveBeenCalledWith()
-    expect(req.user.username).toBe(u.username)
+    expect(req.user!.username).toBe(u.username)
   })
 })

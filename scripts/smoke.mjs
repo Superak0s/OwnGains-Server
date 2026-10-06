@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // End-to-end smoke test against a running server, over real HTTP and WebSocket,
 // using the request shapes the app sends. It signs up a throwaway account and
 // deletes it again at the end, so it is safe to point at a live instance.
 //
-//   node scripts/smoke.mjs [baseUrl] [--min-version x.y.z]
+//   bun scripts/smoke.mjs [baseUrl] [--min-version x.y.z]
 //   bun run smoke http://localhost:5000
 //
 // Exit 0 when every check passes, 1 otherwise.

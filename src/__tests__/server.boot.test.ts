@@ -7,7 +7,7 @@ describe("server boot (integration)", () => {
   // Windows has no real SIGTERM: process.kill terminates the child outright, so
   // the exit code says nothing about shutdown(). Docker/CI run Linux anyway.
   it.skipIf(process.platform === "win32")("boots and shuts down cleanly on SIGTERM", async () => {
-    const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
+    const child = spawn(process.execPath, ["src/server.ts"], {
       cwd: process.cwd(),
       env: { ...process.env, PORT: "18391" },
       stdio: ["ignore", "pipe", "pipe"],

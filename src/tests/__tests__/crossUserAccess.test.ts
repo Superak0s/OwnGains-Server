@@ -350,7 +350,7 @@ describe("cross-user writes and deletes are denied", () => {
       .get("/api/tracking/supplements")
       .set(auth(victim.token))
     expect(list.status).toBe(200)
-    const kept = list.body.supplements.find((s: any) => s.id === v.supplementId)
+    const kept = list.body.supplements.find((s: { id: number }) => s.id === v.supplementId)
     expect(kept?.name).toBe("Vitamin D")
 
     const log = await request(app)

@@ -78,6 +78,6 @@ describe("macros routes", () => {
     expect(replay.body.entry.id).toBe(first.body.entry.id)
 
     const list = await request(app).get("/api/tracking/macros/log?days=2").set(auth(u.token))
-    expect(list.body.data.filter((e: any) => e.name === "snack")).toHaveLength(1)
+    expect(list.body.data.filter((e: { name: string }) => e.name === "snack")).toHaveLength(1)
   })
 })

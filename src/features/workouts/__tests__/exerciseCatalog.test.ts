@@ -114,7 +114,7 @@ describe("exercise catalog", () => {
 describe("per-user muscle labels", () => {
   // The catalog is shared by name, and its muscle columns used to be too:
   // whoever labelled an exercise first chose what everyone saw.
-  it("shows each user their own labels, falling back to the catalog's", async () => {
+  it("shows each user their own labels and never writes them to the catalog", async () => {
     const name = uniqueName("lbl")
     const first = await signup("lbla")
     const second = await signup("lblb")
@@ -146,8 +146,8 @@ describe("per-user muscle labels", () => {
     expect(await logOne(first, ["calves"])).toEqual(["calves"])
     // The second user's own labels win for them, and don't touch the first's.
     expect(await logOne(second, ["chest"])).toEqual(["chest"])
-    // Someone who never labelled it sees the catalog's (first-come) labels.
-    expect(await logOne(unlabelled)).toEqual(["calves"])
+    // Someone who never labelled it sees none of theirs.
+    expect(await logOne(unlabelled)).toEqual([])
 
     const history = await request(app).get("/api/sessions?includeTimings=true").set(auth(first.token))
     expect(history.body.sessions[0].setTimings[0].exercisePrimaryMuscles).toEqual(["calves"])

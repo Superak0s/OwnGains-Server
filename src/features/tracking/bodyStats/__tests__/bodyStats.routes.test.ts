@@ -53,7 +53,7 @@ describe("bodyStats routes", () => {
       .post("/api/tracking/bodystats/bodyfat/log")
       .set(auth(u.token))
       .send({ percentage: 21.4, measurements: null, measuredAt: "2026-01-05T07:00:00.000Z" })
-    expect(pctOnly.status).toBe(200)
+    expect(pctOnly.status).toBe(201)
     expect(pctOnly.body.entry.measurements).toMatchObject({ waist: null, neck: null, hip: null })
     const pctOnlyHistory = await request(app).get("/api/tracking/bodystats/bodyfat/log").set(auth(u.token))
     expect(pctOnlyHistory.body.entries[0]).toMatchObject({
@@ -84,7 +84,7 @@ describe("bodyStats routes", () => {
       .post("/api/tracking/bodystats/bodyfat/log")
       .set(auth(u.token))
       .send({ percentage: 15, measurements: { waist: 80, neck: 38, unit: "cm" } })
-    expect(ok.status).toBe(200)
+    expect(ok.status).toBe(201)
     const id = ok.body.entry.id
 
     const history = await request(app).get("/api/tracking/bodystats/bodyfat/log").set(auth(u.token))

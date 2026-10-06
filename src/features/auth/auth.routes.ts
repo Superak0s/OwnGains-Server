@@ -256,10 +256,6 @@ router.put("/profile", authenticateToken, validateProfileUpdate, async (req: Req
  * so it can't be triggered accidentally, and the current password for the
  * same reason DELETE /account does: a stolen phone already has a valid token,
  * and nothing brings the data back.
- *
- * App builds that predate the password prompt send none. An operator with
- * such builds in the field can accept that with AUTH_LEGACY_DATA_WIPE=true
- * until they are gone.
  */
 router.delete("/account/data", authenticateToken, validateRequired(["confirmDelete"]), async (req: Request, res: Response) => {
   if (req.body.confirmDelete !== "DELETE_ALL_DATA") {
@@ -267,10 +263,9 @@ router.delete("/account/data", authenticateToken, validateRequired(["confirmDele
       'Must confirm deletion with confirmDelete: "DELETE_ALL_DATA"',
     )
   }
-  if (req.body.password !== undefined)
-    await requireCurrentPassword(req, res, req.body.password)
-  else if (process.env.AUTH_LEGACY_DATA_WIPE !== "true")
+  if (req.body.password === undefined)
     throw new ValidationError("password is required", null, "PASSWORD_REQUIRED")
+  await requireCurrentPassword(req, res, req.body.password)
 
   await deleteAllUserData(req.user!.id)
 
@@ -305,25 +300,10 @@ router.delete("/account", authenticateToken, validateRequired(["password"]), asy
 router.post("/refresh", async (req: Request, res: Response) => {
   const presented = req.body?.refreshToken
 
-  if (typeof presented !== "string" || !presented) {
-    // Legacy path: the access token refreshing itself, for app builds that
-    // predate refresh tokens. Off by default, since it let a stolen 15-minute
-    // token renew itself forever, invisible to reuse detection. An operator
-    // with such builds still in the field can opt back in with
-    // AUTH_LEGACY_REFRESH=true until they are gone.
-    if (process.env.AUTH_LEGACY_REFRESH !== "true")
-      throw new UnauthorizedError(
-        "Refresh token required",
-        "REFRESH_TOKEN_REQUIRED",
-      )
-    await new Promise<void>((resolve, reject) =>
-      authenticateToken(req, res, (err) => (err ? reject(err) : resolve())),
-    )
-    return res.json({
-      success: true,
-      token: generateToken(req.user!.uuid, await getTokenVersion(req.user!.id)),
-    })
-  }
+  // An access token never renews itself: that let a stolen 15-minute token
+  // live forever, invisible to reuse detection.
+  if (typeof presented !== "string" || !presented)
+    throw new UnauthorizedError("Refresh token required", "REFRESH_TOKEN_REQUIRED")
 
   const result = await rotateRefreshToken(presented)
   if (!result.ok) {

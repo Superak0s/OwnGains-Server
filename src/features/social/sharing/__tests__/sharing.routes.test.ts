@@ -88,7 +88,13 @@ describe("sharing routes", () => {
     const granted = await request(app).get("/api/sharing/permissions/granted").set(auth(a.token))
     expect(granted.body.permissions).toHaveLength(2)
     for (const p of granted.body.permissions) expect(p.payload).toBeNull()
-    const byType = (list: any[], t: string) => list.find((p) => p.permissionType === t)
+    type Grant = {
+      id: number
+      permissionType: string
+      hasPayload: boolean
+      payload: { programData: string } | null
+    }
+    const byType = (list: Grant[], t: string) => list.find((p) => p.permissionType === t)!
     expect(byType(granted.body.permissions, "program").hasPayload).toBe(true)
     expect(byType(granted.body.permissions, "history").hasPayload).toBe(false)
 
@@ -101,7 +107,7 @@ describe("sharing routes", () => {
     const inlined = await request(app)
       .get("/api/sharing/permissions/received?includePayload=true")
       .set(auth(b.token))
-    expect(byType(inlined.body.permissions, "program").payload.programData).toHaveLength(200 * 1024)
+    expect(byType(inlined.body.permissions, "program").payload?.programData).toHaveLength(200 * 1024)
     expect(byType(inlined.body.permissions, "history").payload).toBeNull()
 
     // The payload route serves either end of the grant, and nobody else.
@@ -164,7 +170,7 @@ describe("sharing routes", () => {
       .get(`/api/sharing/sessions/friend/${a.user.id}`)
       .set(auth(b.token))
     expect(sessions.status).toBe(200)
-    expect(sessions.body.sessions.some((s: any) => s.id === sessionId)).toBe(true)
+    expect(sessions.body.sessions.some((s: { id: number }) => s.id === sessionId)).toBe(true)
 
     const details = await request(app)
       .get(`/api/sharing/sessions/friend/${a.user.id}/${sessionId}`)

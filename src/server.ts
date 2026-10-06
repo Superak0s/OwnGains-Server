@@ -394,9 +394,9 @@ function shutdown(exitCode: number) {
   })
 }
 
-// Only boot when run directly (node server.ts / tsx server.ts), so tests can
+// Only boot when run directly (bun server.ts), so tests can
 // import app without side effects. pathToFileURL makes relative launch
-// scripts (e.g. `tsx server.ts`) compare equal to import.meta.url.
+// scripts (e.g. `bun server.ts`) compare equal to import.meta.url.
 const isMain =
   process.argv[1] != null &&
   import.meta.url === pathToFileURL(process.argv[1]).href

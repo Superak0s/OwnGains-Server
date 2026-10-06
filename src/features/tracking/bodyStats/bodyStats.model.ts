@@ -111,8 +111,14 @@ export async function getBodyFatHistory(
   )
   return rows.map((r) => ({
     id: r.id,
-    percentage: r.percentage,
-    measurements: { waist: r.waist, neck: r.neck, hip: r.hip, unit: "cm" },
+    // METRICS.bodyFatPct is the required metric, so every group has one.
+    percentage: r.values.percentage!,
+    measurements: {
+      waist: r.values.waist,
+      neck: r.values.neck,
+      hip: r.values.hip,
+      unit: "cm",
+    },
     date: r.measuredAt,
   }))
 }

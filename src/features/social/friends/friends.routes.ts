@@ -85,7 +85,9 @@ router.post("/request", async (req: Request, res: Response) => {
     throw new ValidationError("Cannot send friend request to yourself")
   }
 
-  const targetUser = await findUserByUsername(username)
+  // A suspended (or demo) account answers like a missing one: search already
+  // hides them, and a 201 here told a stranger the username exists.
+  const targetUser = await findUserByUsername(username, { activeOnly: true })
 
   if (!targetUser) {
     throw new NotFoundError("User")

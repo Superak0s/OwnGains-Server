@@ -396,7 +396,7 @@ describe("workout session routes", () => {
     const s3 = await log(2, "2024-02-01T10:04:00Z", "2024-02-01T10:04:30Z")
     const rests = async () => {
       const d = await request(app).get(`/api/sessions/${id}`).set(auth(r.token))
-      return Object.fromEntries(d.body.session.setTimings.map((t: any) => [t.id, t.restTime]))
+      return Object.fromEntries(d.body.session.setTimings.map((t: { id: number; restTime: number | null }) => [t.id, t.restTime]))
     }
     expect(await rests()).toEqual({ [s1]: null, [s2]: 90, [s3]: 90 })
 

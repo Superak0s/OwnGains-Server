@@ -130,10 +130,16 @@ export async function listBackups(): Promise<BackupFile[]> {
         return { name, path, bytes: s.size, mtime: s.mtime }
       }),
   )
-  return files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  // By the timestamp in the name, not mtime, which a copy or rsync can change.
+  return files.sort((a, b) => b.name.localeCompare(a.name))
 }
 
-/** Deletes backups at least BACKUP_RETENTION_DAYS old. Returns the deleted names. */
+/**
+ * Deletes backups at least BACKUP_RETENTION_DAYS old, all of them. Keeping a
+ * stale one would break the privacy policy's retention promise, and a restore
+ * of it could bring back accounts whose deleted_accounts tombstones have
+ * expired. The CLI fails loudly when this leaves none. Returns the deleted names.
+ */
 export async function pruneBackups(): Promise<string[]> {
   const cutoff = Date.now() - retentionDays() * 86_400_000
   const old = (await listBackups()).filter((b) => b.mtime.getTime() <= cutoff)

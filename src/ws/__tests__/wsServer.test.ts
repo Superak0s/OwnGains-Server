@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest"
 import http from "http"
+import type { AddressInfo } from "net"
 import jwt from "jsonwebtoken"
 import WebSocket from "ws"
 import { createWsServer, closeWsServer } from "../wsServer.js"
@@ -20,7 +21,9 @@ function connect(port: number): Promise<WebSocket> {
   })
 }
 
-function nextMessage(ws: WebSocket, timeoutMs = 5000): Promise<any> {
+type WsMessage = { type: string; [key: string]: unknown }
+
+function nextMessage(ws: WebSocket, timeoutMs = 5000): Promise<WsMessage> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timed out waiting for message")), timeoutMs)
     ws.once("message", (raw) => {
@@ -59,7 +62,7 @@ describe("wsServer", () => {
     httpServer = http.createServer()
     createWsServer(httpServer)
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
-    port = (httpServer.address() as any).port
+    port = (httpServer.address() as AddressInfo).port
   })
 
   afterEach(async () => {

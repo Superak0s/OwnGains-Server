@@ -43,7 +43,7 @@ describe("injury routes", () => {
       .send({ muscleGroup: "knee", injuryType: "sprain", painLevel: 2 })
 
     const knee = await request(app).get("/api/tracking/injuries?muscle=knee").set(auth(u.token))
-    expect(knee.body.data.map((i: any) => i.muscleGroup)).toEqual(["knee"])
+    expect(knee.body.data.map((i: { muscleGroup: string }) => i.muscleGroup)).toEqual(["knee"])
 
     const activeKnee = await request(app)
       .get("/api/tracking/injuries?muscle=knee&status=active")
@@ -72,7 +72,7 @@ describe("injury routes", () => {
     expect(healed.body.data.status).toBe("recovered")
 
     const active = await request(app).get("/api/tracking/injuries/active").set(auth(u.token))
-    expect(active.body.data.some((i: any) => i.id === id)).toBe(false)
+    expect(active.body.data.some((i: { id: number }) => i.id === id)).toBe(false)
 
     const other = await signup("injur2")
     const notYours = await request(app).delete(`/api/tracking/injuries/${id}`).set(auth(other.token))

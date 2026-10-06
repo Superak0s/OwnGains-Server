@@ -148,7 +148,7 @@ router.post("/bodyfat/log", async (req: Request, res: Response) => {
     parseBackdatedTimestamp(measuredAt, "measuredAt") ?? new Date().toISOString(),
   )
 
-  res.json({ success: true, data: entry, entry })
+  res.status(201).json({ success: true, data: entry, entry })
 })
 
 router.get("/bodyfat/log", async (req: Request, res: Response) => {

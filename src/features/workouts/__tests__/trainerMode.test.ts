@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { randomUUID } from "node:crypto"
 import http from "http"
+import type { AddressInfo } from "net"
 import request from "supertest"
 import WebSocket from "ws"
 import { app, signup, auth } from "../../../tests/helpers.js"
@@ -125,12 +126,12 @@ describe("trainer mode", () => {
     const traineeSessions = await request(app)
       .get("/api/sessions")
       .set(auth(trainee.token))
-    expect(traineeSessions.body.sessions.some((s: any) => s.id === sessionId)).toBe(true)
+    expect(traineeSessions.body.sessions.some((s: { id: number }) => s.id === sessionId)).toBe(true)
 
     const trainerOwn = await request(app)
       .get("/api/sessions")
       .set(auth(trainer.token))
-    expect(trainerOwn.body.sessions.some((s: any) => s.id === sessionId)).toBe(false)
+    expect(trainerOwn.body.sessions.some((s: { id: number }) => s.id === sessionId)).toBe(false)
 
     // End it the same way, still through the header.
     const end = await request(app)
@@ -232,6 +233,7 @@ describe("trainer mode", () => {
 describe("trainer mode WS events", () => {
   let server: http.Server
   let port: number
+  let sessionId: number
   let trainee: Signup
   let trainer: Signup
   const sockets: WebSocket[] = []
@@ -256,7 +258,10 @@ describe("trainer mode WS events", () => {
     return ws
   }
 
-  function expectMessage(ws: WebSocket, type: string): Promise<any> {
+  function expectMessage(
+    ws: WebSocket,
+    type: string,
+  ): Promise<{ type: string; [key: string]: unknown }> {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000)
       const onMessage = (raw: Buffer) => {
@@ -292,14 +297,14 @@ describe("trainer mode WS events", () => {
     server = http.createServer(app)
     createWsServer(server)
     await new Promise<void>((resolve) => server.listen(0, resolve))
-    port = (server.address() as any).port
+    port = (server.address() as AddressInfo).port
 
     const start = await request(app)
       .post("/api/sessions/start")
       .set(auth(trainee.token))
       .send({ dayNumber: 1, dayTitle: "Day 1", split: "A" })
     expect(start.status).toBe(200)
-    ;(globalThis as any).__sessionId = start.body.session.id
+    sessionId = start.body.session.id
   })
 
   afterAll(async () => {
@@ -308,7 +313,6 @@ describe("trainer mode WS events", () => {
   })
 
   it("trainer_set_recorded → trainee; trainee_set_recorded → trainer", async () => {
-    const sessionId = (globalThis as any).__sessionId
     const traineeWs = await connect(trainee.token)
     const trainerWs = await connect(trainer.token)
 

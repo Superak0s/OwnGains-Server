@@ -184,7 +184,7 @@ describe("workout session routes", () => {
     expect((await fill()).status).toBe(200)
     const again = await fill()
     expect(again.status).toBe(200)
-    expect(again.body).toMatchObject({ sessions: 18, sets: 45, friends: 3, tracking: 202 })
+    expect(again.body).toMatchObject({ sessions: 18, sets: 45, friends: 8, tracking: 202 })
     const supplements = await request(app).get("/api/tracking/supplements").set(auth(b.token))
     expect(supplements.body.supplements).toHaveLength(3)
     const photos = await request(app).get("/api/tracking/photos/muscle").set(auth(b.token))
@@ -200,11 +200,18 @@ describe("workout session routes", () => {
     expect(history.body.sessions.filter((s: { isDemo: number }) => s.isDemo)).toHaveLength(18)
 
     const friends = await request(app).get("/api/friends").set(auth(b.token))
-    expect(friends.body.friends).toHaveLength(3)
+    expect(friends.body.friends).toHaveLength(8)
     const pending = await request(app).get("/api/friends/requests/pending").set(auth(b.token))
     expect(pending.body.requests).toHaveLength(1)
 
-    const friend = friends.body.friends[0]
+    const received = await request(app)
+      .get("/api/sharing/permissions/received?includePayload=true")
+      .set(auth(b.token))
+    expect(received.body.permissions).toHaveLength(13)
+    const program = received.body.permissions.find((p: { permissionType: string }) => p.permissionType === "program")
+    expect(program.payload.programData.days).toHaveLength(2)
+
+    const friend = friends.body.friends.find((f: { name: string }) => f.name === "History")
     const shared = await request(app)
       .get(`/api/sharing/sessions/friend/${friend.friendUserId}`)
       .set(auth(b.token))
@@ -215,7 +222,7 @@ describe("workout session routes", () => {
     expect(search.body.users ?? []).toHaveLength(0)
 
     const clear = await request(app).delete("/api/sessions/demo").set(auth(b.token))
-    expect(clear.body).toMatchObject({ deletedCount: 18, deletedFriends: 4, deletedTracking: 202 })
+    expect(clear.body).toMatchObject({ deletedCount: 18, deletedFriends: 9, deletedTracking: 202 })
     const supplementsAfter = await request(app).get("/api/tracking/supplements").set(auth(b.token))
     expect(supplementsAfter.body.supplements).toHaveLength(0)
     const photosAfter = await request(app).get("/api/tracking/photos/muscle").set(auth(b.token))

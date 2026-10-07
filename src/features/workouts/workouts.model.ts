@@ -14,6 +14,8 @@ type Queryable = Pool | PoolConnection
 /** A DATETIME as the driver returns it, or the ISO string a caller passed in. */
 type Timestamp = Date | string
 
+type SqlValue = string | number | null
+
 /**
  * One recorded set as every read returns it. The pool runs with
  * `dateStrings: true`, so the DATETIME columns are strings.
@@ -528,10 +530,10 @@ async function setAssignments(
   userId: number,
   u: UpdateSetTimingParams,
   current: { startTime: Timestamp; endTime: Timestamp },
-): Promise<{ assignments: string[]; params: (string | number | null)[] }> {
+): Promise<{ assignments: string[]; params: SqlValue[] }> {
   const assignments: string[] = []
-  const params: (string | number | null)[] = []
-  const set = (col: string, value: string | number | null) => {
+  const params: SqlValue[] = []
+  const set = (col: string, value: SqlValue) => {
     assignments.push(`${col} = ?`)
     params.push(value)
   }

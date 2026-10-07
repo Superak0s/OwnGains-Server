@@ -6,6 +6,12 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-07
+
+### Changed
+
+- `POST /api/sessions/demo` now adds one demo friend per sharing permission, each named after what it grants the caller (History, Analytics, Program, Joint, Watch, Trainer), plus All (every permission), None (friends with nothing shared) and a Pending request. Program shares an Upper/Lower plan.
+
 ### Internal
 
 - Added `bun run sonar:scan` (`scripts/sonar-scan.sh`), a SonarQube scan that reads `SONAR_TOKEN` from the environment or `.env`.
@@ -130,7 +136,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.2.0

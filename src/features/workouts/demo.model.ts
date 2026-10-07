@@ -53,12 +53,53 @@ const FRIEND_DAYS: DemoDay[] = [
   },
 ]
 
+const ALL_PERMISSIONS = ["history", "analytics", "program", "joint_session", "watch_session", "trainer"]
+
+// Named after what each one grants the caller, so every permission can be tried.
 const FRIENDS = [
-  { name: "Alex (demo)", strength: 1.2, status: "accepted" },
-  { name: "Sam (demo)", strength: 0.8, status: "accepted" },
-  { name: "Jordan (demo)", strength: 1, status: "accepted" },
-  { name: "Riley (demo)", strength: 1, status: "pending" },
+  { name: "History", strength: 1.2, status: "accepted", grants: ["history"] },
+  { name: "Analytics", strength: 0.8, status: "accepted", grants: ["history", "analytics"] },
+  { name: "Program", strength: 1, status: "accepted", grants: ["program"] },
+  { name: "Joint", strength: 1.1, status: "accepted", grants: ["joint_session"] },
+  { name: "Watch", strength: 0.9, status: "accepted", grants: ["watch_session"] },
+  { name: "Trainer", strength: 1, status: "accepted", grants: ["trainer"] },
+  { name: "All", strength: 1.3, status: "accepted", grants: ALL_PERMISSIONS },
+  { name: "None", strength: 1, status: "accepted", grants: [] },
+  { name: "Pending", strength: 1, status: "pending", grants: [] },
 ] as const
+
+/** FRIEND_DAYS in the program shape a `program` grant carries. */
+const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
+  programData: {
+    name: "Upper/Lower Program, 2 Days",
+    totalDays: FRIEND_DAYS.length,
+    split: ["Me"],
+    days: FRIEND_DAYS.map((day) => ({
+      dayNumber: day.dayNumber,
+      dayTitle: day.dayTitle,
+      exercises: day.exercises.map((ex) => ({
+        name: ex.name,
+        primaryMuscles: ex.primaryMuscles ?? [],
+        secondaryMuscles: [],
+        setsBySplit: { Me: ex.sets },
+        reps: "8-10",
+      })),
+      split: {
+        Me: {
+          exercises: day.exercises.map((ex) => ({
+            name: ex.name,
+            primaryMuscles: ex.primaryMuscles ?? [],
+            secondaryMuscles: [],
+            sets: ex.sets,
+            reps: "8-10",
+          })),
+          totalSets: day.exercises.reduce((sum, ex) => sum + ex.sets, 0),
+        },
+      },
+    })),
+  },
+  message: null,
+})
 
 /** Deterministic, so a refill produces the same numbers rather than noise. */
 const baseWeight = (name: string): number => {
@@ -386,8 +427,8 @@ async function deleteDemoData(conn: PoolConnection, userId: number) {
 
 /**
  * Replaces the caller's demo data in one transaction: their own demo workouts
- * for `days`, demo friends who share their history and analytics, one pending
- * friend request, and tracking/supplement entries. Refilling never stacks a
+ * for `days`, one demo friend per permission they grant the caller, one
+ * pending friend request, and tracking/supplement entries. Refilling never stacks a
  * second copy.
  */
 export async function fillDemoData(
@@ -424,11 +465,17 @@ export async function fillDemoData(
       )
       if (friend.status !== "accepted") continue
       friends++
-      await conn.execute(
-        `INSERT INTO sharing_permissions (from_user_id, to_user_id, permission_type)
-         VALUES (?, ?, 'history'), (?, ?, 'analytics')`,
-        [friendId, userId, friendId, userId],
-      )
+      if (friend.grants.length > 0)
+        await conn.execute(
+          `INSERT INTO sharing_permissions (from_user_id, to_user_id, permission_type, payload)
+           VALUES ${friend.grants.map(() => "(?, ?, ?, ?)").join(", ")}`,
+          friend.grants.flatMap((type) => [
+            friendId,
+            userId,
+            type,
+            type === "program" ? FRIEND_PROGRAM_PAYLOAD : null,
+          ]),
+        )
       // is_demo stays 0: friend views hide demo workouts, and these exist only
       // to be seen there.
       await insertWorkouts(conn, friendId, FRIEND_DAYS, "Upper/Lower", FRIEND_SESSION_COUNT, {

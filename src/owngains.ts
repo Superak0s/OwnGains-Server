@@ -288,21 +288,23 @@ async function backupCmd(args: string[]): Promise<number> {
       console.log(`- ${b.name}  ${mb(b.bytes)}  ${b.mtime.toISOString()}`)
     return 0
   }
-  if (sub === "prune") {
-    const pruned = await pruneBackups()
-    console.log(pruned.length ? `Deleted ${pruned.join(", ")}` : "Nothing to prune")
-    // Every backup was past retention, so none has been written lately.
-    // Exit non-zero so a cron job reports it.
-    if (!(await listBackups()).length) {
-      console.error(`No backups left in ${backupDir()}: check that backup create is running`)
-      return 1
-    }
-    return 0
-  }
+  if (sub === "prune") return pruneCmd()
   if ((sub === "verify" || sub === "restore") && args[2] && args[2] !== "--identity")
     return verifyOrRestore(sub, await resolveBackup(args[2]), identity, args.includes("--yes"))
   console.error("Usage: owngains backup create|list|prune|verify <file>|restore <file> [--yes] [--identity <key>]")
   return 2
+}
+
+async function pruneCmd(): Promise<number> {
+  const pruned = await pruneBackups()
+  console.log(pruned.length ? `Deleted ${pruned.join(", ")}` : "Nothing to prune")
+  // Every backup was past retention, so none has been written lately.
+  // Exit non-zero so a cron job reports it.
+  if (!(await listBackups()).length) {
+    console.error(`No backups left in ${backupDir()}: check that backup create is running`)
+    return 1
+  }
+  return 0
 }
 
 async function verifyOrRestore(

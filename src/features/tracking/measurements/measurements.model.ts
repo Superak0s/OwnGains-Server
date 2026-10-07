@@ -358,11 +358,8 @@ function pivotMetricRows(
     }
     if (r.id < g.id) g.id = r.id
     if (r.note != null && (g.note == null || r.note > g.note)) g.note = r.note
-    for (const a of aliases) {
-      if (metrics[a] !== r.metric) continue
-      const current = g.values[a]
-      if (current == null || r.value > current) g.values[a] = r.value
-    }
+    for (const a of aliases)
+      if (metrics[a] === r.metric) g.values[a] = Math.max(g.values[a] ?? r.value, r.value)
   }
   return [...groups.values()]
 }

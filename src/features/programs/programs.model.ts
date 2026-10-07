@@ -462,7 +462,7 @@ export async function upsertProgram(
 }
 
 /** Every exercise of every split of every day, in upload order. */
-function uploadExercises(days: ProgramData["days"] & {}): Exercise[] {
+function uploadExercises(days: NonNullable<ProgramData["days"]>): Exercise[] {
   return days.flatMap((day) =>
     Object.values(day.split ?? {}).flatMap((sw) => sw.exercises ?? []),
   )

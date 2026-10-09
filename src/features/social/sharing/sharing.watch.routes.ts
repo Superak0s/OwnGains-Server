@@ -8,8 +8,10 @@ import {
   resolveFriendAccess,
   getFriendSessionDetails,
   getUserActiveSessionStatus,
+  getLiveAudience,
 } from "./sharing.model.js"
 import { parseIntParam } from "@/middleware/validation.js"
+import { logger } from "@/utils/logger.js"
 
 const router: Router = Router()
 
@@ -20,8 +22,10 @@ const router: Router = Router()
  * route), so a watch is kept open by polling and expires on silence. In-process
  * state, like the WS rate counters: this server is single-instance, and a
  * restart only costs a watcher one `watch_started` on their next poll.
+ * Apps that receive `watch_progress` pushes poll every 60s, so the idle window
+ * has to outlast that with room for one late poll.
  */
-const WATCH_IDLE_MS = 60_000
+const WATCH_IDLE_MS = 150_000
 
 // Both ids are uuids: the watcher's goes out in the owner's WS events, and the
 // friend's is the WS registry key those events are sent to.
@@ -78,6 +82,36 @@ function noteWatch(
     watcherUsername,
     sessionId,
   })
+}
+
+/**
+ * Push a fresh `/live` snapshot to everyone watching this session, as
+ * `watch_progress { friendId, sessionId, liveSession }`. `liveSession` is the
+ * exact `/live` body field, or null once the session has ended (where `/live`
+ * would 404). The grant and friendship are re-read on every push, so revoking
+ * access or unfriending stops the pushes at once, not at the watch expiry.
+ * Never throws: the write that triggered it is already committed.
+ */
+export async function pushWatchProgress(
+  owner: { id: number; uuid: string },
+  sessionId: number,
+  ended = false,
+): Promise<void> {
+  const watching = [...activeWatches.values()].filter(
+    (w) => w.friendId === owner.uuid && w.sessionId === sessionId && w.watcherId !== owner.uuid,
+  )
+  if (watching.length === 0) return
+  try {
+    const allowed = new Set((await getLiveAudience(owner.id, "watchers")).map((a) => a.uuid))
+    const targets = watching.filter((w) => allowed.has(w.watcherId))
+
+    if (targets.length === 0) return
+    const liveSession = ended ? null : await getFriendSessionDetails(owner.id, sessionId)
+    for (const w of targets)
+      sendToUser(w.watcherId, "watch_progress", { friendId: owner.uuid, sessionId, liveSession })
+  } catch (err) {
+    logger.warn("[WS] watch progress push failed:", (err as Error).message)
+  }
 }
 
 /**

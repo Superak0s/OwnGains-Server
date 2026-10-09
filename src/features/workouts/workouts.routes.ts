@@ -34,6 +34,7 @@ import {
 } from "./workouts.model.js"
 import { clearDemoData, fillDemoData } from "./demo.model.js"
 import { getLiveAudience } from "../social/sharing/sharing.model.js"
+import { pushWatchProgress } from "../social/sharing/sharing.watch.routes.js"
 
 const router: Router = Router()
 
@@ -250,6 +251,7 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
     // A trainer recorded the set, and the trainee needs to know their data changed.
     sendToUser(req.user!.uuid, "trainer_set_recorded", trainerEventPayload(req, sessionId))
   }
+  void pushWatchProgress(req.user!, sessionId)
 
   res.json({ success: true, timing })
 })
@@ -267,6 +269,7 @@ router.patch("/:sessionId/sets/:setId", validateSetTiming, async (req: Request, 
 
   if (req.trainer)
     sendToUser(req.user!.uuid, "trainer_set_recorded", trainerEventPayload(req, sessionId))
+  void pushWatchProgress(req.user!, sessionId)
 
   res.json({ success: true, timing })
 })
@@ -325,6 +328,7 @@ router.delete("/:sessionId/sets", denyTrainer, async (req: Request, res: Respons
     exerciseName,
     setIndex,
   )
+  if (deletedCount) void pushWatchProgress(req.user!, sessionId)
 
   res.json({ success: true, deletedCount })
 })
@@ -352,6 +356,7 @@ router.post("/:sessionId/end", idempotent, async (req: Request, res: Response) =
     )
 
     if (req.trainer) pushTrainerEvent(req, sessionId, "trainer_session_ended")
+    void pushWatchProgress(req.user!, sessionId, true)
   }
 
   res.json({ success: true, session, alreadyEnded })

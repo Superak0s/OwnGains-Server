@@ -6,6 +6,18 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- New `watch_progress` WebSocket event pushed to friends watching a workout when the lifter records, edits or deletes a set or ends the session. The payload is `{ friendId, sessionId, liveSession }`, where `liveSession` is the same object `GET /api/sharing/watch/friend/:friendId/session/:sessionId/live` returns, or `null` once the session has ended. It only reaches watchers who polled `/live` recently and whose `watch_session` grant and friendship are still valid, re-checked on every push, and never the lifter's own sockets.
+
+### Changed
+
+- A watch now stays active for 150s after the last `/live` poll instead of 60s, so apps that rely on `watch_progress` can poll every 60s.
+
+### Internal
+
+- Tests for `watch_progress` pushes: the snapshot matches `/live`, idle watchers and the lifter get nothing, and a revoked grant stops pushes.
+
 ## [0.3.2] - 2026-10-07
 
 ### Changed

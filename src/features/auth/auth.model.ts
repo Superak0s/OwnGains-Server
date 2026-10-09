@@ -26,13 +26,15 @@ interface AuthUserRow extends RowDataPacket {
   terms_version: string | null
   terms_accepted_at: Date | null
   health_consent_at: Date | null
+  has_password: number
+  google_linked: number
 }
 
 // Every lookup that builds an AuthUser selects the same profile columns, so
 // req.user (and so publicUser) is never missing a field.
 const USER_COLS = `id, uuid, username, email, name, is_admin, created_at,
        height_cm, bf_formula_sex, terms_version, terms_accepted_at,
-       health_consent_at`
+       health_consent_at, has_password, google_sub IS NOT NULL AS google_linked`
 
 function toAuthUser(u: AuthUserRow): AuthUser & { password_hash?: string } {
   return {
@@ -50,6 +52,8 @@ function toAuthUser(u: AuthUserRow): AuthUser & { password_hash?: string } {
     termsVersion: u.terms_version ?? null,
     termsAcceptedAt: u.terms_accepted_at ?? null,
     healthConsentAt: u.health_consent_at ?? null,
+    hasPassword: u.has_password !== 0,
+    googleLinked: !!u.google_linked,
   }
 }
 
@@ -59,6 +63,7 @@ export async function createUser(
   password: string,
   name?: string,
   consent: ConsentInput = {},
+  googleSub: string | null = null,
 ): Promise<number> {
   const passwordHash = await hashPassword(password)
   const termsVersion = consent.termsVersion ?? null
@@ -69,11 +74,12 @@ export async function createUser(
   try {
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO users (uuid, username, email, password_hash, name, is_admin,
-         terms_version, terms_accepted_at, health_consent_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()), IF(?, NOW(), NULL), NOW())`,
+         terms_version, terms_accepted_at, health_consent_at, google_sub, has_password, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()), IF(?, NOW(), NULL), ?, ?, NOW())`,
       [
         randomUUID(), username, email, passwordHash, name || username, 0,
         termsVersion, termsVersion, consent.healthConsent === true,
+        googleSub, googleSub === null,
       ],
     )
     insertId = result.insertId
@@ -133,38 +139,124 @@ export function asDuplicateUserError(err: unknown): unknown {
   return new ConflictError(ACCOUNT_CONFLICT_MESSAGE, "ACCOUNT_UNAVAILABLE")
 }
 
-export async function findUserByCredentials(
-  usernameOrEmail: string,
-): Promise<
-  | (AuthUser & {
-      password_hash?: string
-      disabled: boolean
-      disabledReason: string | null
-      tokenVersion: number
-    })
-  | null
-> {
-  // A username can equal someone's email (admins are made via the CLI, and
-  // old rows predate the @ ban), so both arms of the WHERE can match. Prefer
-  // the exact username and take one row. Which row MySQL returned first used
-  // to decide, and that is not an identity rule.
-  const [users] = await pool.execute<AuthUserRow[]>(
-    `SELECT ${USER_COLS}, password_hash, token_version,
-            disabled_at IS NOT NULL AS disabled, disabled_reason
-     FROM users WHERE username = ? OR email = ?
-     ORDER BY (username = ?) DESC LIMIT 1`,
-    [usernameOrEmail, usernameOrEmail, usernameOrEmail],
-  )
-  const row = users[0]
+type SigninUser = AuthUser & {
+  password_hash?: string
+  disabled: boolean
+  disabledReason: string | null
+  tokenVersion: number
+  googleSub: string | null
+}
+
+const SIGNIN_COLS = `${USER_COLS}, password_hash, token_version, google_sub,
+            disabled_at IS NOT NULL AS disabled, disabled_reason`
+
+function toSigninUser(row: AuthUserRow | undefined): SigninUser | null {
   return row
     ? {
         ...toAuthUser(row),
         disabled: !!row.disabled,
         disabledReason: (row.disabled_reason as string | null) ?? null,
-        // Read here so signin doesn't go back for it (getTokenVersion).
         tokenVersion: Number(row.token_version),
+        googleSub: (row.google_sub as string | null) ?? null,
       }
     : null
+}
+
+export async function findUserByCredentials(
+  usernameOrEmail: string,
+): Promise<SigninUser | null> {
+  // A username can equal someone's email (admins are made via the CLI, and
+  // old rows predate the @ ban), so both arms of the WHERE can match. Prefer
+  // the exact username and take one row. Which row MySQL returned first used
+  // to decide, and that is not an identity rule.
+  const [users] = await pool.execute<AuthUserRow[]>(
+    `SELECT ${SIGNIN_COLS}
+     FROM users WHERE username = ? OR email = ?
+     ORDER BY (username = ?) DESC LIMIT 1`,
+    [usernameOrEmail, usernameOrEmail, usernameOrEmail],
+  )
+  return toSigninUser(users[0])
+}
+
+export async function findUserByGoogleSub(sub: string): Promise<SigninUser | null> {
+  const [users] = await pool.execute<AuthUserRow[]>(
+    `SELECT ${SIGNIN_COLS} FROM users WHERE google_sub = ?`,
+    [sub],
+  )
+  return toSigninUser(users[0])
+}
+
+/** By email only: findUserByCredentials also matches a username equal to it. */
+export async function findUserByEmail(email: string): Promise<SigninUser | null> {
+  const [users] = await pool.execute<AuthUserRow[]>(
+    `SELECT ${SIGNIN_COLS} FROM users WHERE email = ?`,
+    [email],
+  )
+  return toSigninUser(users[0])
+}
+
+export async function getGoogleSub(userId: number): Promise<string | null> {
+  const [rows] = await pool.execute<AuthUserRow[]>(
+    "SELECT google_sub FROM users WHERE id = ?",
+    [userId],
+  )
+  return (rows[0]?.google_sub as string | null) ?? null
+}
+
+/** Only fills an empty google_sub, so a linked account is never moved to another Google account. */
+export async function linkGoogleSub(userId: number, sub: string): Promise<boolean> {
+  const [r] = await pool.execute<ResultSetHeader>(
+    "UPDATE users SET google_sub = ? WHERE id = ? AND google_sub IS NULL",
+    [sub, userId],
+  )
+  return r.affectedRows > 0
+}
+
+/** Refused for an account with no password, which would then have no way to sign in. */
+export async function unlinkGoogleSub(userId: number): Promise<boolean> {
+  const [r] = await pool.execute<ResultSetHeader>(
+    "UPDATE users SET google_sub = NULL WHERE id = ? AND has_password = 1",
+    [userId],
+  )
+  return r.affectedRows > 0
+}
+
+/** The email's local part as a valid username (3-20 of [A-Za-z0-9_]). */
+export function usernameFromEmail(email: string): string {
+  const base = email.split("@")[0].replace(/[^A-Za-z0-9_]/g, "").slice(0, 15)
+  return base.length >= 3 ? base : `user${base}`
+}
+
+/**
+ * An account for a verified Google identity. Its password is random bytes
+ * nobody keeps, so password signin can never succeed. A taken username gets a
+ * random suffix and another try.
+ */
+export async function createGoogleUser(
+  email: string,
+  name: string | null,
+  sub: string,
+  consent: ConsentInput = {},
+): Promise<number> {
+  const base = usernameFromEmail(email)
+  const password = randomBytes(32).toString("base64url")
+  for (let attempt = 0; ; attempt++) {
+    const username =
+      attempt === 0 ? base : `${base}_${randomBytes(3).toString("hex").slice(0, 4)}`
+    try {
+      return await createUser(username, email, password, name ?? undefined, consent, sub)
+    } catch (err) {
+      if (attempt >= 4 || !(await usernameTaken(username))) throw err
+    }
+  }
+}
+
+async function usernameTaken(username: string): Promise<boolean> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    "SELECT 1 FROM users WHERE username = ?",
+    [username],
+  )
+  return rows.length > 0
 }
 
 /** `activeOnly` skips suspended (and demo) accounts. The CLI needs to find them. */
@@ -259,6 +351,8 @@ export const publicUser = (u: AuthUser) => ({
   termsVersion: u.termsVersion,
   termsAcceptedAt: u.termsAcceptedAt,
   healthConsentAt: u.healthConsentAt,
+  hasPassword: u.hasPassword,
+  googleLinked: u.googleLinked,
 })
 
 /**
@@ -428,7 +522,7 @@ export async function changePassword(
   // revoked in the same transaction: a leaked one must not remain valid past the
   // password it was meant to be revoked with just because a second statement
   // failed.
-  await revokeAllSessions(userId, "password_hash = ?", [hash])
+  await revokeAllSessions(userId, "password_hash = ?, has_password = 1", [hash])
   return true
 }
 

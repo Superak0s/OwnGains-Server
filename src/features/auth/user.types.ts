@@ -18,6 +18,9 @@ interface UserProfile {
   termsAcceptedAt: Date | null
   /** When explicit health-data consent was given, or null if never or withdrawn. */
   healthConsentAt: Date | null
+  /** False for an account created through Google sign-in, which has no usable password. */
+  hasPassword: boolean
+  googleLinked: boolean
 }
 
 /** Subset attached to `req.user` after JWT authentication. */
@@ -35,6 +38,8 @@ export type AuthUser = Pick<
   | "termsVersion"
   | "termsAcceptedAt"
   | "healthConsentAt"
+  | "hasPassword"
+  | "googleLinked"
 >
 
 /** What the app sends at signup and on PUT /api/auth/consent. */

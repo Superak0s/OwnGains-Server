@@ -1,6 +1,7 @@
-import { Router, Request, Response } from "express"
+import { Router, Request, Response, NextFunction } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import {
+  ConflictError,
   ForbiddenError,
   UnauthorizedError,
   ValidationError,
@@ -32,7 +33,14 @@ import {
   revokeRefreshTokens,
   revokeAllSessions,
   recordConsent,
+  findUserByGoogleSub,
+  findUserByEmail,
+  linkGoogleSub,
+  unlinkGoogleSub,
+  createGoogleUser,
+  getGoogleSub,
 } from "./auth.model.js"
+import { verifyGoogleIdToken } from "./google.js"
 import {
   assertNotThrottled,
   recordFailure,
@@ -63,8 +71,20 @@ async function throttleGuard(
   }
 }
 
+async function googleTokenMatches(userId: number, idToken: string): Promise<boolean> {
+  if (!process.env.GOOGLE_WEB_CLIENT_ID) return false
+  const sub = await getGoogleSub(userId)
+  if (!sub) return false
+  try {
+    return (await verifyGoogleIdToken(idToken)).sub === sub
+  } catch {
+    return false
+  }
+}
+
 /**
- * Re-check the signed-in user's password before a sensitive change. Misses are
+ * Re-check the signed-in user's password, or a fresh Google ID token for an
+ * account linked to Google, before a sensitive change. Misses are
  * throttled per account (the `reauth` scope), so a stolen session can't be
  * used to guess the password behind it. 403, not 401, on a miss: the app
  * treats every 401 as an expired session.
@@ -73,14 +93,20 @@ async function requireCurrentPassword(
   req: Request,
   res: Response,
   password: unknown,
+  idToken?: unknown,
 ): Promise<void> {
   const subject = req.user!.uuid
   await throttleGuard(res, "reauth", subject)
-  const hash = await getPasswordHash(req.user!.id)
-  const ok =
-    typeof password === "string" &&
-    !!hash &&
-    (await verifyPassword(password, hash))
+  let ok: boolean
+  if (typeof idToken === "string" && idToken) {
+    ok = await googleTokenMatches(req.user!.id, idToken)
+  } else {
+    const hash = await getPasswordHash(req.user!.id)
+    ok =
+      typeof password === "string" &&
+      !!hash &&
+      (await verifyPassword(password, hash))
+  }
   if (!ok) {
     await recordFailure("reauth", subject)
     throw new ForbiddenError("Incorrect password")
@@ -159,12 +185,7 @@ router.post("/signin", validateLogin, async (req: Request, res: Response) => {
 
   // Only after the password matched, so suspension status isn't something a
   // stranger can probe for.
-  if (user.disabled)
-    throw new ForbiddenError(
-      `This account has been suspended. Reason: ${user.disabledReason ?? "not given"}. ` +
-        "To contest it, contact this server's operator.",
-      "ACCOUNT_DISABLED",
-    )
+  if (user.disabled) throw suspendedError(user.disabledReason)
 
   const token = generateToken(user.uuid, user.tokenVersion)
 
@@ -174,6 +195,106 @@ router.post("/signin", validateLogin, async (req: Request, res: Response) => {
     token,
     refreshToken: await issueRefreshToken(user.id),
     user: publicUser(user),
+  })
+})
+
+function suspendedError(reason: string | null): ForbiddenError {
+  return new ForbiddenError(
+    `This account has been suspended. Reason: ${reason ?? "not given"}. ` +
+      "To contest it, contact this server's operator.",
+    "ACCOUNT_DISABLED",
+  )
+}
+
+// Unset on self-hosted servers, so the path falls through to the 404 handler.
+const googleEnabled = (_req: Request, _res: Response, next: NextFunction) =>
+  process.env.GOOGLE_WEB_CLIENT_ID ? next() : next("router")
+
+/**
+ * POST /api/auth/google
+ *
+ * Signs in with a Google ID token: by its `sub`, else by linking the account
+ * with the same verified email once its `password` is given, else by creating
+ * one. A new account records `termsVersion`/`healthConsent` exactly as /signup does.
+ */
+router.post("/google", googleEnabled, async (req: Request, res: Response) => {
+  const { idToken, password, termsVersion, healthConsent } = req.body
+  if (typeof idToken !== "string" || !idToken || idToken.length > 4096)
+    throw new ValidationError("idToken is required", null, "ID_TOKEN_REQUIRED")
+  const errors = consentFieldErrors(req.body)
+  if (errors.length) throw new ValidationError("Validation failed", errors)
+
+  const google = await verifyGoogleIdToken(idToken)
+  let user = await findUserByGoogleSub(google.sub)
+  let created = false
+  if (!user) {
+    user = await findUserByEmail(google.email)
+    if (user) {
+      if (user.googleSub)
+        throw new ConflictError(
+          "This email belongs to an account linked to another Google account",
+          "GOOGLE_ACCOUNT_MISMATCH",
+        )
+      // Signup never verifies an email, so whoever created this account may not
+      // own the Google account. Linking needs proof of both.
+      if (typeof password !== "string" || !password)
+        throw new ConflictError(
+          "An OwnGains account already uses this email. Enter its password to link your Google account.",
+          "GOOGLE_LINK_NEEDS_PASSWORD",
+          { username: user.username },
+        )
+      await throttleGuard(res, "signin", user.username)
+      if (!user.hasPassword || !(await verifyPassword(password, user.password_hash ?? DUMMY_PASSWORD_HASH))) {
+        await recordFailure("signin", user.username)
+        throw new UnauthorizedError("Incorrect password", "GOOGLE_LINK_PASSWORD_INVALID")
+      }
+      await clearFailures("signin", user.username)
+      if (user.disabled) throw suspendedError(user.disabledReason)
+      if (!(await linkGoogleSub(user.id, google.sub)))
+        throw new ConflictError(
+          "This email belongs to an account linked to another Google account",
+          "GOOGLE_ACCOUNT_MISMATCH",
+        )
+      user = await findUserByGoogleSub(google.sub)
+    } else {
+      await createGoogleUser(google.email, google.name, google.sub, {
+        termsVersion,
+        healthConsent,
+      })
+      user = await findUserByGoogleSub(google.sub)
+      created = true
+    }
+  }
+  if (!user) throw new UnauthorizedError("Invalid Google token", "GOOGLE_TOKEN_INVALID")
+  if (user.disabled) throw suspendedError(user.disabledReason)
+
+  res.status(created ? 201 : 200).json({
+    success: true,
+    message: created ? "Account created successfully" : "Signed in successfully",
+    token: generateToken(user.uuid, user.tokenVersion),
+    refreshToken: await issueRefreshToken(user.id),
+    user: publicUser(user),
+  })
+})
+
+/**
+ * DELETE /api/auth/google
+ *
+ * Unlinks the Google account after re-checking the password. An account with
+ * no password can't unlink, since Google is then its only way in.
+ */
+router.delete("/google", authenticateToken, async (req: Request, res: Response) => {
+  if (!req.user!.hasPassword)
+    throw new ForbiddenError(
+      "This account signs in with Google and has no password, so Google can't be unlinked",
+      "NO_PASSWORD",
+    )
+  await requireCurrentPassword(req, res, req.body?.password)
+  await unlinkGoogleSub(req.user!.id)
+  res.json({
+    success: true,
+    message: "Google account unlinked",
+    user: publicUser({ ...req.user!, googleLinked: false }),
   })
 })
 
@@ -200,7 +321,7 @@ function addBodyProfileUpdates(
 }
 
 router.put("/profile", authenticateToken, validateProfileUpdate, async (req: Request, res: Response) => {
-  const { name, email, heightCm, bfFormulaSex, currentPassword } = req.body
+  const { name, email, heightCm, bfFormulaSex, currentPassword, idToken } = req.body
   const updates: Record<string, string | number> = {}
 
   if (name !== undefined) updates.name = name
@@ -212,13 +333,13 @@ router.put("/profile", authenticateToken, validateProfileUpdate, async (req: Req
     email !== undefined &&
     String(email).toLowerCase() !== req.user!.email.toLowerCase()
   if (emailChanges) {
-    if (typeof currentPassword !== "string" || !currentPassword)
+    if ((typeof currentPassword !== "string" || !currentPassword) && !idToken)
       throw new ValidationError(
         "currentPassword is required to change email",
         null,
         "CURRENT_PASSWORD_REQUIRED",
       )
-    await requireCurrentPassword(req, res, currentPassword)
+    await requireCurrentPassword(req, res, currentPassword, idToken)
     updates.email = email
   }
 
@@ -269,9 +390,9 @@ router.delete("/account/data", authenticateToken, validateRequired(["confirmDele
       'Must confirm deletion with confirmDelete: "DELETE_ALL_DATA"',
     )
   }
-  if (req.body.password === undefined)
+  if (req.body.password === undefined && req.body.idToken === undefined)
     throw new ValidationError("password is required", null, "PASSWORD_REQUIRED")
-  await requireCurrentPassword(req, res, req.body.password)
+  await requireCurrentPassword(req, res, req.body.password, req.body.idToken)
 
   await deleteAllUserData(req.user!.id)
 
@@ -282,11 +403,13 @@ router.delete("/account/data", authenticateToken, validateRequired(["confirmDele
  * DELETE /api/auth/account
  *
  * Permanently deletes the account and everything it owns. Re-checks the
- * password because a stolen phone already has a valid token, and this is
- * the one action nothing can undo.
+ * password (or, for a Google account, a fresh `idToken`) because a stolen
+ * phone already has a valid token, and this is the one action nothing can undo.
  */
-router.delete("/account", authenticateToken, validateRequired(["password"]), async (req: Request, res: Response) => {
-  await requireCurrentPassword(req, res, req.body.password)
+router.delete("/account", authenticateToken, async (req: Request, res: Response) => {
+  if (req.body?.password === undefined && req.body?.idToken === undefined)
+    throw new ValidationError("password is required", null, "PASSWORD_REQUIRED")
+  await requireCurrentPassword(req, res, req.body.password, req.body.idToken)
   await deleteUser(req.user!.id)
   res.json({ success: true, message: "Account deleted successfully" })
 })
@@ -366,6 +489,11 @@ router.post("/signout", authenticateToken, async (req: Request, res: Response) =
 router.put("/password", authenticateToken, validatePasswordChange, async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body
 
+  if (!req.user!.hasPassword)
+    throw new ForbiddenError(
+      "This account signs in with Google and has no password to change",
+      "NO_PASSWORD",
+    )
   await requireCurrentPassword(req, res, currentPassword)
   await changePassword(req.user!.id, newPassword)
 

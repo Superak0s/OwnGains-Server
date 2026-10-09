@@ -70,11 +70,18 @@ CREATE TABLE IF NOT EXISTS users (
   -- they were made for. They are also suspended, so nobody can sign in as
   -- one or find one in search.
   demo_owner_id  INT UNSIGNED                   DEFAULT NULL,
+  -- The Google account's stable `sub` claim, for accounts that sign in with
+  -- Google. Only set on a server with GOOGLE_WEB_CLIENT_ID.
+  google_sub     VARCHAR(64)                    DEFAULT NULL,
+  -- 0 for an account created through Google, whose password_hash is a hash of
+  -- random bytes nobody knows. Set to 1 when an operator resets the password.
+  has_password   TINYINT(1)            NOT NULL DEFAULT 1,
   created_at     DATETIME              NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_users_uuid (uuid),
   UNIQUE KEY uq_users_username (username),
   UNIQUE KEY uq_users_email (email),
+  UNIQUE KEY uq_users_google_sub (google_sub),
   KEY idx_users_demo_owner (demo_owner_id),
   CONSTRAINT fk_users_demo_owner FOREIGN KEY (demo_owner_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT ck_users_height CHECK (height_cm IS NULL OR height_cm > 0)

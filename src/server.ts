@@ -181,6 +181,8 @@ const credentialLimiter = limiter(
 )
 const signupLimiter = limiter(FIFTEEN_MIN, envInt("SIGNUP_RATE_LIMIT", 20, 1))
 app.post("/api/auth/signin", credentialLimiter)
+app.post("/api/auth/google", credentialLimiter)
+app.delete("/api/auth/google", credentialLimiter)
 app.put("/api/auth/password", credentialLimiter)
 app.delete("/api/auth/account", credentialLimiter)
 app.delete("/api/auth/account/data", credentialLimiter)

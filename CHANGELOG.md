@@ -6,7 +6,25 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- `POST /api/auth/google` signs in with a Google ID token, creating a new one or linking the existing account with the same verified email. Linking needs that account's `password` in the same request: without it the route answers 409 `GOOGLE_LINK_NEEDS_PASSWORD` with the account's username in `details`, and a wrong one is 401. It is mounted only when the new `GOOGLE_WEB_CLIENT_ID` variable is set, and answers 404 otherwise.
+- `DELETE /api/auth/google` unlinks the Google account after checking `password`. An account created through Google has no password and gets 403 `NO_PASSWORD`.
+- User objects include `hasPassword`, which is `false` for an account created through Google, and `googleLinked`.
+
+### Changed
+
+- `DELETE /api/auth/account`, `DELETE /api/auth/account/data` and an email change on `PUT /api/auth/profile` accept a fresh Google `idToken` instead of the password for an account linked to Google. `PUT /api/auth/password` answers 403 `NO_PASSWORD` for an account created through Google.
+- The data export includes the linked Google account ID (`google_sub`).
+
+### Security
+
+- Failed `POST /api/auth/google` and `DELETE /api/auth/google` attempts count toward the per-IP credential limiter (`AUTH_RATE_LIMIT`), and a wrong password when linking counts toward that account's signin backoff.
+
 ### Internal
+
+- Migration `003_google_sub.sql` adds `users.google_sub` and `users.has_password`.
+- New dependency `google-auth-library` verifies Google ID tokens.
 
 - GitHub Actions CI builds and runs the test suite against MySQL on pushes to `main` and on pull requests.
 - Project `.mcp.json` adds the GitHub MCP server, which needs a `GITHUB_PAT` environment variable.

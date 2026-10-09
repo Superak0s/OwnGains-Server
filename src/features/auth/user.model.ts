@@ -362,7 +362,7 @@ export async function exportUserData(
   const [profile] = await pool.execute<RowDataPacket[]>(
     `SELECT uuid AS id, username, email, name, bf_formula_sex, height_cm, height_unit,
             weight_unit, is_admin, created_at, terms_version, terms_accepted_at,
-            health_consent_at
+            health_consent_at, google_sub
      FROM users WHERE id = ?`,
     [userId],
   )

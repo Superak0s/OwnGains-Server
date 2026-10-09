@@ -6,6 +6,11 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Internal
+
+- GitHub Actions CI builds and runs the test suite against MySQL on pushes to `main` and on pull requests.
+- Project `.mcp.json` adds the GitHub MCP server, which needs a `GITHUB_PAT` environment variable.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added

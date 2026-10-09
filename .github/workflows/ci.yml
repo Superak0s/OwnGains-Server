@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: owngains
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Write .env
+        run: |
+          cat > .env <<'ENV'
+          DB_HOST=127.0.0.1
+          DB_USER=root
+          DB_PASSWORD=root
+          DB_NAME=owngains
+          JWT_SECRET=ci-secret-ci-secret-ci-secret-ci-secret
+          ALLOWED_ORIGINS=http://localhost:3000
+          MDNS_ENABLED=false
+          ENV
+      - run: bun run build
+      - run: bun run test

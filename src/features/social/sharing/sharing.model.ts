@@ -445,16 +445,20 @@ export async function createJointInvite(
   toUserId: number,
   fromSessionId: number | null = null,
 ): Promise<number> {
-  await pool.execute(
-    `UPDATE joint_session_invites SET status = 'declined' WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'`,
-    [fromUserId, toUserId],
-  )
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO joint_session_invites (from_user_id, to_user_id, from_workout_id, expires_at)
-     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
-    [fromUserId, toUserId, fromSessionId, INVITE_TTL_SECONDS],
-  )
-  return result.insertId
+  // Together, so a failed insert doesn't leave the old invite declined and
+  // no new one in its place.
+  return withTransaction(async (conn) => {
+    await conn.execute(
+      `UPDATE joint_session_invites SET status = 'declined' WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'`,
+      [fromUserId, toUserId],
+    )
+    const [result] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO joint_session_invites (from_user_id, to_user_id, from_workout_id, expires_at)
+       VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
+      [fromUserId, toUserId, fromSessionId, INVITE_TTL_SECONDS],
+    )
+    return result.insertId
+  })
 }
 
 export async function getInvite(inviteId: number): Promise<InviteRow | null> {

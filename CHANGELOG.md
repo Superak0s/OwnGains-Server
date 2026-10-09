@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-10
+
 ### Added
 
 - `POST /api/auth/google` signs in with a Google ID token, creating a new one or linking the existing account with the same verified email. Linking needs that account's `password` in the same request: without it the route answers 409 `GOOGLE_LINK_NEEDS_PASSWORD` with the account's username in `details`, and a wrong one is 401. It is mounted only when the new `GOOGLE_WEB_CLIENT_ID` variable is set, and answers 404 otherwise.
@@ -16,6 +18,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - `DELETE /api/auth/account`, `DELETE /api/auth/account/data` and an email change on `PUT /api/auth/profile` accept a fresh Google `idToken` instead of the password for an account linked to Google. `PUT /api/auth/password` answers 403 `NO_PASSWORD` for an account created through Google.
 - The data export includes the linked Google account ID (`google_sub`).
+
+### Fixed
+
+- Signup, adding an exercise to a program and sending a joint workout invite are now all-or-nothing. A database error or crash part-way could leave a new account without its consent records or admin flag, an exercise on a split the program didn't list, or the previous invite declined with no new one sent.
 
 ### Security
 
@@ -28,6 +34,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - GitHub Actions CI builds and runs the test suite against MySQL on pushes to `main` and on pull requests.
 - Project `.mcp.json` adds the GitHub MCP server, which needs a `GITHUB_PAT` environment variable.
+- The programs edge tests inject failures into transaction connections too, and cover the `addExercise` rollback.
 
 ## [0.4.0] - 2026-10-09
 
@@ -186,7 +193,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.1

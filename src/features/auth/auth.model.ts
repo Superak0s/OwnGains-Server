@@ -70,56 +70,60 @@ export async function createUser(
 
   // uq_users_username / uq_users_email do the uniqueness check, so there is no
   // pre-check SELECT to lose the race against two simultaneous signups.
-  let insertId: number
-  try {
-    const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO users (uuid, username, email, password_hash, name, is_admin,
-         terms_version, terms_accepted_at, health_consent_at, google_sub, has_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()), IF(?, NOW(), NULL), ?, ?, NOW())`,
-      [
-        randomUUID(), username, email, passwordHash, name || username, 0,
-        termsVersion, termsVersion, consent.healthConsent === true,
-        googleSub, googleSub === null,
-      ],
-    )
-    insertId = result.insertId
-  } catch (err) {
-    throw asDuplicateUserError(err)
-  }
-  if (termsVersion !== null)
-    await pool.execute(
-      "INSERT INTO consent_events (user_id, kind, version, granted) VALUES (?, 'terms', ?, 1)",
-      [insertId, termsVersion],
-    )
-  if (consent.healthConsent === true)
-    await pool.execute(
-      "INSERT INTO consent_events (user_id, kind, granted) VALUES (?, 'health', 1)",
+  // One transaction, so a failure part-way can't leave a user without its
+  // consent_events audit rows or a bootstrap admin without the flag.
+  return withTransaction(async (conn) => {
+    let insertId: number
+    try {
+      const [result] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO users (uuid, username, email, password_hash, name, is_admin,
+           terms_version, terms_accepted_at, health_consent_at, google_sub, has_password, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()), IF(?, NOW(), NULL), ?, ?, NOW())`,
+        [
+          randomUUID(), username, email, passwordHash, name || username, 0,
+          termsVersion, termsVersion, consent.healthConsent === true,
+          googleSub, googleSub === null,
+        ],
+      )
+      insertId = result.insertId
+    } catch (err) {
+      throw asDuplicateUserError(err)
+    }
+    if (termsVersion !== null)
+      await conn.execute(
+        "INSERT INTO consent_events (user_id, kind, version, granted) VALUES (?, 'terms', ?, 1)",
+        [insertId, termsVersion],
+      )
+    if (consent.healthConsent === true)
+      await conn.execute(
+        "INSERT INTO consent_events (user_id, kind, granted) VALUES (?, 'health', 1)",
+        [insertId],
+      )
+
+    // With BOOTSTRAP_ADMIN_USERNAME set, that username (and only it) becomes
+    // admin on signup, so a public box can't be claimed by whoever registers
+    // first after deploy. Unset (the self-hosted default), the first-ever user
+    // becomes admin as before.
+    const bootstrapAdmin = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim()
+    if (bootstrapAdmin) {
+      if (username.toLowerCase() === bootstrapAdmin.toLowerCase())
+        await conn.execute(`UPDATE users SET is_admin = 1 WHERE id = ?`, [insertId])
+      return insertId
+    }
+
+    // The first-ever user becomes admin. Decided AFTER the insert and against
+    // MIN(id) rather than from a COUNT(*) taken before it: two signups racing on
+    // a fresh box both read a count of 0 and both came out admin. Exactly one row
+    // can hold the lowest id, so this is the same rule without the race. The
+    // derived table is required: MySQL/MariaDB refuse a bare subquery on the
+    // table being updated.
+    await conn.execute(
+      `UPDATE users SET is_admin = 1
+       WHERE id = ? AND id = (SELECT m FROM (SELECT MIN(id) AS m FROM users) AS first)`,
       [insertId],
     )
-
-  // With BOOTSTRAP_ADMIN_USERNAME set, that username (and only it) becomes
-  // admin on signup, so a public box can't be claimed by whoever registers
-  // first after deploy. Unset (the self-hosted default), the first-ever user
-  // becomes admin as before.
-  const bootstrapAdmin = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim()
-  if (bootstrapAdmin) {
-    if (username.toLowerCase() === bootstrapAdmin.toLowerCase())
-      await pool.execute(`UPDATE users SET is_admin = 1 WHERE id = ?`, [insertId])
     return insertId
-  }
-
-  // The first-ever user becomes admin. Decided AFTER the insert and against
-  // MIN(id) rather than from a COUNT(*) taken before it: two signups racing on
-  // a fresh box both read a count of 0 and both came out admin. Exactly one row
-  // can hold the lowest id, so this is the same rule without the race. The
-  // derived table is required: MySQL/MariaDB refuse a bare subquery on the
-  // table being updated.
-  await pool.execute(
-    `UPDATE users SET is_admin = 1
-     WHERE id = ? AND id = (SELECT m FROM (SELECT MIN(id) AS m FROM users) AS first)`,
-    [insertId],
-  )
-  return insertId
+  })
 }
 
 /**

@@ -5,21 +5,39 @@ import { signup, internalId } from "../../../tests/helpers.js"
 import { pool } from "../../../config/database.js"
 import * as p from "../programs.model.js"
 import type { ProgramData } from "../programs.types.js"
+import type { RowDataPacket } from "mysql2"
 
 const ex = (name: string, extra: Record<string, unknown> = {}) => ({ name, sets: 2, ...extra })
 const plan = (days: unknown[], split?: string[]) => ({ days, split }) as unknown as ProgramData
 
-/** Fails the next statement that contains `match`, once. */
+/**
+ * Fails the next statement that contains `match`, once, whether it runs on the
+ * pool or on a transaction's connection.
+ */
+const realExecute = pool.execute.bind(pool)
+const realGetConnection = pool.getConnection.bind(pool)
+const connExecute = new WeakMap<object, (...a: unknown[]) => unknown>()
+
 function failOn(match: string, err: object) {
   vi.restoreAllMocks()
-  const real = pool.execute.bind(pool)
-  vi.spyOn(pool, "execute").mockImplementation(((sql: string, ...rest: unknown[]) => {
-    if (sql.includes(match)) {
-      vi.mocked(pool.execute).mockImplementation(real as never)
-      return Promise.reject(Object.assign(new Error("injected"), err))
-    }
-    return (real as (...a: unknown[]) => unknown)(sql, ...rest)
-  }) as never)
+  let armed = true
+  const wrap = (real: (...a: unknown[]) => unknown) =>
+    ((sql: string, ...rest: unknown[]) => {
+      if (armed && sql.includes(match)) {
+        armed = false
+        return Promise.reject(Object.assign(new Error("injected"), err))
+      }
+      return real(sql, ...rest)
+    }) as never
+  vi.spyOn(pool, "execute").mockImplementation(wrap(realExecute as never))
+  // The pool hands the same connection back out, so keep each one's real
+  // execute from before it was first spied on.
+  vi.spyOn(pool, "getConnection").mockImplementation(async () => {
+    const conn = await realGetConnection()
+    if (!connExecute.has(conn)) connExecute.set(conn, conn.execute.bind(conn) as never)
+    vi.spyOn(conn, "execute").mockImplementation(wrap(connExecute.get(conn)!))
+    return conn
+  })
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -101,6 +119,15 @@ describe("programs model edges", () => {
 
       failOn("INSERT INTO program_exercises", { code: "ER_LOCK_DEADLOCK" })
       await expect(p.addExercise(userId, 1, "A", ex("Curl"))).rejects.toThrow("injected")
+    })
+
+    it("rolls the exercise back when the split_order append fails", async () => {
+      failOn("UPDATE programs SET split_order", { code: "ER_LOCK_DEADLOCK" })
+      await expect(p.addExercise(userId, 1, "Orphan", ex("Curl"))).rejects.toThrow("injected")
+      const [[{ n }]] = await pool.execute<RowDataPacket[]>(
+        "SELECT COUNT(*) AS n FROM program_exercises WHERE split_name = 'Orphan'",
+      )
+      expect(n).toBe(0)
     })
 
     it("keeps given reps and drops blank ones", async () => {

@@ -652,51 +652,57 @@ export async function addExercise(
   // by then the winner's row is committed and MAX has moved.
   const reps = exercise.reps == null ? null : String(exercise.reps).trim() || null
   const catalogId = exercise.exerciseId?.trim() || null
-  const insertSlot = () =>
-    pool.execute<ResultSetHeader>(
-      `INSERT INTO program_exercises
-         (program_day_id, split_name, position, exercise_id, catalog_id,
-          target_sets, target_reps)
-       SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, ?
-       FROM program_exercises
-       WHERE program_day_id = ? AND split_name = ?
-       HAVING COUNT(*) < ?`,
-      [
-        dayId,
-        split,
-        catalogRowId,
-        catalogId,
-        sets,
-        reps,
-        dayId,
-        split,
-        PROGRAM_LIMITS.exercisesPerSplit,
-      ],
-    )
-  let inserted: ResultSetHeader
-  try {
-    ;[inserted] = await insertSlot()
-  } catch (err) {
-    if ((err as { code?: string }).code !== "ER_DUP_ENTRY") throw err
-    ;[inserted] = await insertSlot()
-  }
-  // HAVING filtered the one aggregate row out: the split is full.
-  if (inserted.affectedRows === 0)
-    throw new ValidationError(
-      `A split may have at most ${PROGRAM_LIMITS.exercisesPerSplit} exercises`,
-    )
-  const [[insertedRow]] = await pool.execute<
-    (RowDataPacket & { position: number })[]
-  >(`SELECT position FROM program_exercises WHERE id = ?`, [inserted.insertId])
-  const position = insertedRow.position
+  // The slot insert and the split_order append commit together, so a failure
+  // between them can't leave an exercise on a split the program doesn't list.
+  // A duplicate-key error only rolls back its own statement in InnoDB, so the
+  // retry below still runs inside the same transaction.
+  const position = await withTransaction(async (conn) => {
+    const insertSlot = () =>
+      conn.execute<ResultSetHeader>(
+        `INSERT INTO program_exercises
+           (program_day_id, split_name, position, exercise_id, catalog_id,
+            target_sets, target_reps)
+         SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, ?
+         FROM program_exercises
+         WHERE program_day_id = ? AND split_name = ?
+         HAVING COUNT(*) < ?`,
+        [
+          dayId,
+          split,
+          catalogRowId,
+          catalogId,
+          sets,
+          reps,
+          dayId,
+          split,
+          PROGRAM_LIMITS.exercisesPerSplit,
+        ],
+      )
+    let inserted: ResultSetHeader
+    try {
+      ;[inserted] = await insertSlot()
+    } catch (err) {
+      if ((err as { code?: string }).code !== "ER_DUP_ENTRY") throw err
+      ;[inserted] = await insertSlot()
+    }
+    // HAVING filtered the one aggregate row out: the split is full.
+    if (inserted.affectedRows === 0)
+      throw new ValidationError(
+        `A split may have at most ${PROGRAM_LIMITS.exercisesPerSplit} exercises`,
+      )
+    const [[insertedRow]] = await conn.execute<
+      (RowDataPacket & { position: number })[]
+    >(`SELECT position FROM program_exercises WHERE id = ?`, [inserted.insertId])
 
-  // A split the program didn't list yet: append it, without rewriting the
-  // array in Node.
-  await pool.execute(
-    `UPDATE programs SET split_order = JSON_ARRAY_APPEND(split_order, '$', ?)
-     WHERE user_id = ? AND NOT JSON_CONTAINS(split_order, JSON_QUOTE(?))`,
-    [split, userId, split],
-  )
+    // A split the program didn't list yet: append it, without rewriting the
+    // array in Node.
+    await conn.execute(
+      `UPDATE programs SET split_order = JSON_ARRAY_APPEND(split_order, '$', ?)
+       WHERE user_id = ? AND NOT JSON_CONTAINS(split_order, JSON_QUOTE(?))`,
+      [split, userId, split],
+    )
+    return insertedRow.position
+  })
 
   return {
     exerciseIndex: position,

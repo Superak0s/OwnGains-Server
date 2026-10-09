@@ -367,7 +367,7 @@ router.post("/:sessionId/end", idempotent, async (req: Request, res: Response) =
 router.patch("/:sessionId", idempotent, async (req: Request, res: Response) => {
   const userId = req.user!.id
   const sessionId = parseIntParam(String(req.params.sessionId), "session ID")
-  const { dayNumber, dayTitle = null } = req.body ?? {}
+  const { dayNumber, dayTitle = null } = req.body
 
   if (!Number.isInteger(dayNumber) || dayNumber < 1)
     throw new ValidationError("Day number must be a positive integer")

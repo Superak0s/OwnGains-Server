@@ -367,7 +367,7 @@ export async function searchUsers(
  * moderator, severing the relationship *is* the remedy. So rather than
  * teaching every read path about blocks, a block tears down everything that
  * could still connect the pair: the friendship, both directions of sharing
- * permissions, and any outstanding joint-session invite. `hasPermission`
+ * permissions, and any outstanding joint-session invite. `resolveFriendAccess`
  * then answers false for watching, history and joint sessions without
  * knowing blocks exist.
  *

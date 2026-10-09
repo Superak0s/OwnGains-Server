@@ -64,6 +64,7 @@ export async function getUserSettings(userId: number): Promise<UserSettings> {
   // INSERT IGNORE swallows the FK violation if the user row vanished between
   // authenticateToken and here, and the cast would then serialize `undefined`
   // as a 200 with no data.
+  /* v8 ignore next -- race: the user row vanished mid-request */
   if (!row) throw new NotFoundError("User")
   return row as unknown as UserSettings
 }

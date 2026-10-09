@@ -38,7 +38,7 @@ export async function logMacrosIntake(
       carbs ?? 0,
       fat ?? 0,
       calories ?? 0,
-      errorMargin ?? 0,
+      errorMargin,
       ts,
       requireOptionalNote(note) ?? null,
     ],

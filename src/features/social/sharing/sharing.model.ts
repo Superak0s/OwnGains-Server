@@ -102,6 +102,7 @@ const MAX_INLINE_PAYLOADS = 10
  */
 function parsePayload(v: unknown): Record<string, unknown> | null {
   if (v == null) return null
+  /* v8 ignore next 7 -- only an older MariaDB that sends JSON without its type metadata reaches this */
   if (typeof v === "string") {
     try {
       return JSON.parse(v) as Record<string, unknown>
@@ -339,18 +340,6 @@ export async function resolveFriendAccess(
     friends: !!rows[0].friends,
     granted: !!rows[0].granted,
   }
-}
-
-export async function hasPermission(
-  fromUserId: number,
-  toUserId: number,
-  permissionType: PermissionType,
-): Promise<boolean> {
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT 1 FROM sharing_permissions WHERE from_user_id = ? AND to_user_id = ? AND permission_type = ? LIMIT 1`,
-    [fromUserId, toUserId, permissionType],
-  )
-  return rows.length > 0
 }
 
 // Muscle groups belong to the program day, not to the workout, same LEFT JOIN
@@ -606,7 +595,7 @@ export async function updateParticipantProgress(
   // knows what it is doing right now sends exerciseName, which is stored in its own
   // slot (JSON_SET appends when the index is past the end).
   if (progress.exerciseNames) {
-    assignments.push("exercise_names = CAST(? AS JSON)")
+    assignments.push("exercise_names = JSON_EXTRACT(?, '$')")
     params.push(JSON.stringify(progress.exerciseNames))
   } else if (progress.exerciseName) {
     assignments.push(

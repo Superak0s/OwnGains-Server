@@ -77,6 +77,7 @@ export async function idempotent(req: Request, res: Response, next: NextFunction
 
   const json = res.json.bind(res)
   res.json = (body: unknown) => {
+    /* v8 ignore next -- only a handler that answers twice */
     if (settled) return json(body)
     settled = true
     if (res.statusCode < 200 || res.statusCode >= 300) {

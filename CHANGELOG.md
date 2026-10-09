@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Added
 
 - New `watch_progress` WebSocket event pushed to friends watching a workout when the lifter records, edits or deletes a set or ends the session. The payload is `{ friendId, sessionId, liveSession }`, where `liveSession` is the same object `GET /api/sharing/watch/friend/:friendId/session/:sessionId/live` returns, or `null` once the session has ended. It only reaches watchers who polled `/live` recently and whose `watch_session` grant and friendship are still valid, re-checked on every push, and never the lifter's own sockets.
@@ -14,9 +16,22 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - A watch now stays active for 150s after the last `/live` poll instead of 60s, so apps that rely on `watch_progress` can poll every 60s.
 
+### Fixed
+
+- Joint workout progress updates that send `exerciseNames` (over HTTP or the WebSocket) no longer fail with a 500 on MariaDB.
+- Two `owngains backup create` runs started in the same second (for example from two cron entries) no longer write into the same file and leave an undecryptable backup.
+
 ### Internal
 
 - Tests for `watch_progress` pushes: the snapshot matches `/live`, idle watchers and the lifter get nothing, and a revoked grant stops pushes.
+- Raised test coverage with edge-case suites for the CLI, backups, boot and shutdown, env and database provisioning, validation, idempotency, the WebSocket server, the session cleanup job, metrics, legal pages, password hashing, middleware, and the auth, user, programs, workouts, demo, tracking, progress photo, supplements, friends and sharing models and routes.
+- Moved `runCli` into `src/tests/helpers.ts` and added `src/tests/fakebin.mjs`, a stand-in for `mysqldump` and `mysql` in backup tests.
+- `src/server.ts` exports `start`, `shutdown`, `main` and `getLanInterface` so tests can run boot and shutdown in-process. Its per-user rate-limit keys are built with a template literal, with no change in behavior.
+- Removed fallbacks and guards that could never run (in `src/ws/wsServer.ts`, the workouts, demo, auth, user, menstrual and progress photo models, the measurements pivot, the signup route, the throttle and macros models, the trainer audit log line, the rate-limit bypass IP check and every `req.body ?? {}`), simplified the program split-order and workout history sort comparators, deleted the unused `hasPermission` from the sharing model, and marked race-only branches with `v8 ignore`.
+- The progress photo model now rejects an insert without 1 to 20 muscle groups itself, matching the route.
+- Fixed flaky tests that shared database state across parallel files: the boot test no longer arms the real shutdown backstop timer or session sweep, the sweep lock tests take the lock before seeding, the last-admin CLI check moved to the mocked CLI suite (no more demoting every admin), and the purge tests age a joint session only after its participants exist.
+- Added a Claude Code PostToolUse hook that reminds Claude to update README.md after a change to feature routes or models, `src/routes.ts`, env config, the schema, the WebSocket server or jobs, and a user-invoked `/readme-audit` skill that checks README.md against the code and fixes the drift.
+- README brought in line with the code: demo fill route and `DEMO_FILL_RATE_LIMIT`, `consent_events` and `demo_rows` tables, existing migrations, the WebSocket pre-auth frame cap, `docker-compose.yml`, the k6 load test and `sonar:scan`, and the Docker image no longer described as setting `UV_THREADPOOL_SIZE`.
 
 ## [0.3.2] - 2026-10-07
 
@@ -148,7 +163,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.0

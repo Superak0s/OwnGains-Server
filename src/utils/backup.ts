@@ -89,7 +89,9 @@ export async function createBackup(): Promise<string> {
     logger.warn("[BACKUP] BACKUP_AGE_RECIPIENT is unset; writing an unencrypted backup")
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
   const out = join(dir, `owngains-${stamp}.sql.gz${recipient ? ".age" : ""}`)
-  const part = `${out}.part`
+  // The pid keeps two runs started in the same second (names only have second
+  // resolution) from writing into the same file and corrupting each other.
+  const part = `${out}.${process.pid}.part`
   const file = createWriteStream(part, { mode: 0o600 })
   try {
     if (recipient) {

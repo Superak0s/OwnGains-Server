@@ -23,13 +23,16 @@ async function insert(sql: string, params: (string | number)[]): Promise<number>
 
 async function jointSession(a: number, b: number, status: string, ageSql: string) {
   const id = await insert(
-    `INSERT INTO joint_sessions (created_by, status, created_at) VALUES (?, ?, NOW() - INTERVAL ${ageSql})`,
+    "INSERT INTO joint_sessions (created_by, status) VALUES (?, ?)",
     [a, status],
   )
   await pool.execute(
     "INSERT INTO joint_session_participants (joint_session_id, user_id) VALUES (?, ?), (?, ?)",
     [id, a, id, b],
   )
+  // Aged only once its participants exist: a purge from another file can
+  // delete an old session between the two inserts.
+  await pool.execute(`UPDATE joint_sessions SET created_at = NOW() - INTERVAL ${ageSql} WHERE id = ?`, [id])
   return id
 }
 

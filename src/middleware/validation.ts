@@ -206,7 +206,7 @@ export function validateRequired(requiredFields: string[]) {
     // req.body is undefined when the request arrives with no Content-Type, so
     // indexing it threw a TypeError and showed up as a 500 instead of the 400
     // this validator exists to produce.
-    const body = req.body ?? {}
+    const body = req.body
     const missing = requiredFields.filter(
       (f) => body[f] === undefined || body[f] === null || body[f] === "",
     )
@@ -332,7 +332,7 @@ export function validateLogin(
   _res: Response,
   next: NextFunction,
 ): void {
-  const { username, password } = req.body ?? {}
+  const { username, password } = req.body
   // Strings only: an object here reached the throttle's .trim() and the
   // WHERE clause as-is. No password policy (accounts made under an older,
   // laxer one must still sign in), just a sanity ceiling well above anything
@@ -808,7 +808,7 @@ export function validateProgramUpload(
   next: NextFunction,
 ): void {
   const L = PROGRAM_LIMITS
-  const { weeklyPlan, originalFilename } = req.body ?? {}
+  const { weeklyPlan, originalFilename } = req.body
 
   if (
     !isPlainObject(weeklyPlan) ||
@@ -858,7 +858,7 @@ export function validateProgramExercisePatch(
   next: NextFunction,
 ): void {
   const L = PROGRAM_LIMITS
-  const b = req.body ?? {}
+  const b = req.body
   const errors: string[] = []
 
   coerceIntField(b, "dayNumber", (n) => n >= 1 && n <= L.dayNumber,

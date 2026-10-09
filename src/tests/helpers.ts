@@ -1,6 +1,7 @@
 import request from "supertest"
 import { app } from "../server.js"
 import { findUserByUuid } from "../features/auth/auth.model.js"
+import { main } from "../owngains.js"
 
 export { app }
 
@@ -33,4 +34,22 @@ export async function internalId(uuid: string): Promise<number> {
   const user = await findUserByUuid(uuid)
   if (!user) throw new Error(`no user with uuid ${uuid}`)
   return user.id
+}
+
+// Runs the operator CLI in-process, capturing what it prints.
+export async function runCli(args: string[]): Promise<{ code: number; out: string }> {
+  const logs: string[] = []
+  const origLog = console.log
+  const origErr = console.error
+  console.log = (...a: unknown[]) => logs.push(a.join(" "))
+  console.error = (...a: unknown[]) => logs.push(a.join(" "))
+  const prev = process.argv
+  process.argv = ["node", "owngains", ...args]
+  try {
+    return { code: await main(), out: logs.join("\n") }
+  } finally {
+    console.log = origLog
+    console.error = origErr
+    process.argv = prev
+  }
 }

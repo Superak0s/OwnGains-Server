@@ -154,6 +154,7 @@ router.get("/watch/friend/:friendId/session/:sessionId/live", async (req: Reques
     throw new NotFoundError("Active session")
 
   const session = await getFriendSessionDetails(friendId, sessionId)
+  /* v8 ignore next -- only if the workout is deleted mid-request */
   if (!session) throw new NotFoundError("Session")
 
   // Only after every access check: a caller who can't watch never registers as

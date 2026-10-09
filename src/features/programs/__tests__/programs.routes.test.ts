@@ -164,10 +164,11 @@ describe("programs routes", () => {
       split: ["push"],
       days: [{ ...weeklyPlan.days[0], dayNumber: 2 }],
     }
-    await request(app)
+    const reup = await request(app)
       .post("/api/program/upload")
       .set(auth(u.token))
       .send({ weeklyPlan: shrunk, originalFilename: "plan.csv" })
+    expect(reup.status, JSON.stringify(reup.body)).toBe(200)
     const cleared = await request(app)
       .get("/api/program/current-day")
       .set(auth(u.token))
@@ -262,5 +263,26 @@ describe("programs routes", () => {
       })
     expect(unknownKey.status).toBe(400)
     expect(unknownKey.body.error).toContain("tempo")
+  })
+})
+
+describe("programs route edges", () => {
+  it("requires each edit's own fields, and clears a catalog id on rename", async () => {
+    const v = await signup("progedge")
+    const patch = (path: string, body: object) => request(app).patch(`/api/program/exercise/${path}`).set(auth(v.token)).send(body)
+    expect((await patch("add", { split: "push", exercise: { name: "Dip", sets: 3 } })).status).toBe(400)
+    expect((await patch("machine", { dayNumber: 1, split: "push", exerciseIndex: 0 })).status).toBe(400)
+    await request(app).post("/api/program/upload").set(auth(v.token)).send({ weeklyPlan, originalFilename: "p.csv" })
+    const rename = await patch("rename", { dayNumber: 1, split: "push", exerciseIndex: 0, newName: "Bench", newExerciseId: null })
+    expect(rename.status).toBe(200)
+  })
+
+  it("orders a day's split keys missing from the split order last", async () => {
+    const v = await signup("progorder")
+    const day = weeklyPlan.days[0]
+    const plan = { ...weeklyPlan, days: [{ ...day, split: { zed: day.split.push, push: day.split.push, yak: day.split.push } }] }
+    expect((await request(app).post("/api/program/upload").set(auth(v.token)).send({ weeklyPlan: plan, originalFilename: "p.csv" })).status).toBe(200)
+    const got = await request(app).get("/api/program").set(auth(v.token))
+    expect(Object.keys(got.body.days[0].split)).toEqual(["push", "yak", "zed"])
   })
 })

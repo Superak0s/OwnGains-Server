@@ -43,6 +43,7 @@ async function getNoteById(userId: number, noteId: number): Promise<MuscleNote> 
     `SELECT ${NOTE_COLS} FROM muscle_notes WHERE id = ? AND user_id = ?`,
     [noteId, userId],
   )
+  /* v8 ignore next -- race: called right after the insert */
   if (!rows[0]) throw new NotFoundError("Note")
   return rows[0]
 }

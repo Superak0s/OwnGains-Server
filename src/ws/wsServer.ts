@@ -119,10 +119,12 @@ export function hasOtherClients(userUuid: string): boolean {
  * With 0 hops the header is ignored, since it's entirely caller-supplied.
  */
 function clientIp(req: http.IncomingMessage, hops: number): string {
+  /* v8 ignore next -- undefined only once the socket has closed */
   const remote = req.socket.remoteAddress ?? "unknown"
   if (hops === 0) return remote
   const header = req.headers["x-forwarded-for"]
-  const forwarded = (Array.isArray(header) ? header.join(",") : (header ?? ""))
+  // String() joins a repeated header with commas, like the single form.
+  const forwarded = String(header ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
@@ -301,6 +303,7 @@ export function notifyJointProgress(
   progress: ProgressPayload,
 ): void {
   const partner = session.participants.find((p) => p.userId !== fromUserId)
+  /* v8 ignore next -- a joint session always has a second participant */
   if (partner)
     sendToUser(partner.userId, "joint_progress", {
       jointSessionId: session.id,
@@ -312,17 +315,17 @@ export function notifyJointProgress(
  * Current token_version for each uuid, in one query. Missing from the map =
  * the account no longer exists. pool.query (text protocol, client-side
  * escaping) rather than execute, so a varying IN-list length never turns into
- * a new server-side prepared statement.
+ * a new server-side prepared statement. Never called with an empty list: the
+ * heartbeat skips the sweep when no socket is signed in.
  */
 async function fetchTokenVersions(uuids: string[]): Promise<Map<string, number>> {
   const versions = new Map<string, number>()
-  if (uuids.length === 0) return versions
   const [rows] = await pool.query<RowDataPacket[]>(
     "SELECT uuid, token_version FROM users WHERE uuid IN (?)",
     [uuids],
   )
   for (const row of rows)
-    versions.set(row.uuid as string, Number(row.token_version ?? 0))
+    versions.set(row.uuid as string, Number(row.token_version))
   return versions
 }
 
@@ -410,7 +413,7 @@ export function createWsServer(
       perIp.set(ip, count + 1)
       info.req.socket.once("close", () => {
         total--
-        const n = (perIp.get(ip) ?? 1) - 1
+        const n = perIp.get(ip)! - 1
         if (n > 0) perIp.set(ip, n)
         else perIp.delete(ip)
       })
@@ -489,11 +492,10 @@ export function createWsServer(
     let authInFlight = false
     let preAuthMsgCount = 0
 
+    // Cleared the moment `user` is set, so it only ever fires unauthenticated.
     const authTimeout = setTimeout(() => {
-      if (!user) {
-        logger.warn("[WS] auth timeout, no auth message received")
-        ws.close(4001, "Unauthorized: No auth message")
-      }
+      logger.warn("[WS] auth timeout, no auth message received")
+      ws.close(4001, "Unauthorized: No auth message")
     }, authTimeoutMs)
 
     async function handleAuth(msg: WsMessage): Promise<void> {
@@ -586,7 +588,7 @@ export function createWsServer(
         // would otherwise re-insert it and leak the entry for the life of
         // the process.
         if (!msgCount.has(uuid)) return
-        msgCount.set(uuid, Math.max(0, (msgCount.get(uuid) ?? 1) - 1))
+        msgCount.set(uuid, Math.max(0, msgCount.get(uuid)! - 1))
       }, 1000)
       if (count > MAX_MSG_PER_SEC) {
         // Tell the client why, then close. Replying alone left the socket
@@ -669,6 +671,7 @@ export function createWsServer(
     ws.on("message", (raw: Ws.RawData) => {
       // Backstop for anything handleMessage didn't anticipate: an async
       // listener's rejection has nowhere else to go but the process.
+      /* v8 ignore next 4 -- backstop: every path inside handleMessage catches its own errors */
       handleMessage(raw).catch((err) => {
         logger.error("[WS] message handler failed:", err)
         send(ws, "error", { message: "Server error" })

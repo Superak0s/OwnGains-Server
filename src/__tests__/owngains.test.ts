@@ -1,27 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { main } from "../owngains.js"
-import { uniqueName } from "../tests/helpers.js"
+import { runCli, uniqueName } from "../tests/helpers.js"
 import { createUser } from "../features/auth/auth.model.js"
 import { reportUser } from "../features/social/friends/friends.model.js"
 import type { RowDataPacket } from "mysql2"
 import { pool } from "../config/database.js"
-
-async function runCli(args: string[]): Promise<{ code: number; out: string }> {
-  const logs: string[] = []
-  const origLog = console.log
-  const origErr = console.error
-  console.log = (...a: unknown[]) => logs.push(a.join(" "))
-  console.error = (...a: unknown[]) => logs.push(a.join(" "))
-  const prev = process.argv
-  process.argv = ["node", "owngains", ...args]
-  try {
-    return { code: await main(), out: logs.join("\n") }
-  } finally {
-    console.log = origLog
-    console.error = origErr
-    process.argv = prev
-  }
-}
 
 describe("owngains CLI", () => {
   it("prints usage and exits 0 with no command", async () => {
@@ -48,29 +30,8 @@ describe("owngains CLI", () => {
     let [rows] = await pool.query<(RowDataPacket & { is_admin: number })[]>("SELECT is_admin FROM users WHERE username = ?", [username])
     expect(rows[0]!.is_admin).toBe(1)
 
-    // Removing the last admin is refused, since this CLI is the only way back in.
-    // Other test files share this database and may have made their own admins
-    // (the first user of a fresh database is one), so make this user the only
-    // admin explicitly rather than assuming it.
-    // The demotion is database-wide, so the admins other files made are put
-    // back straight after the one CLI call that needs it. Left demoted, the
-    // admin and metrics suites running in parallel failed with 403s.
-    const [others] = await pool.query<(RowDataPacket & { id: number })[]>(
-      "SELECT id FROM users WHERE is_admin = 1 AND username <> ?",
-      [username],
-    )
-    const otherIds = others.map((r) => r.id)
-    await pool.query("UPDATE users SET is_admin = 0 WHERE username <> ?", [username])
-    let lastOne: Awaited<ReturnType<typeof runCli>>
-    try {
-      lastOne = await runCli(["remove", username])
-    } finally {
-      if (otherIds.length)
-        await pool.query("UPDATE users SET is_admin = 1 WHERE id IN (?)", [otherIds])
-    }
-    expect(lastOne.code).toBe(2)
-    expect(lastOne.out).toContain("only admin")
-
+    // The last-admin refusal is in owngains.mocked.test.ts: staging it here
+    // meant demoting every other admin in the shared database.
     const second = uniqueName("adm2")
     await createUser(second, `${second}@test.local`, "Passw0rd-123")
     expect((await runCli(["add", second])).code).toBe(0)
@@ -117,6 +78,41 @@ describe("owngains CLI", () => {
     const hash = rows[0]!.password_hash
     const bcrypt = (await import("bcrypt")).default ?? (await import("bcrypt"))
     expect(await bcrypt.compare("NewPass9999", hash)).toBe(true)
+  })
+
+  it("rejects an unknown command and prints help on request", async () => {
+    expect(await runCli(["nope"])).toEqual({ code: 2, out: "Unknown command" })
+    expect((await runCli(["help"])).out).toContain("Usage: owngains")
+  })
+
+  it("suspend/unsuspend validate input, refuse admins and toggle disabled_at", async () => {
+    const username = uniqueName("sus")
+    await createUser(username, `${username}@test.local`, "Passw0rd-123")
+    const disabled = async () => {
+      const [rows] = await pool.query<(RowDataPacket & { d: string | null })[]>(
+        "SELECT disabled_reason AS d FROM users WHERE username = ?",
+        [username],
+      )
+      return rows[0]!.d
+    }
+
+    expect((await runCli(["suspend"])).out).toBe("Usage: owngains suspend <username> <reason>")
+    expect((await runCli(["unsuspend"])).out).toBe("Usage: owngains unsuspend <username>")
+    expect((await runCli(["suspend", uniqueName("nope"), "x"])).out).toContain("User not found")
+    expect((await runCli(["suspend", username])).code).toBe(2)
+    expect((await runCli(["suspend", username, "x".repeat(501)])).code).toBe(2)
+
+    const sus = await runCli(["suspend", username, "spamming", "people"])
+    expect(sus).toEqual({ code: 0, out: `User ${username} suspended and signed out everywhere.` })
+    expect(await disabled()).toBe("spamming people")
+
+    expect((await runCli(["unsuspend", username])).out).toBe(`User ${username} unsuspended.`)
+    expect(await disabled()).toBeNull()
+
+    const admin = uniqueName("susadm")
+    await createUser(admin, `${admin}@test.local`, "Passw0rd-123")
+    await runCli(["add", admin])
+    expect((await runCli(["suspend", admin, "x"])).out).toContain("Refusing to suspend an admin")
   })
 
   it("lists every user with an admin marker, and reports", async () => {

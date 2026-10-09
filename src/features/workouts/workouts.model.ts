@@ -973,7 +973,7 @@ export async function getRecordSessions(userId: number): Promise<Session[]> {
   // chronologically, and id breaks ties the same way the history list does).
   rows.sort((a, b) => {
     if (a.startTime === b.startTime) return b.id - a.id
-    return String(a.startTime) < String(b.startTime) ? 1 : -1
+    return String(b.startTime).localeCompare(String(a.startTime))
   })
 
   const bySession = new Map<number, SetTiming[]>()
@@ -986,7 +986,8 @@ export async function getRecordSessions(userId: number): Promise<Session[]> {
     ...(r as unknown as Session),
     primaryMuscles: parseMuscleGroups(r.primaryMuscles),
     secondaryMuscles: parseMuscleGroups(r.secondaryMuscles),
-    setTimings: bySession.get(r.id) ?? [],
+    // Every row here was fetched because it has kept sets.
+    setTimings: bySession.get(r.id)!,
   }))
 }
 
@@ -999,8 +1000,9 @@ async function fetchKeptSets(
 ): Promise<WorkoutSetRow[]> {
   const sets: WorkoutSetRow[] = []
   let chunk: number[] = []
+  // Never called empty: the caller returns early when no set was kept, and the
+  // loop flushes only a non-empty chunk.
   const flush = async () => {
-    if (!chunk.length) return
     const [part] = await pool.execute<WorkoutSetRow[]>(
       `SELECT ${SET_COLS}
        ${SET_FROM}

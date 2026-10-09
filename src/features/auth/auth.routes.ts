@@ -94,9 +94,8 @@ router.post("/signup", validateRegistration, async (req: Request, res: Response)
     termsVersion,
     healthConsent,
   })
-  const user = await findUserById(userId)
+  const user = (await findUserById(userId))!
 
-  if (!user) throw new Error("Failed to create user")
   const token = generateToken(user.uuid, 0)
 
   res.status(201).json({
@@ -114,7 +113,7 @@ router.post("/signup", validateRegistration, async (req: Request, res: Response)
  * this after signup, sign-in and whenever the Terms change.
  */
 router.put("/consent", authenticateToken, async (req: Request, res: Response) => {
-  const body = req.body ?? {}
+  const body = req.body
   const errors = consentFieldErrors(body)
   if (body.termsVersion === undefined && body.healthConsent === undefined)
     errors.push("Provide termsVersion and/or healthConsent")
@@ -340,7 +339,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
  * stays signed in.
  */
 router.post("/signout", authenticateToken, async (req: Request, res: Response) => {
-  const { refreshToken, allDevices } = req.body ?? {}
+  const { refreshToken, allDevices } = req.body
   if (allDevices === true) {
     await revokeAllSessions(req.user!.id)
     return res.json({

@@ -87,6 +87,8 @@ Applies to Markdown, `CHANGELOG.md` entries, code comments, and the error, log a
 ## Claude Code tooling
 
 - **Typecheck hook**: a `PostToolUse` hook runs `bunx tsc --noEmit` after every `Edit`/`Write` to a `.ts` file and blocks the edit if it fails. It catches the two silent breakages this layout invites: a missing `.js` extension on a local import, and a `@/` alias that doesn't resolve. TypeScript 7's native compiler does the whole project in well under a second, so it costs nothing per edit.
+- **README hook**: a second `PostToolUse` hook (`.claude/hooks/readme-reminder.mjs`) adds a reminder to check README.md after an edit to a feature's `.routes.ts`/`.model.ts`, `src/routes.ts`, `config/env.ts`, `schema.sql`, `ws/wsServer.ts` or `jobs/`. It never blocks.
+- **`/readme-audit`**: user-invoked skill that compares every README section with the code (routes, env variables, tables, WS events, jobs, CLI) and fixes the drift.
 - **`/new-feature`**: user-invoked skill that walks the feature trio (`<name>.{routes,model}.ts`), the `registerRoutes` mount, the schema-vs-migration decision, and the test file. It does not self-invoke.
 - **`security-reviewer`** and **`sql-reviewer`** subagents: launched on request, not automatically. The first audits auth, WebSocket, rate-limit/proxy-trust and upload paths. The second checks placeholder discipline in `pool.execute` calls and whether a schema change belongs in `schema.sql` or a new migration.
 - **MCP servers** (local scope, this project only): `context7` for live docs on the recent majors here (Express 5, helmet 8, multer 2), and `mysql-test`, a read-only connection to `owngains_test`, useful because there is no ORM and so no generated types to read the live schema from.

@@ -117,9 +117,7 @@ router.get("/group/:muscle", async (req: Request, res: Response) => {
 })
 
 /** True when an If-None-Match header lists `etag` (or `*`). */
-function matchesIfNoneMatch(req: Request, etag: string): boolean {
-  const header = req.get("If-None-Match")
-  if (!header) return false
+function matchesIfNoneMatch(header: string, etag: string): boolean {
   return header
     .split(",")
     .map((t) => t.trim().replace(/^W\//, ""))
@@ -134,9 +132,10 @@ router.get("/:id/image", async (req: Request, res: Response) => {
 
   // A revalidation is answered from the metadata row: the stored hash is the
   // ETag, so a 304 never reads the LONGBLOB into the heap.
-  if (req.get("If-None-Match")) {
+  const ifNoneMatch = req.get("If-None-Match")
+  if (ifNoneMatch) {
     const hash = await getPhotoHash(userId, photoId)
-    if (hash && matchesIfNoneMatch(req, `"${hash}"`)) {
+    if (hash && matchesIfNoneMatch(ifNoneMatch, `"${hash}"`)) {
       res.set("ETag", `"${hash}"`)
       res.set("Cache-Control", `private, max-age=${86_400}`)
       res.status(304).end()

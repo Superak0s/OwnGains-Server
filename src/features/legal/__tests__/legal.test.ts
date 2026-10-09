@@ -29,3 +29,21 @@ describe("legal pages", () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe("legal page outages", () => {
+  it("serves a stale copy past its hour, and 503s a page never fetched", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("down", { status: 502 })))
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2 * 60 * 60 * 1000)
+    try {
+      expect((await request(app).get("/terms-of-service.html")).status).toBe(200)
+    } finally {
+      vi.restoreAllMocks()
+    }
+    // A fresh module, so nothing is cached.
+    vi.resetModules()
+    const fresh = express().use((await import("../legal.routes.js")).default)
+    const res = await request(fresh).get("/delete-account.html")
+    expect([res.status, res.headers["retry-after"]]).toEqual([503, "60"])
+    vi.unstubAllGlobals()
+  })
+})

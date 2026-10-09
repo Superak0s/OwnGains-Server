@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import http from "node:http"
 import jwt from "jsonwebtoken"
 import WebSocket, { type WebSocketServer } from "ws"
-import { createWsServer, sendToUser, type WsServerOptions } from "../wsServer.js"
+import { closeWsServer, createWsServer, getWsStats, sendToUser, type WsServerOptions } from "../wsServer.js"
 import { createUser, findUserById } from "../../features/auth/auth.model.js"
 import type { ResultSetHeader, RowDataPacket } from "mysql2"
 import { pool } from "../../config/database.js"
@@ -169,6 +169,8 @@ describe("H7: connection caps", () => {
     await connect(port)
     await connect(port)
     await expect(connect(port)).rejects.toMatchObject({ status: 503 })
+    // A second refusal inside 10s isn't logged again.
+    await expect(connect(port)).rejects.toMatchObject({ status: 503 })
   })
 
   it("keys the per-IP cap on X-Forwarded-For only when a proxy hop is trusted", async () => {
@@ -181,6 +183,8 @@ describe("H7: connection caps", () => {
     await expect(
       connect(proxied.port, { "X-Forwarded-For": "203.0.113.2" }),
     ).resolves.toBeInstanceOf(WebSocket)
+    // No header at all: the socket address is the client.
+    await expect(connect(proxied.port)).resolves.toBeInstanceOf(WebSocket)
 
     // Exposed directly, the header is caller-supplied and must not create buckets.
     const direct = await startServer({ maxConnectionsPerIp: 1, trustProxyHops: 0 })
@@ -292,5 +296,181 @@ describe("leave_joint_session", () => {
     expect(got.find((m) => m.type === "invite_status")?.status).toBe("session_ended")
     const [rows] = await pool.execute<(RowDataPacket & { status: string })[]>("SELECT status FROM joint_sessions WHERE id = ?", [js.insertId])
     expect(rows[0]!.status).toBe("ended")
+  })
+})
+
+describe("edge paths", () => {
+  const sign = (userId: string, opts: jwt.SignOptions = { expiresIn: "15m" }) =>
+    jwt.sign({ userId, tokenVersion: 0 }, process.env.JWT_SECRET!, { algorithm: "HS256", ...opts })
+  const idOf = async (uuid: string) =>
+    (await pool.execute<(RowDataPacket & { id: number })[]>("SELECT id FROM users WHERE uuid = ?", [uuid]))[0][0]!.id
+  async function jointSession(...uuids: string[]): Promise<number> {
+    const ids = await Promise.all(uuids.map(idOf))
+    const [js] = await pool.execute<ResultSetHeader>("INSERT INTO joint_sessions (created_by) VALUES (?)", [ids[0]])
+    for (const id of ids)
+      await pool.execute("INSERT INTO joint_session_participants (joint_session_id, user_id) VALUES (?, ?)", [js.insertId, id])
+    return js.insertId
+  }
+  const sendAuth = async (port: number, token: string) => {
+    const ws = await connect(port)
+    ws.send(JSON.stringify({ type: "auth", token }))
+    return waitForClose(ws)
+  }
+
+  it("refuses a token for a non-uuid or unknown user, and reports a DB failure as 4002", async () => {
+    const { port } = await startServer()
+    expect(await sendAuth(port, sign("42"))).toEqual({ code: 4001, reason: "Unauthorized: invalid token" })
+    expect(await sendAuth(port, sign(crypto.randomUUID()))).toEqual({ code: 4001, reason: "Unauthorized: User not found" })
+    const err = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(pool, "execute").mockRejectedValueOnce(new Error("db down"))
+    expect((await sendAuth(port, sign(crypto.randomUUID()))).code).toBe(4002)
+    expect(err).toHaveBeenCalled()
+  })
+
+  it("ignores a second auth frame while the first is being checked", async () => {
+    const { port } = await startServer()
+    const u = await makeUser()
+    const ws = await connect(port)
+    const auth = JSON.stringify({ type: "auth", token: u.token })
+    ws.send(auth)
+    ws.send(auth)
+    expect((await nextMessage(ws)).type).toBe("auth_success")
+    await expect(nextMessage(ws, 300)).rejects.toThrow("timed out")
+  })
+
+  it("drops an auth that finishes after its socket closed", async () => {
+    const { port, wss } = await startServer()
+    const u = await makeUser()
+    const real = pool.execute.bind(pool)
+    vi.spyOn(pool, "execute").mockImplementationOnce(((...a: Parameters<typeof pool.execute>) => {
+      wss.clients.forEach((c) => c.terminate())
+      return real(...a)
+    }) as typeof pool.execute)
+    const before = getWsStats().authenticatedSockets
+    const ws = await connect(port)
+    ws.send(JSON.stringify({ type: "auth", token: u.token }))
+    await waitForClose(ws)
+    await sleep(100)
+    expect(getWsStats().authenticatedSockets).toBe(before)
+  })
+
+  it("auth.refresh reports a DB failure as 4002", async () => {
+    const { port } = await startServer()
+    const u = await makeUser()
+    const ws = await authed(port, u.token)
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(pool, "execute").mockRejectedValueOnce(new Error("db down"))
+    ws.send(JSON.stringify({ type: "auth.refresh", token: u.token }))
+    expect(await waitForClose(ws)).toEqual({ code: 4002, reason: "Server error during auth" })
+  })
+
+  it("relays joint progress, and refuses outsiders and ended sessions", async () => {
+    const { port } = await startServer()
+    const [a, b, c] = await Promise.all([makeUser(), makeUser(), makeUser()])
+    const id = await jointSession(a.userId, b.userId)
+    const [wsA, wsB, wsC] = await Promise.all([a, b, c].map((u) => authed(port, u.token)))
+    expect(getWsStats()).toMatchObject({ running: true })
+    expect(getWsStats().authenticatedSockets).toBeGreaterThanOrEqual(3)
+
+    const toB = nextMessage(wsB)
+    wsA.send(JSON.stringify({ type: "push_joint_progress", jointSessionId: id }))
+    expect(await toB).toMatchObject({ type: "joint_progress", jointSessionId: id, progress: { fromUserId: a.userId, readyForNext: false } })
+
+    const toC = nextMessage(wsC)
+    wsC.send(JSON.stringify({ type: "push_joint_progress", jointSessionId: id, progress: {} }))
+    expect(await toC).toEqual({ type: "error", message: "Not a participant" })
+
+    await pool.execute("UPDATE joint_sessions SET status = 'ended' WHERE id = ?", [id])
+    const ended = nextMessage(wsA)
+    wsA.send(JSON.stringify({ type: "push_joint_progress", jointSessionId: id, progress: null }))
+    expect(await ended).toEqual({ type: "joint_session_ended", jointSessionId: id })
+  })
+
+  it("ignores a leave for a session the user is not in, and a solo leave notifies nobody", async () => {
+    const { port } = await startServer()
+    const u = await makeUser()
+    const ws = await authed(port, u.token)
+    const solo = await jointSession(u.userId)
+    ws.send(JSON.stringify({ type: "leave_joint_session", jointSessionId: 2_000_000_000 }))
+    ws.send(JSON.stringify({ type: "leave_joint_session", jointSessionId: solo }))
+    await vi.waitFor(async () => {
+      const [rows] = await pool.execute<(RowDataPacket & { status: string })[]>("SELECT status FROM joint_sessions WHERE id = ?", [solo])
+      expect(rows[0]!.status).toBe("ended")
+    })
+    expect(ws.readyState).toBe(WebSocket.OPEN)
+  })
+
+  it.each([
+    ["push_joint_progress", "a driver error is masked", new Error("ER_secret_detail"), "Server error"],
+    ["push_joint_progress", "a 4xx is passed on", Object.assign(new Error("Conflict here"), { statusCode: 409 }), "Conflict here"],
+    ["leave_joint_session", "a driver error is masked", new Error("ER_secret_detail"), "Server error"],
+  ])("%s failure: %s", async (type, _name, error, message) => {
+    const { port } = await startServer()
+    const u = await makeUser()
+    const ws = await authed(port, u.token)
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(pool, "execute").mockRejectedValueOnce(error)
+    const reply = nextMessage(ws)
+    ws.send(JSON.stringify({ type, jointSessionId: 1 }))
+    expect(await reply).toEqual({ type: "error", message })
+  })
+
+  it("reports no connections once stopped", async () => {
+    await startServer()
+    closeWsServer()
+    expect(getWsStats()).toMatchObject({ running: false, connections: 0, maxConnections: null, distinctIps: 0 })
+  })
+
+  it("logs and ignores a frame that is not JSON", async () => {
+    const { port } = await startServer()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const ws = await connect(port)
+    ws.send("{")
+    await vi.waitFor(() => expect(warn.mock.calls.flat().join(" ")).toContain("failed to parse message"))
+    expect(ws.readyState).toBe(WebSocket.OPEN)
+  })
+
+  it("lets the rate counter decay, also after the user left", async () => {
+    const { port } = await startServer()
+    const u = await makeUser()
+    const ws = await authed(port, u.token)
+    ws.send(JSON.stringify({ type: "noop" }))
+    await sleep(1100)
+    ws.send(JSON.stringify({ type: "noop" }))
+    ws.close()
+    await waitForClose(ws)
+    await sleep(1100)
+  })
+
+  it("heartbeat: terminates a silent socket and closes an expired token", async () => {
+    const { port } = await startServer({ heartbeatMs: 200, authTimeoutMs: 5000 })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const u = await makeUser()
+    const silent = new WebSocket(`ws://127.0.0.1:${port}/ws`, { autoPong: false })
+    sockets.push(silent)
+    await new Promise((r) => silent.once("open", r))
+    const expiring = await authed(port, sign(u.userId, { expiresIn: 1 }))
+
+    const [s, e] = await Promise.all([waitForClose(silent), waitForClose(expiring, 4000)])
+    expect(s.code).toBe(1006)
+    expect(e).toEqual({ code: 4001, reason: "Unauthorized: Token expired" })
+  })
+
+  it("heartbeat: a failed revalidation signs nobody out, and skips sockets closed meanwhile", async () => {
+    const { port, wss } = await startServer({ heartbeatMs: 200 })
+    const err = vi.spyOn(console, "error").mockImplementation(() => {})
+    const u = await makeUser()
+    const ws = await authed(port, u.token)
+    const real = pool.query.bind(pool)
+    const query = vi
+      .spyOn(pool, "query")
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockImplementationOnce(((...a: Parameters<typeof pool.query>) => {
+        wss.clients.forEach((c) => c.close(1000, "bye"))
+        return real(...a)
+      }) as typeof pool.query)
+    expect((await waitForClose(ws)).code).not.toBe(4001)
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(err.mock.calls.flat().join(" ")).toContain("revalidation failed")
   })
 })

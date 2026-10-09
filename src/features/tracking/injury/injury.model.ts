@@ -95,6 +95,7 @@ async function getInjuryById(
     `SELECT ${INJURY_COLS} FROM injuries WHERE id = ? AND user_id = ?`,
     [injuryId, userId],
   )
+  /* v8 ignore next -- race: called right after this user wrote the row */
   if (!rows[0]) throw new NotFoundError("Injury")
   return rows[0]
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest"
+import { describe, it, expect, beforeAll } from "vitest"
 import request from "supertest"
 import { app, signup, auth, internalId } from "../../../tests/helpers.js"
 import { pool } from "../../../config/database.js"
@@ -13,13 +13,6 @@ describe("admin routes and moderation", () => {
     plain = await signup("plain")
     // isAdmin is read from the row on every request, so the existing token
     // picks this up without re-signing in.
-    await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(admin.user.id)])
-  })
-
-  // __tests__/owngains.test.ts briefly demotes every other admin to test the
-  // CLI's last-admin guard. Re-assert before each test so that window can't
-  // turn into a stray 403 here.
-  beforeEach(async () => {
     await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(admin.user.id)])
   })
 

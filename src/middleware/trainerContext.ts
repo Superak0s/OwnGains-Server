@@ -75,7 +75,7 @@ export async function applyTrainerContext(
   // identifiers every other log line and WS event already carry.
   if (req.method !== "GET" && req.method !== "HEAD")
     logger.info(
-      `[TRAINER] ${req.trainer.uuid} as ${trainee.uuid}: ${req.method} ${req.originalUrl} reqId=${req.reqId ?? "-"}`,
+      `[TRAINER] ${req.trainer.uuid} as ${trainee.uuid}: ${req.method} ${req.originalUrl} reqId=${req.reqId}`,
     )
   next()
 }

@@ -143,7 +143,7 @@ if (bypassLocalIps && trustProxyHops === 0)
 // production protection, not something to mock around. Read per request,
 // so a test that exercises a limiter can unset VITEST around itself.
 const skipLimiter = (req: Request) =>
-  !!process.env.VITEST || (bypassLocalIps && isLocalIp(req.ip ?? ""))
+  !!process.env.VITEST || (bypassLocalIps && isLocalIp(String(req.ip)))
 
 const limiter = (
   windowMs: number,
@@ -198,7 +198,8 @@ const largeBodyLimiter = limiter(
   FIFTEEN_MIN,
   envInt("LARGE_BODY_RATE_LIMIT", 20, 1),
   {
-    keyGenerator: (req) => `user:${req.user?.uuid ?? "anon"}`,
+    // Behind authenticateToken, so req.user is always set.
+    keyGenerator: (req) => `user:${req.user!.uuid}`,
     skip: (req) => {
       if (skipLimiter(req)) return true
       if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return true
@@ -213,7 +214,7 @@ app.post(
   "/api/sessions/demo",
   authenticateToken,
   limiter(FIFTEEN_MIN, envInt("DEMO_FILL_RATE_LIMIT", 5, 1), {
-    keyGenerator: (req) => `user:${req.user?.uuid ?? "anon"}`,
+    keyGenerator: (req) => `user:${req.user!.uuid}`,
   }),
 )
 
@@ -319,7 +320,7 @@ const mdnsEnabled = envBool("MDNS_ENABLED", true)
 // on a machine with Docker/WSL/VirtualBox/Hyper-V adapters it can bind
 // multicast to one of those instead, so the announcement never reaches the
 // actual Wi-Fi/Ethernet network.
-function getLanInterface(): string | undefined {
+export function getLanInterface(): string | undefined {
   const virtualAdapter = /loopback|vEthernet|VirtualBox|Virtual|VPN|Tailscale|ZeroTier|Docker/i
   for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
     if (virtualAdapter.test(name)) continue
@@ -335,7 +336,7 @@ function getLanInterface(): string | undefined {
 let bonjour: Bonjour | undefined
 let mdnsService: Service | undefined
 
-async function start() {
+export async function start() {
   await testDatabaseConnection()
   createWsServer(server)
   const b = mdnsEnabled
@@ -376,7 +377,7 @@ async function start() {
 
 let shuttingDown = false
 
-function shutdown(exitCode: number) {
+export function shutdown(exitCode: number) {
   // SIGTERM followed by SIGINT (or a signal during a crash) used to run the
   // whole teardown twice: a second server.close() errors, and a second
   // pool.end() rejects, straight back into the rejection handler.
@@ -410,7 +411,8 @@ const isMain =
   process.argv[1] != null &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 
-if (isMain) {
+/** Boots the server and hooks the process signals. Exported for tests. */
+export function main(): void {
   start().catch((err) => {
     logger.error("Failed to start server:", err)
     process.exit(1)
@@ -444,3 +446,6 @@ if (isMain) {
     shutdown(1)
   })
 }
+
+/* v8 ignore next -- only when launched as a script, never under test */
+if (isMain) main()

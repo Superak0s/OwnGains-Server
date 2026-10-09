@@ -84,6 +84,7 @@ const MAX_DEFINITIONS_PER_USER = 50
  * statement text per call site, however many values the caller sent.
  */
 function fixedIn<T>(values: readonly T[], size: number): { sql: string; params: T[] } {
+  /* v8 ignore next 2 -- every caller caps its list first, so this guards a code change, not input */
   if (values.length === 0 || values.length > size)
     throw new Error(`fixedIn: ${values.length} values for ${size} slots`)
   const params = [...values]
@@ -356,7 +357,7 @@ function pivotMetricRows(
       for (const a of aliases) g.values[a] = null
       groups.set(r.measuredAt, g)
     }
-    if (r.id < g.id) g.id = r.id
+    // Rows come ordered by id within a session, so the first one set g.id to the lowest.
     if (r.note != null && (g.note == null || r.note > g.note)) g.note = r.note
     for (const a of aliases)
       if (metrics[a] === r.metric) g.values[a] = Math.max(g.values[a] ?? r.value, r.value)

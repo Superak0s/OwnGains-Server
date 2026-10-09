@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeAll, vi } from "vitest"
 import express from "express"
 import request from "supertest"
 import { app, signup, auth, internalId } from "../../../tests/helpers.js"
@@ -22,16 +22,22 @@ describe("admin metrics", () => {
     await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(admin.user.id)])
   })
 
-  // __tests__/owngains.test.ts briefly demotes every other admin to test the
-  // CLI's last-admin guard. Re-assert before each test so that window can't
-  // turn into a stray 403 here.
-  beforeEach(async () => {
-    await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(admin.user.id)])
-  })
-
   it("refuses anonymous callers and non-admins", async () => {
     expect((await request(app).get("/api/admin/metrics")).status).toBe(401)
     expect((await request(app).get("/api/admin/metrics").set(auth(plain.token))).status).toBe(403)
+  })
+
+  it("reports a null nodeEnv when NODE_ENV is unset", async () => {
+    // The config is read at load, so this needs a fresh copy of the router.
+    vi.stubEnv("NODE_ENV", undefined)
+    vi.resetModules()
+    try {
+      const fresh = express().use((await import("../metrics.routes.js")).default)
+      const res = await request(fresh).get("/").set(auth(admin.token))
+      expect(res.body.config.nodeEnv).toBeNull()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("reports process, HTTP, websocket and database figures to an admin", async () => {

@@ -83,7 +83,7 @@ interface ProgressPhotoMeta extends RowDataPacket {
   customSideName: string | null
   createdAt: string
   /** JSON_ARRAYAGG, so the driver hands back a real array, or null for none. */
-  muscleGroups: string[] | null
+  muscleGroups: string[]
 }
 
 // The muscle groups come from a correlated subquery rather than a LEFT JOIN +
@@ -101,7 +101,6 @@ const SELECT_PHOTOS = `
 function withUri(row: ProgressPhotoMeta) {
   return {
     ...row,
-    muscleGroups: row.muscleGroups ?? [],
     uri: `/api/tracking/photos/muscle/${row.id}/image`,
     thumbUri: `/api/tracking/photos/muscle/${row.id}/thumb`,
   }
@@ -122,6 +121,7 @@ async function assertDecodable(photo: Buffer): Promise<void> {
     throw new ValidationError("Invalid image data")
   }
   const { width, height } = meta
+  /* v8 ignore next -- sharp reports no format it can open without dimensions */
   if (!width || !height) throw new ValidationError("Invalid image data")
   if (width * height > MAX_INPUT_PIXELS)
     throw new ValidationError(
@@ -191,8 +191,8 @@ export async function uploadPhoto(
     throw new ValidationError("Invalid image type. Allowed: JPEG, PNG, WebP")
   if (!(ALLOWED_ANGLES as readonly string[]).includes(angle))
     throw new ValidationError("Invalid angle")
-  if (muscleGroups.length > 20)
-    throw new ValidationError("Too many muscle groups")
+  if (!muscleGroups.length || muscleGroups.length > 20)
+    throw new ValidationError("Between 1 and 20 muscle groups are required")
   // A muscle group is a row now, not a piece of a comma-joined string, so a
   // comma in the name is just a character.
   if (muscleGroups.some((m) => typeof m !== "string" || !m || m.length > MAX_MUSCLE_NAME_LENGTH))

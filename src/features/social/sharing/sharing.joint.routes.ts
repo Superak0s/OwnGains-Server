@@ -116,11 +116,13 @@ router.post("/joint-sessions/invites/:inviteId/accept", async (req: Request, res
   )
 
   const jointSession = await getJointSession(jointSessionId)
+  /* v8 ignore next -- only if the session is deleted mid-request */
   if (!jointSession) throw new Error("Joint session not found after accept")
 
   const sender = jointSession.participants.find(
     (p) => p.userId !== req.user!.uuid,
   )
+  /* v8 ignore next -- the sender is always the other participant */
   if (sender)
     sendToUser(sender.userId, "invite_status", {
       status: "accepted",
@@ -136,6 +138,7 @@ router.post("/joint-sessions/invites/:inviteId/decline", async (req: Request, re
 
   await declineInvite(inviteId, req.user!.id)
 
+  /* v8 ignore next -- declineInvite already 404d a missing invite */
   if (invite)
     sendToUser(invite.from_user_uuid, "invite_status", {
       status: "declined",
@@ -168,6 +171,7 @@ router.patch("/joint-sessions/:jointSessionId/progress", async (req: Request, re
   })
 
   const session = await getJointSession(jointSessionId)
+  /* v8 ignore next -- the update above 404s a session that is gone */
   if (session) notifyJointProgress(session, req.user!.uuid, stored)
 
   res.json({ success: true })

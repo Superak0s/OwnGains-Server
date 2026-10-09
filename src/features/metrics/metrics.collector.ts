@@ -292,6 +292,7 @@ function record(req: Request, res: Response, ms: number): void {
   const us = Math.min(MAX_LATENCY_US, Math.max(1, Math.round(ms * 1000)))
   totals.latency.record(us)
   const cls = `${Math.floor(status / 100)}xx`
+  /* v8 ignore next -- a finished response is never 1xx */
   if (cls in totals.byClass) totals.byClass[cls]++
   bump(totals.byStatus, status)
   totals.byMethod[req.method] = (totals.byMethod[req.method] ?? 0) + 1

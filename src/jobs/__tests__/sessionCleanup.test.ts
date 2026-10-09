@@ -103,26 +103,32 @@ describe("endStaleSessions", () => {
   }
 
   it("stands down while another sweep holds the lock", async () => {
-    const id = await staleWorkout()
-    const holder = await pool.getConnection()
-    try {
-      await holder.query(`SELECT GET_LOCK('owngains_session_cleanup', 5)`)
-      expect(await endStaleSessions(30)).toEqual([])
+    const endTime = async () => {
       const [rows] = await pool.query("SELECT end_time FROM workouts WHERE id = ?", [id])
-      expect((rows as { end_time: string | null }[])[0].end_time).toBeNull()
+      return (rows as { end_time: string | null }[])[0].end_time
+    }
+    // Other files boot real sweeps against this database, so the workout is
+    // only created once the lock is held: no sweep can end it before then.
+    const holder = await pool.getConnection()
+    let id: number
+    try {
+      const [[{ got }]] = (await holder.query(`SELECT GET_LOCK('owngains_session_cleanup', 30) AS got`)) as unknown as [[{ got: number }]]
+      expect(got).toBe(1)
+      id = await staleWorkout()
+      expect(await endStaleSessions(30)).toEqual([])
+      expect(await endTime()).toBeNull()
     } finally {
       await holder.query(`SELECT RELEASE_LOCK('owngains_session_cleanup')`)
       holder.release()
     }
 
-    // Retry: other files write to `workouts` concurrently, and the other
-    // sessionCleanup test may hold the lock for a moment.
-    let ended: { id: number }[] = []
-    for (let i = 0; i < 10 && !ended.some((e) => e.id === id); i++) {
-      ended = await endStaleSessions(30).catch(() => [])
-      if (!ended.some((e) => e.id === id)) await new Promise((r) => setTimeout(r, 200))
+    // Retry: another sweep may hold the lock for a moment, and may be the one
+    // that ends this workout, so check the row rather than what this call returns.
+    for (let i = 0; i < 10 && !(await endTime()); i++) {
+      await endStaleSessions(30).catch(() => [])
+      if (!(await endTime())) await new Promise((r) => setTimeout(r, 200))
     }
-    expect(ended.some((e) => e.id === id)).toBe(true)
+    expect(await endTime()).not.toBeNull()
     await pool.execute("DELETE FROM workouts WHERE id = ?", [id])
   })
 

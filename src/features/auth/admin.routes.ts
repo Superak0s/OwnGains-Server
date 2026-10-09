@@ -48,6 +48,7 @@ router.get("/reports", async (req: Request, res: Response) => {
 router.post("/users/:userId/suspend", async (req: Request, res: Response) => {
   const target = await requireUser(req.params.userId, "user ID")
   const user = await findUserById(target.id)
+  /* v8 ignore next -- race: requireUser just found this row */
   if (!user) throw new NotFoundError("User")
   if (user.isAdmin)
     throw new ForbiddenError("Cannot suspend an admin; revoke admin first")

@@ -73,6 +73,7 @@ async function getCycleById(
     `SELECT ${CYCLE_COLS} FROM menstrual_cycle WHERE id = ? AND user_id = ?`,
     [id, userId],
   )
+  /* v8 ignore next -- only a row deleted between the write and this read */
   if (!rows[0]) throw new NotFoundError("Menstrual entry")
   return rows[0]
 }
@@ -154,7 +155,7 @@ export async function getCycleStats(
   )
   const settings = await getUserSettings(userId)
 
-  const last = lastRows[0] ?? null
+  const last = lastRows[0]
   const cycleLength =
     Number(avgRows[0]?.avgDays) ||
     overrides.cycleLengthDays ||

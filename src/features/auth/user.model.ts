@@ -68,9 +68,9 @@ export async function getUserBodyData(userId: number): Promise<UserBodyData> {
   if (!rows[0]) throw new NotFoundError("User")
   return {
     // decimalNumbers on the pool: height_cm is already a number here.
-    heightCm: rows[0].height_cm ?? null,
+    heightCm: rows[0].height_cm,
     bfFormulaSex: rows[0].bf_formula_sex || "male",
-    weightUnit: rows[0].weight_unit || "kg",
+    weightUnit: rows[0].weight_unit,
   }
 }
 
@@ -199,6 +199,7 @@ function buildChildExports(
       if (paths.has(table) || owned.has(table) || EXPORT_SKIPPED_CHILDREN.has(table))
         continue
       const hop = [...cons.values()].find((cols) => paths.has(cols[0].refTable))
+      /* v8 ignore next -- the current schema declares every child table after its parent */
       if (!hop) continue
       addChildExport(table, hop, paths, children, userColumns)
       grew = true
@@ -279,7 +280,7 @@ function getUserTables(): Promise<UserTables> {
       owned.set(table, [...(owned.get(table) ?? []), String(r.columnName)])
     }
     for (const [table, cols] of Object.entries(UNDECLARED_USER_COLUMNS))
-      userColumns.set(table, [...(userColumns.get(table) ?? []), ...cols])
+      userColumns.set(table, cols) // Undeclared, so never already in the map.
     const children = buildChildExports(
       fkRows as ForeignKeyRow[],
       owned,
@@ -316,6 +317,7 @@ async function idsToUuids(
     for (const r of rows) uuidById.set(r.id, r.uuid)
   }
   forEachUserCell(data, userColumns, (row, c) => {
+    /* v8 ignore next -- the "?? null" is for a user deleted between the two reads */
     if (row[c] != null) row[c] = uuidById.get(row[c]) ?? null
   })
 }

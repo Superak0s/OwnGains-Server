@@ -161,13 +161,11 @@ function toProgramData(
   // the upload's order, so re-key each day through it instead of storing the
   // order a second time per day.
   const splitOrder = asStrings(program.splitOrder)
-  const bySplitOrder = (a: string, b: string): number => {
-    const ia = splitOrder.indexOf(a)
-    const ib = splitOrder.indexOf(b)
-    if (ia !== ib)
-      return (ia < 0 ? splitOrder.length : ia) - (ib < 0 ? splitOrder.length : ib)
-    return a.localeCompare(b)
+  const rank = (key: string): number => {
+    const i = splitOrder.indexOf(key)
+    return i < 0 ? splitOrder.length : i
   }
+  const bySplitOrder = (a: string, b: string): number => rank(a) - rank(b) || a.localeCompare(b)
 
   return {
     split: splitOrder,
@@ -766,6 +764,7 @@ export async function patchExerciseMachine(
        FROM program_exercises WHERE id = ?`,
       [merge, PROGRAM_LIMITS.machineMetaKeys, merge, PROGRAM_LIMITS.machines, slot.id],
     )
+    /* v8 ignore next -- race: the slot row was just read */
     if (within && !within.ok)
       throw new ValidationError(
         `An exercise may have at most ${PROGRAM_LIMITS.machines} machines and ${PROGRAM_LIMITS.machineMetaKeys} machineMeta entries`,

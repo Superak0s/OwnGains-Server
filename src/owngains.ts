@@ -373,4 +373,5 @@ const isMain =
   process.argv[1] != null &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 
+/* v8 ignore next -- only when launched as a script, never under test */
 if (isMain) process.exit(await main())

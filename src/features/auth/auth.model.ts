@@ -162,7 +162,7 @@ export async function findUserByCredentials(
         disabled: !!row.disabled,
         disabledReason: (row.disabled_reason as string | null) ?? null,
         // Read here so signin doesn't go back for it (getTokenVersion).
-        tokenVersion: Number(row.token_version ?? 0),
+        tokenVersion: Number(row.token_version),
       }
     : null
 }
@@ -325,7 +325,7 @@ export async function findUserForAuth(
   )
   const row = rows[0]
   return row
-    ? { user: toAuthUser(row), tokenVersion: row.token_version ?? 0 }
+    ? { user: toAuthUser(row), tokenVersion: row.token_version }
     : null
 }
 
@@ -575,7 +575,7 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
     ok: true,
     userId: row.user_id,
     userUuid: row.user_uuid,
-    tokenVersion: Number(row.token_version ?? 0),
+    tokenVersion: Number(row.token_version),
     token: await issueRefreshToken(row.user_id, row.family_id),
   }
 }

@@ -89,7 +89,7 @@ export async function recordFailure(
     `SELECT failures FROM auth_throttle WHERE scope = ? AND subject_hash = ?`,
     [scope, hash],
   )
-  const lock = lockSecondsFor(Number(rows[0]?.failures ?? 0))
+  const lock = lockSecondsFor(Number(rows[0]!.failures))
   if (lock > 0) {
     await pool.execute(
       `UPDATE auth_throttle SET locked_until = NOW() + INTERVAL ? SECOND

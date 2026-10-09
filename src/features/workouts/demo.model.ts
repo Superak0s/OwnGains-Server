@@ -79,7 +79,7 @@ const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
       dayTitle: day.dayTitle,
       exercises: day.exercises.map((ex) => ({
         name: ex.name,
-        primaryMuscles: ex.primaryMuscles ?? [],
+        primaryMuscles: ex.primaryMuscles!, // Every friend exercise lists them.
         secondaryMuscles: [],
         setsBySplit: { Me: ex.sets },
         reps: "8-10",
@@ -88,7 +88,7 @@ const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
         Me: {
           exercises: day.exercises.map((ex) => ({
             name: ex.name,
-            primaryMuscles: ex.primaryMuscles ?? [],
+            primaryMuscles: ex.primaryMuscles!, // Every friend exercise lists them.
             secondaryMuscles: [],
             sets: ex.sets,
             reps: "8-10",
@@ -104,7 +104,7 @@ const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
 /** Deterministic, so a refill produces the same numbers rather than noise. */
 const baseWeight = (name: string): number => {
   let hash = 0
-  for (const char of name) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 997
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) % 997
   return 20 + (hash % 9) * 5
 }
 
@@ -259,7 +259,6 @@ async function insertDemoRows(
   columns: string[],
   rows: Row[],
 ): Promise<number> {
-  if (rows.length === 0) return 0
   const placeholders = `(${["?", ...columns.map(() => "?")].join(", ")})`
   const [result] = await conn.execute<ResultSetHeader>(
     `INSERT INTO ${table} (user_id, ${columns.join(", ")})

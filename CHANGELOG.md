@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- `MIN_APP_VERSION` (x.y.z) is published as `minAppVersion` on `GET /healthz`. The Google Play build of the app forces its in-app update when its own version is lower. Unset means never force, and a malformed value is refused at boot.
+
 ## [0.5.1] - 2026-10-10
 
 ### Added

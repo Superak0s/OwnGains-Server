@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest"
-import { envBool, envInt, readLocalOnlyFeatures } from "../env.js"
+import { envBool, envInt, readLocalOnlyFeatures, readMinAppVersion } from "../env.js"
 
 afterEach(() => {
   delete process.env.X_TEST
   delete process.env.LOCAL_ONLY_FEATURES
+  delete process.env.MIN_APP_VERSION
 })
 
 describe("env parsing fails at boot on a malformed value", () => {
@@ -33,5 +34,18 @@ describe("env parsing fails at boot on a malformed value", () => {
     expect(readLocalOnlyFeatures()).toEqual(["tracking", "supplements"])
     process.env.LOCAL_ONLY_FEATURES = "tracking,workouts"
     expect(() => readLocalOnlyFeatures()).toThrow('unknown feature "workouts"')
+  })
+})
+
+describe("readMinAppVersion", () => {
+  it("is null when unset and the version when valid", () => {
+    expect(readMinAppVersion()).toBeNull()
+    process.env.MIN_APP_VERSION = " 0.5.1 "
+    expect(readMinAppVersion()).toBe("0.5.1")
+  })
+
+  it("refuses a malformed value", () => {
+    process.env.MIN_APP_VERSION = "v0.5"
+    expect(() => readMinAppVersion()).toThrow("MIN_APP_VERSION must look like 1.2.3")
   })
 })

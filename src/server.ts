@@ -11,7 +11,7 @@ import { Bonjour, type Service } from "bonjour-service"
 import { version } from "@/config/version.js"
 import { startStaleSessionCleanup, stopStaleSessionCleanup } from "./jobs/sessionCleanup.js"
 import { logger } from "./utils/logger.js"
-import { envBool, envInt } from "./config/env.js"
+import { envBool, envInt, readMinAppVersion } from "./config/env.js"
 import {
   metricsBanner,
   metricsEnabled,
@@ -268,6 +268,8 @@ export function beginDrain(): void {
   draining = true
 }
 
+const minAppVersion = readMinAppVersion()
+
 app.get("/healthz", async (_req: Request, res: Response) => {
   if (draining) {
     res.status(503).json({ status: "DRAINING" })
@@ -290,6 +292,7 @@ app.get("/healthz", async (_req: Request, res: Response) => {
     status: "OK",
     fqdn: process.env.SERVER_FQDN || null,
     localOnlyFeatures,
+    minAppVersion,
   })
 })
 

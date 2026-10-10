@@ -24,6 +24,19 @@ export function envBool(name: string, fallback: boolean): boolean {
   throw new Error(`${name} must be true or false (got "${process.env[name]}")`)
 }
 
+/**
+ * MIN_APP_VERSION as x.y.z, or null when unset. Published on /healthz so the
+ * Play build forces an update for anyone below it. Throws on a malformed value
+ * rather than silently never forcing.
+ */
+export function readMinAppVersion(): string | null {
+  const raw = process.env.MIN_APP_VERSION?.trim()
+  if (!raw) return null
+  if (!/^\d+\.\d+\.\d+$/.test(raw))
+    throw new Error(`MIN_APP_VERSION must look like 1.2.3 (got "${raw}")`)
+  return raw
+}
+
 // Features a deployment can refuse to store, to keep its disk footprint down.
 const KNOWN_LOCAL_ONLY = ["tracking", "supplements"] as const
 

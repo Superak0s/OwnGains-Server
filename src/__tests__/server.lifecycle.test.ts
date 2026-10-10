@@ -154,7 +154,7 @@ describe("server lifecycle", () => {
 
   it("starts, advertises over mDNS, handles process events and shuts down once", async () => {
     const before = Object.fromEntries(events.map((e) => [e, listeners(e).length]))
-    const srv = await boot({ PORT: "0", SERVER_FQDN: "gains.example" })
+    const srv = await boot({ PORT: "0", MDNS_ENABLED: "true", SERVER_FQDN: "gains.example" })
     const { pool } = await import("../config/database.js")
     try {
       // A failed start is logged and exits 1.

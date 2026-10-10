@@ -13,6 +13,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 ### Internal
 
 - CI runs the test suite against MariaDB 11.4, the database the official server runs, and the README names it as the supported database.
+- The server lifecycle test sets `MDNS_ENABLED=true` itself, so it no longer fails when the environment (as in CI) disables mDNS.
 
 ## [0.5.2] - 2026-10-10
 

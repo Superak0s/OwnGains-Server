@@ -6,6 +6,14 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Fixed
+
+- The purge of sign-ups that never accepted the Terms failed on MySQL with error 1093 and deleted nothing. It now selects the empty accounts first and deletes them by id.
+
+### Internal
+
+- CI runs the test suite against MariaDB 11.4, the database the official server runs, and the README names it as the supported database.
+
 ## [0.5.2] - 2026-10-10
 
 ### Added

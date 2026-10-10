@@ -6,7 +6,7 @@ The optional backend for the [OwnGains](../OwnGains-App) fitness app. It provide
 
 > **The OwnGains app does not require this server**. It runs fully offline out of the box. Run this only if you want to sync across devices or enable social/live features, either via the central instance at `https://owngains.superak0s.com` or your own self-hosted one.
 
-A Bun / TypeScript REST + WebSocket API, backed by MySQL, Docker-first and self-hostable. Every deployment is one box, with no horizontal scaling and no instances talking to each other.
+A Bun / TypeScript REST + WebSocket API, backed by MariaDB 11.4, Docker-first and self-hostable. Every deployment is one box, with no horizontal scaling and no instances talking to each other.
 
 **Central instance:** `https://owngains.superak0s.com` is the public server the app points at by default. It runs with `LOCAL_ONLY_FEATURES=tracking,supplements`, so body tracking (weight, measurements, hydration, soreness, cycle, injuries, notes, macros, progress photos) and supplements are never stored there. The app keeps them on the device. Workouts, programs, settings, accounts and social features sync through it. Self-host your own instance if you want those features synced too, or all your data under your control.
 
@@ -16,14 +16,14 @@ A Bun / TypeScript REST + WebSocket API, backed by MySQL, Docker-first and self-
 
 - **Runtime:** Bun (Docker image `oven/bun:1-alpine`), **TypeScript 7**, compiled with `tsc` (+ `tsc-alias` for the `@/*` path alias), run via `bun --watch` in dev. `bunfig.toml` sets `[run] bun = true`, so every script and tool shim that calls `node` runs on Bun as well.
 - **Framework:** **Express 5**.
-- **Database:** **MySQL** via `mysql2` (`mysql2/promise` connection pool). No ORM: hand-written SQL with an idempotent `schema.sql` plus numbered migrations.
+- **Database:** **MariaDB 11.4** via `mysql2` (`mysql2/promise` connection pool). No ORM: hand-written SQL with an idempotent `schema.sql` plus numbered migrations.
 - **Auth:** **JWT** access tokens (`jsonwebtoken`, HS256) + opaque rotating refresh tokens, native **bcrypt** (12 salt rounds, run on the libuv threadpool behind a concurrency cap) for password hashing.
 - **Real-time:** **WebSockets** (`ws`).
 - **Uploads:** **multer** (memory storage for photos, magic-byte checked, stored as LONGBLOB) + **sharp** (re-encodes each photo to a metadata-free JPEG of at most 2048px and bakes a 400px thumbnail).
 - **Security:** `helmet`, `cors`, `express-rate-limit`.
 - **Compression:** `compression`: gzip on JSON responses over 1 kb (already-compressed types like photo BLOBs are skipped).
 - **Discovery:** `bonjour-service`: the server advertises itself on the LAN as `_owngains._tcp`.
-- **Tests:** **vitest** + `supertest` against a real MySQL (`bun run test`).
+- **Tests:** **vitest** + `supertest` against a real MariaDB (`bun run test`, the same version CI uses).
 - **Package manager:** **Bun**.
 
 ---

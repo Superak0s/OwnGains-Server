@@ -22,7 +22,7 @@ bun run smoke [url] [--min-version x.y.z]   # scripts/smoke.mjs: live HTTP+WS sm
 bun run sonar:scan       # scripts/sonar-scan.sh: SonarQube analysis (config in sonar-project.properties)
 ```
 
-`bun run test` runs the vitest suite (`vitest run`, add `--coverage` when you want a report). It needs a live MySQL: `src/tests/global-setup.ts` drops and rebuilds a `<DB_NAME>_test` database (`.env` `DB_NAME` plus `_test`, or `TEST_DB_NAME`) from `.env` credentials, and route tests drive the real `app` through supertest. There is no linter, so don't invent `bun run lint`.
+`bun run test` runs the vitest suite (`vitest run`, add `--coverage` when you want a report). It needs a live MariaDB 11.4 (the version CI and the official server run): `src/tests/global-setup.ts` drops and rebuilds a `<DB_NAME>_test` database (`.env` `DB_NAME` plus `_test`, or `TEST_DB_NAME`) from `.env` credentials, and route tests drive the real `app` through supertest. There is no linter, so don't invent `bun run lint`.
 
 Requires a `.env`, which Bun loads from the repo root on its own, so there is no `dotenv` dependency and no flag to pass. Everything runs on Bun, never Node: `bunfig.toml` sets `[run] bun = true`, so a script or tool shim (vitest, tsc-alias) that calls `node` gets Bun instead. Write new scripts as `bun <file>`. See README.md for the full variable table. At minimum `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` (≥32 chars), and `ALLOWED_ORIGINS` must be set or the server throws on boot (`src/server.ts`). The DB and schema auto-provision on first connect against a fresh database.
 

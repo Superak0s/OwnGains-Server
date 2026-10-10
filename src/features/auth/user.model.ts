@@ -431,11 +431,19 @@ export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
         `AND NOT EXISTS (SELECT 1 FROM ${table} x WHERE ${cols.map((c) => "x." + c + " = u.id").join(" OR ")})`,
     )
     .join("\n       ")
-  const [r] = await pool.execute<ResultSetHeader>(
-    `DELETE u FROM users u
+  // Two steps: users is itself in the owned list (demo_owner_id), and MySQL
+  // rejects a DELETE whose subquery reads the table being deleted (error 1093).
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT u.id FROM users u
      WHERE u.terms_accepted_at IS NULL AND u.is_admin = 0
        AND u.created_at < NOW() - INTERVAL ${days | 0} DAY
        ${empty}`,
+  )
+  if (rows.length === 0) return 0
+  const ids = rows.map((row) => row.id)
+  const [r] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM users WHERE id IN (${ids.map(() => "?").join(",")})`,
+    ids,
   )
   return r.affectedRows
 }

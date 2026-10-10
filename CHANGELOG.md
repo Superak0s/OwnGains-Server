@@ -6,6 +6,41 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-10
+
+### Added
+
+- `GET /api/admin/metrics` takes `?window=15m|1h|6h|24h|7d|30d|all`, or `?window=custom&from=<date>&to=<date>` (default `1h`, anything else is 400). Request counts, status codes, latency percentiles, error kinds, error lists, logged errors and slow requests cover that window, and the response says which in `window`. The `/admin/metrics` page has a selector for it, with two date pickers for a custom range that reach back to the oldest kept data (`window.dataFrom`).
+- Admin metrics are saved to the database (new `metrics_history` and `metrics_events` tables) once a minute and on shutdown, and kept 30 days, so a restart no longer resets the counts, charts and error lists.
+- Optional Telegram alerts for bot traffic: with `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, one IP getting `BOT_ALERT_THRESHOLD` (default 60) or more `401`, `403`, `429` or unrouted `404` responses in a minute sends a message, at most once an hour per IP. `config.botAlertsEnabled` reports whether it is on.
+- Telegram health alerts through the same bot: one message when p95 latency, p99 latency or the 5xx rate over the last 5 minutes reaches its limit (`ALERT_P95_MS` 500, `ALERT_P99_MS` 1000, `ALERT_ERROR_RATE_PCT` 1, `0` turns one off), and one when it is back under. Below `ALERT_MIN_REQUESTS` (30) requests nothing is judged. `config.healthAlerts` reports the limits.
+- The database tables on the `/admin/metrics` page sort by name, rows, data size or index size when a column header is clicked.
+- F5 and Ctrl/Cmd+R on the `/admin/metrics` page refresh the data without reloading the page. Ctrl+F5 and Ctrl+Shift+R still reload it.
+
+### Changed
+
+- The metrics response has `chart` (`bucketMinutes`, `slots`, at most 120 `points` over the window) in place of `history` (last hour), `errors.listsFrom` (where the kept error lists start, when the window reaches further back), `errors.log.inWindow`, and `app.sets.everLogged` in place of `app.sets.total`.
+- Clearing the metrics error log keeps the error counts and charts. Only the error lists, slow requests and log lines start over.
+
+### Fixed
+
+- Metrics route labels no longer grow one row per value of a free-text path parameter (a split name in `DELETE /api/sessions/split/:split`): matched routes use their pattern.
+- Metrics error totals no longer undercount once more than 300 distinct error kinds were seen. Counts come from the per-status totals, not a capped group table.
+- The metrics dashboard's database figures no longer scan the whole `workouts` and `workout_sets` tables on every refresh.
+
+### Security
+
+- Failed and slow requests in the admin metrics, with the username, are now stored in the database for 30 days instead of in memory only. The client IP is never stored: it is shown only for errors still in memory. With Telegram alerts on, offending IPs are sent to Telegram.
+- The request log line now includes the caller's user uuid, the acting trainer's uuid (when set) and the client IP, so a breach can be traced to the accounts whose data was fetched. These stay in the container log and are never sent to the database.
+
+### Internal
+
+- Tests for metrics persistence, custom windows, and Telegram bot and health alerts.
+- README documents metrics storage, retention, the API and Telegram alert setup, and `.env.example` lists the Telegram and health alert variables.
+- Migration `004_workouts_start_index.sql` adds the `workouts` index `idx_w_start_user (start_time, user_id)` for the active-user counts.
+
+- CI pulls the MySQL service image from the AWS ECR Public mirror of Docker Official Images, not Docker Hub, to avoid its anonymous pull rate limit.
+
 ## [0.5.0] - 2026-10-10
 
 ### Added
@@ -193,7 +228,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.3.2

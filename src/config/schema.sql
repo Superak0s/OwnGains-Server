@@ -263,6 +263,9 @@ CREATE TABLE IF NOT EXISTS workouts (
   KEY idx_w_program_day (program_day_id),
   -- Open workouts (end_time IS NULL) by age, for the stale-session sweep.
   KEY idx_w_open (end_time, start_time),
+  -- Workouts and distinct lifters in the last day/week/month, for the admin
+  -- metrics. Covering, so those counts never read the rows.
+  KEY idx_w_start_user (start_time, user_id),
   CONSTRAINT fk_w_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT fk_w_program_day FOREIGN KEY (program_day_id) REFERENCES program_days (id) ON DELETE SET NULL,
   CONSTRAINT ck_w_times CHECK (end_time IS NULL OR end_time >= start_time),
@@ -817,4 +820,26 @@ CREATE TABLE IF NOT EXISTS demo_rows (
   row_id     INT UNSIGNED NOT NULL,
   PRIMARY KEY (user_id, table_name, row_id),
   CONSTRAINT fk_dr_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Admin metrics history (metrics.collector.ts): one row per minute for the
+-- last day, rolled up into one row per hour kept 30 days. `data` is the
+-- period's status counts, latency buckets and chart point as JSON.
+CREATE TABLE IF NOT EXISTS metrics_history (
+  span_min SMALLINT UNSIGNED NOT NULL,  -- 1 = minute, 60 = hour
+  at_ms    BIGINT UNSIGNED   NOT NULL,  -- period end, epoch ms
+  data     TEXT              NOT NULL,
+  PRIMARY KEY (span_min, at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Admin metrics events: failed requests (with username and IP), slow requests
+-- and logged errors, kept 30 days and capped in rows. `data` is the event as JSON.
+CREATE TABLE IF NOT EXISTS metrics_events (
+  id    BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  kind  TINYINT UNSIGNED NOT NULL,  -- 0 server error, 1 client error, 2 slow request, 3 error log line
+  at_ms BIGINT UNSIGNED  NOT NULL,
+  data  TEXT             NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_me_kind_at (kind, at_ms),
+  KEY idx_me_at (at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

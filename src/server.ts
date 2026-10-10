@@ -112,7 +112,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.on("finish", () =>
       logger.info(
         `[${req.method}] ${req.route ? req.baseUrl + req.route.path : "(unrouted)"} ${res.statusCode}`,
-        { auth: req.headers.authorization ? "present" : "missing", reqId: req.reqId },
+        {
+          auth: req.headers.authorization ? "present" : "missing",
+          reqId: req.reqId,
+          user: req.user?.uuid,
+          actor: req.trainer?.uuid,
+          ip: req.ip,
+        },
       ),
     )
   next()
@@ -350,7 +356,7 @@ export async function start() {
   server.listen(PORT, () => {
     logger.info(`🚀 OwnGains Server v${version} running on port ${PORT}`)
     startStaleSessionCleanup()
-    startMetricsCollector()
+    void startMetricsCollector()
     logger.info(
       metricsBanner({
         port: PORT,
@@ -387,7 +393,8 @@ export function shutdown(exitCode: number) {
   shuttingDown = true
   beginDrain()
   closeWsServer()
-  stopMetricsCollector()
+  // Saves the minute in progress, so it needs the pool still open.
+  const metricsSaved = stopMetricsCollector()
   // A sweep mid-transaction would otherwise have pool.end() pulled out from under it.
   const sweepDone = stopStaleSessionCleanup()
   if (mdnsService) mdnsService.stop()
@@ -398,6 +405,7 @@ export function shutdown(exitCode: number) {
   server.close(async () => {
     try {
       await sweepDone
+      await metricsSaved
       await pool.end()
     } catch (err) {
       logger.error("Error closing DB pool:", err)

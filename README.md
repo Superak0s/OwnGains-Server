@@ -167,6 +167,7 @@ SQL tables (`src/config/schema.sql`):
 - **deleted_accounts**: uuids of deleted accounts, kept `BACKUP_RETENTION_DAYS` so a restored backup can't bring them back.
 - **consent_events**: append-only history of every Terms acceptance and health consent given or withdrawn. `users` holds only the current state.
 - **demo_rows**: ids of the tracking and supplement rows `POST /api/sessions/demo` created, so `DELETE /demo` removes exactly those.
+- **metrics_history** / **metrics_events**: the admin metrics, saved once a minute: per-minute and per-hour traffic figures, and server errors, client errors, slow requests and error log lines (with username, never the IP). Both kept 30 days.
 
 `schema.sql` is all `CREATE TABLE IF NOT EXISTS` and re-runs on every boot, so a new table needs no migration. Changes to _existing_ tables (new columns, indexes) go in `src/migrations/NNN_description.sql`. Each file runs at most once, tracked in a `_migrations` table, applied in filename order on every boot. A fresh database marks every migration as applied without running it, so each one is mirrored in `schema.sql`. `src/migrations/README.md` records each file's minimum supported prior schema.
 
@@ -223,6 +224,13 @@ Set these environment variables. Bun reads a `.env` file at the repo root by its
 | `HISTORY_TIMINGS_MAX`         | no       | `100`                                                                 | Page ceiling for `GET /api/sessions?includeTimings=true`. The app follows `nextCursor`. Raise it only for app builds that fetch history in one 1000-session request                                                                                                                                                                            |
 | `METRICS_ENABLED`             | no       | `true`                                                                | Server metrics for admins: the request counters, `GET /api/admin/metrics` (JSON) and the `/admin/metrics` dashboard. `false` removes all three: nothing is counted, the page 404s and so does the endpoint (after the usual `/api/admin` auth check)                                                                                                                      |
 | `METRICS_PAGE_ENABLED`        | no       | `true`                                                                | The `/admin/metrics` HTML dashboard only. `false` keeps the JSON endpoint for the app but serves no page. Ignored when `METRICS_ENABLED=false`                                                                                                                                                                                                                            |
+| `TELEGRAM_BOT_TOKEN`          | no       | unset                                                                 | Bot token from @BotFather for bot traffic alerts. Alerts are on only when this and `TELEGRAM_CHAT_ID` are both set |
+| `TELEGRAM_CHAT_ID`            | no       | unset                                                                 | Chat the alerts are sent to (your user id, or a group id) |
+| `BOT_ALERT_THRESHOLD`         | no       | `60`                                                                  | Refused requests (`401`, `403`, `429`, unrouted `404`) from one IP within one minute that trigger an alert. Each IP is reported at most once an hour. Keyed by `req.ip`, so set `TRUST_PROXY_HOPS` correctly behind a proxy |
+| `ALERT_P95_MS`                | no       | `500`                                                                 | Telegram health alert when p95 latency over the last 5 minutes reaches this many ms. `0` turns it off |
+| `ALERT_P99_MS`                | no       | `1000`                                                                | Same for p99 latency. `0` turns it off |
+| `ALERT_ERROR_RATE_PCT`        | no       | `1`                                                                   | Same for the share of 5xx responses, in percent (decimals allowed, `0.5`). `0` turns it off |
+| `ALERT_MIN_REQUESTS`          | no       | `30`                                                                  | Fewest requests in those 5 minutes before the health alerts judge anything, so a quiet night with one slow request does not alert |
 
 > ⚠️ **Security:** do not commit real secrets. Rotate any credentials that have been checked into `.env`, and keep `.env` out of version control.
 
@@ -370,8 +378,21 @@ OwnGains and the official server at `owngains.superak0s.com` are built and run b
 
 Open `http://<your-server>:5000/admin/metrics` in a browser and sign in with an
 **admin** account's username and password (the same ones the app uses). A
-non-admin account is refused. The page refreshes itself (5s / 15s / 1m / off).
-Filters, sorting and expanded rows are kept across a refresh. Sections:
+non-admin account is refused. The page refreshes itself (5s / 15s / 1m / off),
+and F5 (or Ctrl/Cmd+R) refreshes the data without reloading the page. Use
+Ctrl+F5 or Ctrl+Shift+R to load a new version of the page itself, after an
+upgrade. Filters, sorting and expanded rows are kept across a refresh.
+
+The **Show** selector picks the time window for the overview, error, latency,
+slow request and chart figures:
+
+- last 15 minutes, hour, 6 hours, 24 hours, 7 days or 30 days
+- since restart
+- a custom range: two date pickers, which reach back to the oldest kept data
+  and no further than now
+
+Routes, methods, bytes sent and aborted requests are always since restart.
+Sections:
 
 - **Overview**: health and DB ping, uptime, requests, 5xx and 4xx rates, p99
   latency, memory, live WebSocket sockets, DB pool usage.
@@ -387,35 +408,128 @@ Filters, sorting and expanded rows are kept across a refresh. Sections:
     that failed, 404s, 429s, …)
   - the **server error log**: every `logger.error` line, including ones outside
     a request (DB outages, cleanup sweep failures, WebSocket errors).
-  - **Clear error log** starts these lists over (request totals are kept).
+  - Counts are exact for the whole window. The lists show at most the most
+    recent 500 server errors, 2000 client errors and 300 log lines of the
+    window, and say so when it reaches further back than that.
+  - **Clear error log** starts these lists over, in memory and in the database
+    (counts and charts are kept).
 - **Performance**: avg / p50 / p90 / p95 / p99 / max latency, event-loop
-  delay, and per-minute charts for the last hour: requests, 5xx, 4xx, 429,
-  p95, p99, average latency, event-loop p99, CPU, RSS, heap, WebSocket sockets.
+  delay, and charts over the window (per minute up to two hours, at most 120
+  points for longer windows, in whole hours past a day): requests, 5xx, 4xx,
+  429, p95, p99, average latency, event-loop p99, CPU, RSS, heap, WebSocket
+  sockets.
 - **Routes**: the top 100 routes (ids collapsed, e.g.
   `POST /api/sessions/:id/set`), sortable by requests, error %, 4xx, 5xx, avg,
   p50, p95, p99 and max, with each route's status codes.
-- **Slow requests**: the last 50 requests that took 1s or longer.
+- **Slow requests**: requests in the window that took 1s or longer (at most
+  the most recent 500 of the window).
 - **Users & activity**: users (admins, suspended, new), active lifters
-  (1/7/30 days), online now, workouts, sets, programs, friendships, reports,
-  progress photos and their size, signed-in devices.
+  (1/7/30 days), online now, workouts, sets ever logged, programs, friendships,
+  reports, progress photos and their size, signed-in devices.
 - **System**, **Database** (version, ping, pool, threads, query mix, slow
   queries, row-lock waits, deadlocks, temp tables on disk, buffer pool, size
   per table) and a **configuration** summary (switches only, no secrets).
 
+Click a column header in the routes or database tables to sort by it, and click
+it again to reverse the order.
+
+#### API
+
 The app (or a script) reads the same data from `GET /api/admin/metrics` with an
-admin's `Authorization: Bearer <token>`, and can clear the error log with
-`DELETE /api/admin/metrics/errors`. Anyone else gets `401`/`403`. Database
-figures are cached for 15 seconds. Everything else is kept in memory, is bounded
-in size, and resets on restart. Turn the feature off with
-`METRICS_ENABLED=false`, or keep the endpoint but drop the web page with
-`METRICS_PAGE_ENABLED=false`.
+admin's `Authorization: Bearer <token>`. Anyone else gets `401`/`403`.
+
+- `?window=15m|1h|6h|24h|7d|30d|all` (default `1h`), or
+  `?window=custom&from=<date>&to=<date>` with ISO dates and `from` before `to`.
+  Anything else is `400`.
+- The response's `window` has `key`, `minutes`, `from`, `to` and `dataFrom`
+  (the oldest kept data). `config.botAlertsEnabled` says whether Telegram alerts
+  are on, and `config.healthAlerts` holds the health alert limits.
+- `DELETE /api/admin/metrics/errors` clears the error log.
+
+Database figures are cached for 15 seconds.
+
+#### Storage and retention
+
+Metrics are saved to the database once a minute and on shutdown, so a restart
+keeps them, and they are included in backups like any other table.
+
+| Table             | Holds                                                                                                | Kept                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `metrics_history` | traffic per minute (requests by status, latency, CPU, memory, sockets), rolled into hours after a day | 30 days, reloaded on boot     |
+| `metrics_events`  | server errors, client errors, slow requests and error log lines, with username and request id        | 30 days, at most 100,000 rows |
+
+The client IP is **never** written to the database. It is shown only for
+errors still held in memory since the last restart. Routes, methods, bytes sent
+and aborted requests are in memory only and reset on restart.
+
+#### Telegram alerts
+
+Optional. The server can send a Telegram message when:
+
+- one IP gets many refused requests in a minute, the pattern of a scanner or a
+  password-guessing bot (bot traffic alerts)
+- latency or the server error rate crosses a limit, and again once it is back
+  under (health alerts)
+
+Both use the same bot.
+
+1. In Telegram, message **@BotFather**, send `/newbot` and follow the prompts.
+   It replies with a token like `123456:ABC-...`.
+2. Open a chat with the new bot and send it any message (a bot cannot write to
+   you first).
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and copy
+   the number in `"chat":{"id":...}`. For a group, add the bot to the group,
+   send a message there and use that chat's id (it starts with `-`).
+4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` (optionally
+   the thresholds below) and restart. The dashboard's configuration summary
+   shows **Telegram bot alerts: on** and the health alert limits.
+
+Bot traffic alerts:
+
+- Refused means `401`, `403`, `429`, or `404` on a path no route matches.
+- Once a minute, every IP with `BOT_ALERT_THRESHOLD` (default 60) or more
+  refused requests in that minute goes into one message: up to 10 IPs, each
+  with its status codes and most requested path.
+- An IP already reported is not reported again for an hour.
+- Normal use does not reach it: the rate limiters refuse a client long before
+  60 failures a minute matter.
+- Counting is by `req.ip`. Behind a reverse proxy set `TRUST_PROXY_HOPS`
+  correctly, or every request looks like it comes from the proxy and normal
+  traffic sets alerts off. Behind Cloudflare the proxy in front of the server
+  must pass on the visitor's real IP.
+- The message contains the offending IPs, so they reach Telegram's servers.
+
+Health alerts:
+
+- Once a minute the server looks at the last 5 minutes: p95 latency, p99
+  latency and the share of `5xx` responses.
+- Defaults: p95 under 500ms (`ALERT_P95_MS`), p99 under 1s (`ALERT_P99_MS`) and
+  5xx under 1% (`ALERT_ERROR_RATE_PCT`). Reaching a limit sends
+  `Over: p95 latency 812ms (limit 500ms)`. Set one to `0` to turn it off.
+- Nothing more is sent while it stays over. Once it drops under, one
+  `Back under: ...` message follows. A restart forgets the state, so an
+  ongoing problem is reported again after one.
+- With fewer than `ALERT_MIN_REQUESTS` (30) requests in the 5 minutes nothing
+  is judged, since p99 of a handful of requests is just the slowest one.
+- 4xx responses do not count as errors: they are mostly clients and bots.
+
+Both kinds need `METRICS_ENABLED=true`, since the figures come from the metrics
+middleware. The bot token is kept out of the logs.
+
+#### Turning it off
+
+`METRICS_ENABLED=false` removes the counters, the endpoint, the page, saving to
+the database and both kinds of alerts. `METRICS_PAGE_ENABLED=false` keeps the endpoint
+but serves no web page.
+
+#### Security
 
 The page signs in through `POST /api/auth/signin`, so the usual sign-in rate
 limit and per-account throttle apply. Tokens are kept in the tab's
 `sessionStorage` (gone when the tab closes) and **Sign out** revokes the
 refresh token. Serve it over HTTPS (your reverse proxy) on anything but a
 trusted LAN, since the password is sent to it. Error entries include usernames
-and client IPs, which is why the whole thing is admin-only.
+(and client IPs while in memory), which is why the whole thing is admin-only.
 
 ---
 

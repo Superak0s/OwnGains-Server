@@ -88,6 +88,13 @@ describe("routeLabel", () => {
       "GET /api/tracking/hydration/:date",
     )
   })
+
+  it("replaces free-text params from the matched route pattern", () => {
+    expect(routeLabel("DELETE", "/api/sessions/split/Push%20Day", "/split/:split")).toBe(
+      "DELETE /api/sessions/split/:split",
+    )
+    expect(routeLabel("GET", "/api/x/abc", "/")).toBe("GET /api/x/abc")
+  })
 })
 
 describe("error capture", () => {
@@ -116,7 +123,7 @@ describe("error capture", () => {
       process.env.NODE_ENV = prev
       vi.restoreAllMocks()
     }
-    const { errors } = processSnapshot()
+    const { errors } = await processSnapshot()
     const ev = errors.recentServer.find((e) => e.message === "kaboom: disk on fire")
     expect(ev).toMatchObject({ status: 500, route: "GET /boom/:id", name: "Error", path: "/boom/42" })
     expect(ev!.stack).toContain("kaboom")
@@ -133,7 +140,7 @@ describe("error capture", () => {
     await request(mini).get("/nope/a")
     await request(mini).get("/nope/b")
     vi.restoreAllMocks()
-    const { errors, http } = processSnapshot()
+    const { errors, http } = await processSnapshot()
     const tea = errors.groups.find((g) => g.code === "TEAPOT")
     expect(tea).toMatchObject({ status: 418, message: "short and stout", name: "AppError" })
     expect(tea!.count).toBeGreaterThanOrEqual(2)
@@ -165,19 +172,18 @@ describe("error capture", () => {
     vi.restoreAllMocks()
   })
 
-  it("keeps anything logged at error level outside a request", () => {
+  it("keeps anything logged at error level outside a request", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     logger.error("[SESSION_CLEANUP] Cleanup run failed:", "lock wait timeout")
     vi.restoreAllMocks()
-    const { errors } = processSnapshot()
+    const { errors } = await processSnapshot()
     expect(errors.log.recent[0].message).toBe("[SESSION_CLEANUP] Cleanup run failed: lock wait timeout")
   })
 
   it("adds a per-minute point with p95/p99", async () => {
     await request(mini).get("/teapot")
     rollMinute()
-    const { history } = processSnapshot()
-    const last = history[history.length - 1]
+    const last = await (await processSnapshot()).chart.points.at(-1)!
     expect(last.requests).toBeGreaterThanOrEqual(1)
     expect(last.p99Ms).not.toBeNull()
     expect(last.clientErrors).toBeGreaterThanOrEqual(1)
@@ -200,8 +206,20 @@ describe("admin error log over HTTP", () => {
     expect((await request(app).delete("/api/admin/metrics/errors").set(auth(plain.token))).status).toBe(403)
     expect((await request(app).delete("/api/admin/metrics/errors").set(auth(admin.token))).status).toBe(200)
     const after = await request(app).get("/api/admin/metrics").set(auth(admin.token))
-    // The 403 above and anything else before the clear are gone.
+    // The 403 above and anything else before the clear are gone, counts are not.
     expect(after.body.errors.groups.some((g: { status: number }) => g.status === 401)).toBe(false)
+    expect(after.body.http.byStatus["401"]).toBeGreaterThanOrEqual(1)
+
+    const day = await request(app).get("/api/admin/metrics?window=24h").set(auth(admin.token))
+    expect(day.body.window.key).toBe("24h")
+    expect(Date.parse(day.body.window.dataFrom)).toBeLessThanOrEqual(Date.parse(day.body.process.startedAt))
+    expect((await request(app).get("/api/admin/metrics?window=2y").set(auth(admin.token))).status).toBe(400)
+    const custom = await request(app)
+      .get("/api/admin/metrics?window=custom&from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z")
+      .set(auth(admin.token))
+    expect(custom.body.window).toMatchObject({ key: "custom", minutes: 1440, to: "2026-01-02T00:00:00.000Z" })
+    for (const q of ["window=custom", "window=custom&from=2026-01-02&to=2026-01-01", "window=custom&from=x&to=y"])
+      expect((await request(app).get("/api/admin/metrics?" + q).set(auth(admin.token))).status).toBe(400)
   })
 })
 

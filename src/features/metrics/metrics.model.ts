@@ -2,8 +2,8 @@ import type { RowDataPacket } from "mysql2/promise"
 import { pool } from "@/config/database.js"
 
 // The database half of the admin metrics. Every figure is a plain COUNT or an
-// information_schema read. On one small box a full scan of `workouts`
-// is milliseconds, and the result is cached (see DB_CACHE_MS) so a dashboard
+// information_schema read. The time-window counts on `workouts` read
+// idx_w_start_user alone, and the result is cached (see DB_CACHE_MS) so a dashboard
 // left open refreshing every few seconds costs one run per window, not one
 // per viewer per refresh.
 
@@ -13,7 +13,7 @@ interface AppCounts {
   users: { total: number; admins: number; suspended: number; new7d: number; new30d: number }
   activeUsers: { day: number; week: number; month: number }
   workouts: { total: number; inProgress: number; last24h: number; last7d: number }
-  sets: { total: number }
+  sets: { everLogged: number }
   programs: number
   friendships: { accepted: number; pending: number }
   jointSessionsActive: number
@@ -58,7 +58,9 @@ async function appCounts(): Promise<AppCounts> {
       (SELECT COUNT(*) FROM workouts WHERE end_time IS NULL)                    AS workouts_open,
       (SELECT COUNT(*) FROM workouts WHERE start_time >= NOW() - INTERVAL 1 DAY) AS workouts_24h,
       (SELECT COUNT(*) FROM workouts WHERE start_time >= NOW() - INTERVAL 7 DAY) AS workouts_7d,
-      (SELECT COUNT(*) FROM workout_sets)                                       AS sets_total,
+      -- The top id, not COUNT(*): O(1) on the primary key where a count scans
+      -- every set. Counts deleted sets too, so it reads "ever logged".
+      (SELECT COALESCE(MAX(id), 0) FROM workout_sets)                           AS sets_ever,
       (SELECT COUNT(*) FROM programs)                                           AS programs,
       (SELECT COUNT(*) FROM friendships WHERE status = 'accepted')              AS friends_accepted,
       (SELECT COUNT(*) FROM friendships WHERE status = 'pending')               AS friends_pending,
@@ -87,7 +89,7 @@ async function appCounts(): Promise<AppCounts> {
       last24h: n(r.workouts_24h),
       last7d: n(r.workouts_7d),
     },
-    sets: { total: n(r.sets_total) },
+    sets: { everLogged: n(r.sets_ever) },
     programs: n(r.programs),
     friendships: { accepted: n(r.friends_accepted), pending: n(r.friends_pending) },
     jointSessionsActive: n(r.joint_active),
@@ -218,4 +220,70 @@ export function poolStats() {
     inUse: all != null && free != null ? all - free : null,
     queued: core?._connectionQueue?.length ?? null,
   }
+}
+
+// Persistence for the collector's history and event lists. pool.query, not
+// execute: the VALUES ? bulk insert and the LIMIT need client-side expansion.
+
+export interface HistoryRow {
+  spanMin: number
+  atMs: number
+  data: string
+}
+
+export async function saveHistoryRows(rows: HistoryRow[]): Promise<void> {
+  if (!rows.length) return
+  await pool.query("INSERT IGNORE INTO metrics_history (span_min, at_ms, data) VALUES ?", [
+    rows.map((r) => [r.spanMin, r.atMs, r.data]),
+  ])
+}
+
+export async function loadHistoryRows(sinceMs: number): Promise<HistoryRow[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT span_min, at_ms, data FROM metrics_history WHERE at_ms > ? ORDER BY at_ms",
+    [sinceMs],
+  )
+  return rows.map((r) => ({ spanMin: n(r.span_min), atMs: n(r.at_ms), data: String(r.data) }))
+}
+
+/** Drops minute rows already rolled into an hour, and hours past retention. */
+export async function pruneHistory(minutesUpToMs: number, hoursUpToMs: number): Promise<void> {
+  await pool.query(
+    "DELETE FROM metrics_history WHERE (span_min = 1 AND at_ms <= ?) OR (span_min = 60 AND at_ms <= ?)",
+    [minutesUpToMs, hoursUpToMs],
+  )
+}
+
+export interface EventRow {
+  kind: number
+  atMs: number
+  data: string
+}
+
+export async function saveEvents(rows: EventRow[]): Promise<void> {
+  if (!rows.length) return
+  await pool.query("INSERT INTO metrics_events (kind, at_ms, data) VALUES ?", [
+    rows.map((r) => [r.kind, r.atMs, r.data]),
+  ])
+}
+
+/** Newest first, at most `limit`, with at in (fromMs, toMs]. */
+export async function loadEvents(kind: number, fromMs: number, toMs: number, limit: number): Promise<string[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT data FROM metrics_events WHERE kind = ? AND at_ms > ? AND at_ms <= ? ORDER BY at_ms DESC LIMIT ?",
+    [kind, fromMs, toMs, limit],
+  )
+  return rows.map((r) => String(r.data))
+}
+
+/** Deletes events older than `beforeMs`, then all but the newest `keep`. */
+export async function pruneEvents(beforeMs: number, keep: number): Promise<void> {
+  await pool.query("DELETE FROM metrics_events WHERE at_ms <= ?", [beforeMs])
+  const [rows] = await pool.query<RowDataPacket[]>("SELECT MAX(id) AS top FROM metrics_events")
+  const top = n(rows[0]?.top)
+  if (top > keep) await pool.query("DELETE FROM metrics_events WHERE id <= ?", [top - keep])
+}
+
+export async function deleteEvents(): Promise<void> {
+  await pool.query("DELETE FROM metrics_events")
 }

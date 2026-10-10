@@ -221,6 +221,22 @@ pre {
         <div class="meta" id="meta">Loading…</div>
       </div>
       <div class="controls">
+        <label class="meta" for="window">Show</label>
+        <select id="window">
+          <option value="15m">Last 15 min</option>
+          <option value="1h" selected>Last hour</option>
+          <option value="6h">Last 6 hours</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="all">Since restart</option>
+          <option value="custom">Custom range</option>
+        </select>
+        <span id="custom-range" class="controls hidden">
+          <input type="datetime-local" id="from" aria-label="From">
+          <span class="meta">to</span>
+          <input type="datetime-local" id="to" aria-label="To">
+        </span>
         <label class="meta" for="interval">Refresh</label>
         <select id="interval">
           <option value="0">Off</option>
@@ -228,7 +244,7 @@ pre {
           <option value="15000" selected>15s</option>
           <option value="60000">1m</option>
         </select>
-        <button id="refresh" type="button">Refresh now</button>
+        <button id="refresh" type="button" title="F5 refreshes the data too">Refresh now</button>
         <button id="signout" type="button">Sign out</button>
       </div>
     </div>
@@ -264,6 +280,7 @@ pre {
         <input type="search" id="err-search" placeholder="Filter by message, code or route" aria-label="Filter errors">
         <button type="button" id="clear-errors">Clear error log</button>
       </div>
+      <p class="meta hidden" id="lists-from"></p>
       <div id="error-groups"></div>
       <h3>Recent server errors (5xx)</h3>
       <div class="panel" id="recent-server"></div>
@@ -276,7 +293,7 @@ pre {
     <section id="s-performance">
       <h2>Performance</h2>
       <div id="latency-tiles"></div>
-      <h3>Last hour, per minute</h3>
+      <h3 id="chart-title">Per minute</h3>
       <div class="charts" id="charts"></div>
     </section>
 
@@ -284,7 +301,7 @@ pre {
       <h2>Routes</h2>
       <div class="toolbar">
         <input type="search" id="route-search" placeholder="Filter routes" aria-label="Filter routes">
-        <span class="meta">Click a column to sort. Ids in paths are collapsed to :id.</span>
+        <span class="meta">Since restart, whatever the window. Click a column to sort. Ids in paths are collapsed to :id.</span>
       </div>
       <div id="routes"></div>
     </section>
@@ -310,9 +327,13 @@ pre {
   let timer = null
   let data = null
   // View state that must survive the periodic re-render.
+  const WINDOW_LABELS = { "15m": "last 15 min", "1h": "last hour", "6h": "last 6 hours", "24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days", all: "since restart", custom: "selected range" }
   const ui = {
+    window: WINDOW_LABELS[store.get("ol_window")] ? store.get("ol_window") : "1h",
     errFilter: "all", errSearch: "", routeSearch: "",
     routeSort: { key: "count", dir: -1 },
+    dbSort: { key: "dataMb", dir: -1 },
+    from: store.get("ol_from") || "", to: store.get("ol_to") || "",
     open: new Set(),
   }
 
@@ -371,7 +392,14 @@ pre {
 
   async function load() {
     if (!token) return showLogin()
-    const res = await api("GET", "/api/admin/metrics")
+    let query = "?window=" + encodeURIComponent(ui.window)
+    if (ui.window === "custom") {
+      // datetime-local values are local time, which new Date reads as such.
+      const from = new Date(ui.from), to = new Date(ui.to)
+      if (!(from < to)) { $("app-error").textContent = "Pick a start and an end date, the start first."; return }
+      query += "&from=" + encodeURIComponent(from.toISOString()) + "&to=" + encodeURIComponent(to.toISOString())
+    }
+    const res = await api("GET", "/api/admin/metrics" + query)
     if (!res) { $("app-error").textContent = "Server unreachable, retrying."; return }
     if (res.status === 401) return showLogin("Session expired. Sign in again.")
     if (res.status === 403) return signOut("This account is not an admin.")
@@ -379,6 +407,11 @@ pre {
     $("app-error").textContent = ""
     showApp()
     data = await res.json()
+    // The pickers reach back to the oldest kept data and no further than now.
+    for (const id of ["from", "to"]) {
+      $(id).min = localInput(new Date(data.window.dataFrom))
+      $(id).max = localInput(new Date())
+    }
     render()
   }
 
@@ -406,6 +439,38 @@ pre {
     schedule()
   })
   $("interval").addEventListener("change", schedule)
+  const localInput = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  const showRange = () => {
+    $("custom-range").classList.toggle("hidden", ui.window !== "custom")
+    if (ui.window !== "custom") return
+    if (!ui.from) ui.from = localInput(new Date(Date.now() - 86400000))
+    if (!ui.to) ui.to = localInput(new Date())
+    $("from").value = ui.from
+    $("to").value = ui.to
+  }
+  $("window").value = ui.window
+  showRange()
+  $("window").addEventListener("change", (e) => {
+    ui.window = e.target.value
+    store.set("ol_window", ui.window)
+    showRange()
+    load()
+  })
+  for (const id of ["from", "to"])
+    $(id).addEventListener("change", (e) => {
+      ui[id] = e.target.value
+      store.set("ol_" + id, ui[id])
+      load()
+    })
+  // F5 and Ctrl/Cmd+R reload the data, not the page, so the session, open
+  // rows and filters remain. Ctrl+F5 and Ctrl+Shift+R still reload the page.
+  document.addEventListener("keydown", (e) => {
+    const f5 = e.key === "F5" && !e.ctrlKey && !e.metaKey
+    const r = (e.key === "r" || e.key === "R") && (e.ctrlKey || e.metaKey) && !e.shiftKey
+    if (!(f5 || r) || $("app").classList.contains("hidden")) return
+    e.preventDefault()
+    load()
+  })
   $("refresh").addEventListener("click", load)
   $("signout").addEventListener("click", () => signOut())
 
@@ -417,16 +482,27 @@ pre {
   $("err-search").addEventListener("input", (e) => { ui.errSearch = e.target.value.toLowerCase(); if (data) renderErrors() })
   $("route-search").addEventListener("input", (e) => { ui.routeSearch = e.target.value.toLowerCase(); if (data) renderRoutes() })
   $("clear-errors").addEventListener("click", async () => {
-    if (!confirm("Clear the recorded errors, slow requests and error log? Request totals are kept.")) return
+    if (!confirm("Clear the recorded errors, slow requests and error log? Counts and charts are kept.")) return
     const res = await api("DELETE", "/api/admin/metrics/errors")
     if (res && res.ok) { ui.open.clear(); load() }
   })
+  // Clicking a header sorts by it, clicking it again flips the order. Text
+  // columns start A to Z, numbers start largest first.
+  const nextSort = (cur, th) => {
+    const key = th.dataset.sort
+    return { key, dir: cur.key === key ? -cur.dir : (th.classList.contains("num") ? -1 : 1) }
+  }
   $("routes").addEventListener("click", (e) => {
     const th = e.target.closest("th[data-sort]")
     if (!th) return
-    const key = th.dataset.sort
-    ui.routeSort = { key, dir: ui.routeSort.key === key ? -ui.routeSort.dir : (key === "route" ? 1 : -1) }
+    ui.routeSort = nextSort(ui.routeSort, th)
     renderRoutes()
+  })
+  $("database").addEventListener("click", (e) => {
+    const th = e.target.closest("#db-tables th[data-sort]")
+    if (!th) return
+    ui.dbSort = nextSort(ui.dbSort, th)
+    renderDatabase()
   })
   // Remember which rows are expanded, so a refresh doesn't fold them away.
   document.addEventListener("toggle", (e) => {
@@ -476,18 +552,25 @@ pre {
     '</tr>').join("") : '<tr><td colspan="' + cols.length + '"><span class="muted">' + esc(emptyText || "Nothing yet") + '</span></td></tr>') +
     '</tbody></table></div>'
 
+  const sortRows = (rows, { key, dir }) => rows.sort((a, b) => {
+    const x = a[key], y = b[key]
+    if (x == null) return 1
+    if (y == null) return -1
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir
+  })
+
   // One series per chart, one y-axis, so no legend: the title names it.
   function chart(title, points, key, unit, kind) {
     const vals = points.map((p) => p[key])
     const last = [...vals].reverse().find((v) => v != null)
-    const head = '<div class="title">' + esc(title) + '</div><div class="now">Last minute: ' +
+    const head = '<div class="title">' + esc(title) + '</div><div class="now">Latest: ' +
       (last == null ? "—" : fmt(last, 1) + unit) + '</div>'
-    if (points.length < 2) return '<div class="chart">' + head + '<div class="empty">Collecting, one point per minute</div></div>'
+    if (points.length < 2) return '<div class="chart">' + head + '<div class="empty">Not enough points in this window yet</div></div>'
     const W = 320, H = 120, padL = 34, padB = 4, padT = 6
     const max = Math.max(1, ...vals.filter((v) => v != null)) * 1.1
     // A fixed hour-wide axis, newest minute on the right, so a young process
     // shows a few narrow bars instead of two that fill the chart.
-    const SLOTS = 60, slot = (W - padL) / SLOTS, offset = Math.max(0, SLOTS - points.length)
+    const SLOTS = data.chart.slots, slot = (W - padL) / SLOTS, offset = Math.max(0, SLOTS - points.length)
     const x = (i) => padL + (offset + i + 0.5) * slot
     const y = (v) => H - padB - (v / max) * (H - padB - padT)
     let marks = ""
@@ -510,7 +593,7 @@ pre {
       '" y="0" width="' + slot + '" height="' + H + '"/>').join("")
     const pts = esc(JSON.stringify(points.map((p) => [p.at, p[key]])))
     return '<div class="chart" data-unit="' + esc(unit) + '" data-points="' + pts + '">' + head +
-      '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(title) + ' over the last hour">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(title) + ', ' + esc(WINDOW_LABELS[data.window.key]) + '">' +
       grid + marks + '<line class="cross" x1="0" x2="0" y1="0" y2="' + H + '" visibility="hidden"/>' + hits +
       '</svg><div class="tip hidden"></div></div>'
   }
@@ -540,7 +623,7 @@ pre {
 
   // ─── sections ───────────────────────────────────────────────────────────────
   function render() {
-    const m = data, p = m.process, h = m.http, db = m.database, ws = m.websocket
+    const m = data, p = m.process, h = m.http, db = m.database, ws = m.websocket, w = WINDOW_LABELS[m.window.key]
     $("meta").textContent = "v" + m.version + " · up " + dur(p.uptimeSeconds) + " · updated " + new Date(m.generatedAt).toLocaleTimeString()
     const e = m.errors
     const navCount = $("nav-errors")
@@ -550,10 +633,10 @@ pre {
     $("overview").innerHTML = tiles([
       tile("Status", db.errors.length ? "Degraded" : "Healthy", db.errors.length ? db.errors.length + " DB probe error(s)" : "DB ping " + ms(db.server && db.server.pingMs), db.errors.length ? "warn" : ""),
       tile("Uptime", dur(p.uptimeSeconds), "since " + new Date(p.startedAt).toLocaleString()),
-      tile("Requests", fmt(h.totalRequests), fmt(h.inFlight) + " in flight · " + fmt(h.bytesOutMb, 1) + " MB sent"),
-      tile("5xx rate", pct(h.byStatusClass["5xx"], h.totalRequests), fmt(h.byStatusClass["5xx"]) + " server errors", h.byStatusClass["5xx"] ? "bad" : ""),
-      tile("4xx rate", pct(h.byStatusClass["4xx"], h.totalRequests), fmt(h.byStatusClass["4xx"]) + " client errors"),
-      tile("Latency p99", ms(h.latencyMs.p99), "p95 " + ms(h.latencyMs.p95) + " · p50 " + ms(h.latencyMs.p50)),
+      tile("Requests", fmt(h.totalRequests), w + " · " + fmt(h.inFlight) + " in flight"),
+      tile("5xx rate", pct(h.byStatusClass["5xx"], h.totalRequests), fmt(h.byStatusClass["5xx"]) + " server errors, " + w, h.byStatusClass["5xx"] ? "bad" : ""),
+      tile("4xx rate", pct(h.byStatusClass["4xx"], h.totalRequests), fmt(h.byStatusClass["4xx"]) + " client errors, " + w),
+      tile("Latency p99", ms(h.latencyMs.p99), "p95 " + ms(h.latencyMs.p95) + " · p50 " + ms(h.latencyMs.p50) + ", " + w),
       tile("Memory (RSS)", fmt(p.memory.rssMb, 1) + " MB", "heap " + fmt(p.memory.heapUsedMb, 1) + " / " + fmt(p.memory.heapTotalMb, 1) + " MB"),
       tile("WebSocket", fmt(ws.authenticatedSockets) + " sockets", fmt(ws.connectedUsers) + " users online"),
       tile("DB pool", db.pool.inUse == null ? "—" : fmt(db.pool.inUse) + " / " + fmt(db.pool.limit), fmt(db.pool.queued) + " queued", db.pool.queued ? "warn" : ""),
@@ -582,17 +665,21 @@ pre {
   }
 
   function renderErrors() {
-    const e = data.errors, h = data.http, bs = h.byStatus
+    const e = data.errors, h = data.http, bs = h.byStatus, w = WINDOW_LABELS[data.window.key]
     const sum = (codes) => codes.reduce((t, c) => t + (bs[c] || 0), 0)
     $("error-tiles").innerHTML = tiles([
-      tile("Server errors (5xx)", fmt(e.serverErrors), "since " + ago(e.since), e.serverErrors ? "bad" : ""),
-      tile("Client errors (4xx)", fmt(e.clientErrors), "since " + ago(e.since)),
-      tile("Rate limited (429)", fmt(bs["429"] || 0), "all time", bs["429"] ? "warn" : ""),
+      tile("Server errors (5xx)", fmt(e.serverErrors), w, e.serverErrors ? "bad" : ""),
+      tile("Client errors (4xx)", fmt(e.clientErrors), w),
+      tile("Rate limited (429)", fmt(bs["429"] || 0), w, bs["429"] ? "warn" : ""),
       tile("Auth failures", fmt(sum(["401", "403"])), fmt(bs["401"] || 0) + " × 401 · " + fmt(bs["403"] || 0) + " × 403"),
-      tile("Not found (404)", fmt(bs["404"] || 0), "all time"),
-      tile("Logged errors", fmt(e.log.total), "logger.error calls", e.log.total ? "warn" : ""),
+      tile("Not found (404)", fmt(bs["404"] || 0), w),
+      tile("Logged errors", fmt(e.log.inWindow), "logger.error calls, " + w, e.log.inWindow ? "warn" : ""),
       tile("Error kinds", fmt(e.groups.length), "distinct status/code/message"),
     ])
+    const cut = $("lists-from")
+    cut.classList.toggle("hidden", !e.listsFrom)
+    cut.textContent = e.listsFrom ? "Only the most recent errors are kept, so the kinds and lists below start at " +
+      new Date(e.listsFrom).toLocaleString() + ". The counts above cover the whole window." : ""
 
     const codes = Object.entries(bs)
     $("status-codes").innerHTML = codes.length
@@ -609,7 +696,7 @@ pre {
       { label: "Last seen", get: (g) => stamp(g.lastSeen) },
       { label: "First seen", get: (g) => stamp(g.firstSeen) },
       { label: "Last request id", get: (g) => '<code class="muted">' + esc(g.lastReqId || "—") + '</code>' },
-    ], groups, e.groups.length ? "No errors match the filter" : "No errors recorded.")
+    ], groups, e.groups.length ? "No errors match the filter" : "No errors in this window.")
 
     const server = e.recentServer.filter(errorMatches)
     $("recent-server").innerHTML = server.length ? server.map((ev) => {
@@ -623,7 +710,7 @@ pre {
           ["User", ev.user || "anonymous"], ["Acting trainer", ev.trainer || "—"],
           ["Client IP", ev.ip || "—"], ["Request id", ev.reqId || "—"], ["Duration", ms(ev.durationMs)],
         ]) + '<pre>' + esc(ev.message + (ev.stack ? "\n\n" + ev.stack : "")) + '</pre></div></details>'
-    }).join("") : empty(e.recentServer.length ? "No server errors match the filter" : "No server errors recorded.")
+    }).join("") : empty(e.recentServer.length ? "No server errors match the filter" : "No server errors in this window.")
 
     const client = e.recentClient.filter(errorMatches).slice(0, 100)
     $("recent-client").innerHTML = table([
@@ -643,13 +730,17 @@ pre {
         '<span class="muted small">' + esc(time(l.at)) + '</span><span class="badge bad">log</span>' +
         '<span>' + esc(l.message.split("\n")[0]) + '</span><span></span><span class="muted small">' + esc(ago(l.at)) + '</span>' +
         '</summary><div class="body"><pre>' + esc(l.message) + '</pre></div></details>'
-    }).join("") : empty("Nothing logged at error level.")
+    }).join("") : empty("Nothing logged at error level in this window.")
   }
 
   function renderPerformance() {
-    const l = data.http.latencyMs, el = data.process.eventLoopDelayMs, hist = data.history
+    const l = data.http.latencyMs, el = data.process.eventLoopDelayMs, hist = data.chart.points, b = data.chart.bucketMinutes
+    const w = WINDOW_LABELS[data.window.key]
+    const per = b >= 60 && b % 60 === 0 ? (b === 60 ? "hour" : b / 60 + " hours") : b + " minutes"
+    $("chart-title").textContent = w[0].toUpperCase() + w.slice(1) +
+      (b > 1 ? ", per " + per + " (latency, event loop and gauges: worst or average)" : ", per minute")
     $("latency-tiles").innerHTML = tiles([
-      tile("Average", ms(l.avg), "all requests"),
+      tile("Average", ms(l.avg), w),
       tile("p50", ms(l.p50), "median"),
       tile("p90", ms(l.p90)),
       tile("p95", ms(l.p95)),
@@ -675,15 +766,8 @@ pre {
   }
 
   function renderRoutes() {
-    const { key, dir } = ui.routeSort
-    const rows = data.http.routes
-      .filter((r) => !ui.routeSearch || r.route.toLowerCase().includes(ui.routeSearch))
-      .sort((a, b) => {
-        const x = a[key], y = b[key]
-        if (x == null) return 1
-        if (y == null) return -1
-        return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir
-      })
+    const rows = sortRows(data.http.routes
+      .filter((r) => !ui.routeSearch || r.route.toLowerCase().includes(ui.routeSearch)), ui.routeSort)
     $("routes").innerHTML = table([
       { label: "Route", sort: "route", get: (r) => '<code>' + esc(r.route) + '</code>' },
       { label: "Requests", sort: "count", num: true, get: (r) => fmt(r.count) },
@@ -701,14 +785,14 @@ pre {
 
   function renderSlow() {
     const h = data.http
-    $("slow").innerHTML = '<p class="meta">Requests that took ' + esc(ms(h.slowThresholdMs)) + ' or longer, newest first.</p>' + table([
+    $("slow").innerHTML = '<p class="meta">Requests that took ' + esc(ms(h.slowThresholdMs)) + ' or longer, ' + esc(WINDOW_LABELS[data.window.key]) + ', newest first.</p>' + table([
       { label: "Time", get: (r) => stamp(r.at) },
       { label: "Duration", num: true, get: (r) => '<strong>' + ms(r.durationMs) + '</strong>' },
       { label: "Status", get: (r) => badge(r.status) },
       { label: "Route", get: (r) => '<code title="' + esc(r.method + " " + r.path) + '">' + esc(r.route) + '</code>' },
       { label: "User", get: (r) => esc(r.user || "—") },
       { label: "Request id", get: (r) => '<code class="muted">' + esc(r.reqId || "—") + '</code>' },
-    ], h.slowRequests, "No slow requests recorded.")
+    ], h.slowRequests, "No slow requests in this window.")
   }
 
   function renderUsers() {
@@ -721,7 +805,7 @@ pre {
       tile("Online now", fmt(data.websocket.connectedUsers), fmt(data.websocket.authenticatedSockets) + " devices"),
       tile("Workouts", fmt(app.workouts.total), fmt(app.workouts.last24h) + " in 24h · " + fmt(app.workouts.last7d) + " in 7d"),
       tile("In progress", fmt(app.workouts.inProgress), fmt(app.jointSessionsActive) + " joint sessions"),
-      tile("Sets logged", fmt(app.sets.total), fmt(app.programs) + " programs"),
+      tile("Sets ever logged", fmt(app.sets.everLogged), fmt(app.programs) + " programs"),
       tile("Friendships", fmt(app.friendships.accepted), fmt(app.friendships.pending) + " pending"),
       tile("Reports", fmt(app.reports.total), fmt(app.reports.last7d) + " in 7 days", app.reports.last7d ? "warn" : ""),
       tile("Progress photos", fmt(app.photos.count), fmt(app.photos.totalMb, 1) + " MB"),
@@ -780,11 +864,11 @@ pre {
       ["Idempotency keys stored", app ? fmt(app.idempotencyKeys) : "—"],
       ["Snapshot taken", new Date(db.collectedAt).toLocaleTimeString() + " (cached 15s)"],
     ]) + (db.size ? '<h3>Tables</h3><div id="db-tables">' + table([
-      { label: "Table", get: (r) => '<code>' + esc(r.name) + '</code>' },
-      { label: "Rows (est.)", num: true, get: (r) => fmt(r.rows) },
-      { label: "Data MB", num: true, get: (r) => fmt(r.dataMb, 2) },
-      { label: "Index MB", num: true, get: (r) => fmt(r.indexMb, 2) },
-    ], db.size.tables) + '</div>' : "")
+      { label: "Table", sort: "name", get: (r) => '<code>' + esc(r.name) + '</code>' },
+      { label: "Rows (est.)", sort: "rows", num: true, get: (r) => fmt(r.rows) },
+      { label: "Data MB", sort: "dataMb", num: true, get: (r) => fmt(r.dataMb, 2) },
+      { label: "Index MB", sort: "indexMb", num: true, get: (r) => fmt(r.indexMb, 2) },
+    ], sortRows(db.size.tables.slice(), ui.dbSort), "", ui.dbSort) + '</div>' : "")
   }
 
   function renderConfig() {
@@ -797,6 +881,12 @@ pre {
       ["Server FQDN", c.serverFqdn || "—"],
       ["Bootstrap admin", c.bootstrapAdminSet ? "set" : "first user"],
       ["Metrics page", c.metricsPageEnabled ? "on" : "off"],
+      ["Telegram bot alerts", c.botAlertsEnabled ? "on" : "off"],
+      ["Health alert limits", (() => {
+        const h = c.healthAlerts, lim = (v, unit) => (v ? v + unit : "off")
+        return "p95 " + lim(h.p95Ms, "ms") + ", p99 " + lim(h.p99Ms, "ms") + ", 5xx " + lim(h.errorRatePct, "%") +
+          " over " + h.windowMinutes + " min, from " + h.minRequests + " requests"
+      })()],
       ["Slow request threshold", ms(data.http.slowThresholdMs)],
     ])
   }

@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-10
+
 ### Added
 
 - `MIN_APP_VERSION` (x.y.z) is published as `minAppVersion` on `GET /healthz`. The Google Play build of the app forces its in-app update when its own version is lower. Unset means never force, and a malformed value is refused at boot.
@@ -232,7 +234,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.2
 [0.5.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.4.0

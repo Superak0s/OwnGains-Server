@@ -1,6 +1,6 @@
 {
   "name": "owngains-server",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Sync, accounts and social backend for the OwnGains fitness app — central instance or self-hosted",
   "main": "dist/server.js",
   "scripts": {

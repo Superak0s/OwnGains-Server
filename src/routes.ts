@@ -21,6 +21,7 @@ import supplementRoutes from "./features/tracking/supplements/supplements.routes
 import injuryRoutes from "./features/tracking/injury/injury.routes.js"
 import personalNotesRoutes from "./features/tracking/personalNotes/personalNotes.routes.js"
 import progressPhotoRoutes from "./features/tracking/progressPhoto/progressPhoto.routes.js"
+import profilePhotoRoutes from "./features/profilePhoto/profilePhoto.routes.js"
 import metricsRoutes from "./features/metrics/metrics.routes.js"
 import metricsPage from "./features/metrics/metrics.page.js"
 import legalRoutes from "./features/legal/legal.routes.js"
@@ -76,6 +77,7 @@ export function registerRoutes(app: Application): void {
   app.use("/api/sessions", sessionRoutes)
   app.use("/api/program", programRoutes)
   app.use("/api/friends", friendRoutes)
+  app.use("/api/profile/photo", profilePhotoRoutes)
   app.use("/api/sharing", sharingRoutes)
   if (serves("tracking")) {
     for (const [path, router] of trackingRoutes) app.use(path, router)

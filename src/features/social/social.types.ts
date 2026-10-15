@@ -5,6 +5,8 @@ export interface Friend {
   friendUserId: string
   username: string
   name: string
+  /** Changes whenever the friend replaces their profile photo. Null without one. */
+  photoHash: string | null
 }
 
 export interface FriendRequest {

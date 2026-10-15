@@ -6,12 +6,22 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- Profile photos on every server, `LOCAL_ONLY_FEATURES` included: `PUT`, `GET` and `DELETE /api/profile/photo` store, return (with an `ETag`) and remove one 400px JPEG per account, `GET /api/profile/photo/:userUuid` returns an accepted friend's, and `GET /api/friends` lists each friend's `photoHash`.
+- Hydration entries carry their own measurement error: `POST /api/tracking/hydration` takes an optional `errorMargin` (± percent, 0 to 100, default 0, anything else is 400 `VALIDATION_ERROR`), and `GET` returns `errorMargin` on every row (0 for older entries). Other measurement histories now also return `errorMargin`, always 0.
+
+### Changed
+
+- Display names may only contain letters, digits, single spaces and `. ' - _`, and usernames and display names are refused when they contain a banned word. Signup now checks `name` too, and a Google account whose name breaks the rules is created without one.
+
 ### Fixed
 
 - The purge of sign-ups that never accepted the Terms failed on MySQL with error 1093 and deleted nothing. It now selects the empty accounts first and deletes them by id.
 
 ### Internal
 
+- Migration `005_measurement_error_margin.sql` adds `measurements.error_margin`.
 - CI runs the test suite against MariaDB 11.4, the database the official server runs, and the README names it as the supported database.
 - The server lifecycle test sets `MDNS_ENABLED=true` itself, so it no longer fails when the environment (as in CI) disables mDNS.
 

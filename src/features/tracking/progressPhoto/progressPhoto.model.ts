@@ -166,7 +166,17 @@ async function encodePhoto(photo: Buffer): Promise<{ original: Buffer; thumb: Bu
   }
 }
 
-const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex")
+/** A profile photo: the thumbnail encode, metadata-free, with the same bounded decode. */
+export async function encodeAvatar(photo: Buffer): Promise<Buffer> {
+  await assertDecodable(photo)
+  try {
+    return await makeThumb(photo)
+  } catch {
+    throw new ValidationError("Invalid image data")
+  }
+}
+
+export const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex")
 
 export async function uploadPhoto(
   userId: number,

@@ -112,6 +112,8 @@ function requireMetricKeyShape(metric: string): void {
 interface MetricSample {
   metric: string
   value: number
+  /** ± percent, 0 to 100. Only hydration sends it. Defaults to 0. */
+  errorMargin?: number
 }
 
 export interface MetricEntry extends RowDataPacket {
@@ -120,11 +122,12 @@ export interface MetricEntry extends RowDataPacket {
   value: number
   measuredAt: Date | string
   note: string | null
+  errorMargin: number
   createdAt: Date | string
 }
 
 const ENTRY_COLS = `id, metric, value, measured_at AS measuredAt, note,
-  created_at AS createdAt`
+  error_margin AS errorMargin, created_at AS createdAt`
 
 /**
  * Write one or more samples under one shared `measured_at`, which is what
@@ -162,6 +165,9 @@ export async function logMetrics(
     const bounds = METRIC_BOUNDS[s.metric]
     if (bounds && (s.value < bounds.min || s.value > bounds.max))
       throw new ValidationError(bounds.message)
+    const margin = s.errorMargin ?? 0
+    if (!Number.isFinite(margin) || margin < 0 || margin > 100)
+      throw new ValidationError("errorMargin must be a number from 0 to 100")
   }
   const cleanNote = requireOptionalNote(note) ?? null
 
@@ -173,9 +179,10 @@ export async function logMetrics(
     // query(), not execute(): the row count varies, and VALUES ? expands the
     // nested array client-side instead of preparing a statement per count.
     await pool.query<ResultSetHeader>(
-      `INSERT INTO measurements (user_id, metric, value, measured_at, note) VALUES ?
-       ON DUPLICATE KEY UPDATE value = VALUES(value), note = VALUES(note)`,
-      [upserts.map((s) => [userId, s.metric, s.value, ts, cleanNote])],
+      `INSERT INTO measurements (user_id, metric, value, measured_at, note, error_margin) VALUES ?
+       ON DUPLICATE KEY UPDATE value = VALUES(value), note = VALUES(note),
+         error_margin = VALUES(error_margin)`,
+      [upserts.map((s) => [userId, s.metric, s.value, ts, cleanNote, s.errorMargin ?? 0])],
     )
     const keys = fixedIn(upserts.map((s) => s.metric), MAX_VALUES_PER_ENTRY)
     const [rows] = await pool.execute<(RowDataPacket & { id: number })[]>(
@@ -210,10 +217,11 @@ async function logAdditiveMetric(
   for (let attempt = 0; ; attempt++) {
     try {
       const [result] = await pool.execute<ResultSetHeader>(
-        `INSERT INTO measurements (user_id, metric, value, measured_at, note, entry_seq)
-         SELECT ?, ?, ?, ?, ?, COALESCE(MAX(entry_seq) + 1, 0) FROM measurements
+        `INSERT INTO measurements (user_id, metric, value, measured_at, note, error_margin, entry_seq)
+         SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(entry_seq) + 1, 0) FROM measurements
          WHERE user_id = ? AND metric = ? AND measured_at = ?`,
-        [userId, sample.metric, sample.value, ts, note, userId, sample.metric, ts],
+        [userId, sample.metric, sample.value, ts, note, sample.errorMargin ?? 0,
+          userId, sample.metric, ts],
       )
       return result.insertId
     } catch (err) {

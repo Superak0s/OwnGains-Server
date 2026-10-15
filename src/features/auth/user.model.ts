@@ -149,6 +149,7 @@ interface ChildExport {
 const EXPORT_SKIPPED_CHILDREN = new Set([
   "progress_photo_blobs",
   "progress_photo_thumbs",
+  "profile_photo_blobs",
 ])
 
 interface ForeignKeyRow {

@@ -352,6 +352,8 @@ CREATE TABLE IF NOT EXISTS measurements (
   -- that share one instant 0, 1, 2… so a second drink doesn't replace the first.
   entry_seq   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   note        TEXT                   DEFAULT NULL,
+  -- ± percent, the user's own uncertainty estimate. Only hydration sets it.
+  error_margin DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   -- Unique, not just indexed: a device replaying a week of offline logs on
@@ -360,7 +362,8 @@ CREATE TABLE IF NOT EXISTS measurements (
   UNIQUE KEY uq_m_user_metric_at_seq (user_id, metric, measured_at, entry_seq),
   KEY idx_m_user_at (user_id, measured_at),
   CONSTRAINT fk_m_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-  CONSTRAINT ck_m_value CHECK (value > 0)
+  CONSTRAINT ck_m_value CHECK (value > 0),
+  CONSTRAINT ck_m_error_margin CHECK (error_margin BETWEEN 0 AND 100)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Label/unit registry. Built-in metrics need no row here; a user-defined metric
@@ -591,6 +594,23 @@ CREATE TABLE IF NOT EXISTS progress_photo_thumbs (
   data     MEDIUMBLOB   NOT NULL,
   PRIMARY KEY (photo_id),
   CONSTRAINT fk_ppt_photo FOREIGN KEY (photo_id) REFERENCES progress_photos (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One per user, always a 400px metadata-free JPEG. The bytes are in their own
+-- table so the data export (which skips it) and listings never read them.
+CREATE TABLE IF NOT EXISTS profile_photos (
+  user_id      INT UNSIGNED NOT NULL,
+  content_hash CHAR(64)     NOT NULL,
+  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_prof_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS profile_photo_blobs (
+  user_id INT UNSIGNED NOT NULL,
+  data    MEDIUMBLOB   NOT NULL,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_profb_photo FOREIGN KEY (user_id) REFERENCES profile_photos (user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS progress_photo_muscles (

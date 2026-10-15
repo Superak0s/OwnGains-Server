@@ -256,9 +256,10 @@ export async function getFriends(userId: number): Promise<Friend[]> {
     // The pair is ordered, so "the other one" is one IF and one join rather
     // than a CASE over two copies of the users table.
     `SELECT f.id AS friendshipId, f.created_at AS friendsSince,
-            u.uuid AS friendUserId, u.username, u.name
+            u.uuid AS friendUserId, u.username, u.name, pp.content_hash AS photoHash
      FROM friendships f
      JOIN users u ON u.id = IF(f.user_id = ?, f.friend_id, f.user_id)
+     LEFT JOIN profile_photos pp ON pp.user_id = u.id
      WHERE ? IN (f.user_id, f.friend_id) AND f.status = 'accepted'
      ORDER BY f.accepted_at DESC LIMIT 500`,
     [userId, userId],

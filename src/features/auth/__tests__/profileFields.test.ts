@@ -32,3 +32,20 @@ describe("height and body-fat formula on the user object", () => {
     expect(noop.body.user).toMatchObject({ heightCm: 182, bfFormulaSex: "female" })
   })
 })
+
+describe("display name and username rules", () => {
+  it("refuses odd characters and banned words, and stores names trimmed", async () => {
+    const u = await signup("namerule")
+    const put = (name: string) => request(app).put("/api/auth/profile").set(auth(u.token)).send({ name })
+    expect((await put("<b>hi</b>")).status).toBe(400)
+    expect((await put("Big Shit")).status).toBe(400)
+    const ok = await put("  José Núñez ")
+    expect(ok.status).toBe(200)
+    expect(ok.body.user.name).toBe("José Núñez")
+
+    const bad = await request(app)
+      .post("/api/auth/signup")
+      .send({ username: "xfuckx_1", email: "nr@test.local", password: "Passw0rd-123", name: "Ok", termsVersion: "test", healthConsent: true })
+    expect(bad.status).toBe(400)
+  })
+})

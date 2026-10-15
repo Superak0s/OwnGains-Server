@@ -22,6 +22,23 @@ describe("hydration routes", () => {
     expect(history.body.data[0].value).toBe(500)
   })
 
+  it("stores a per-entry errorMargin, 0 when missing, 400 when invalid", async () => {
+    const ok = await request(app)
+      .post("/api/tracking/hydration")
+      .set(auth(u.token))
+      .send({ amountMl: 250, errorMargin: 7.5, measuredAt: new Date(Date.now() - 1000).toISOString() })
+    expect(ok.status).toBe(201)
+    for (const errorMargin of [-1, 100.5, "5", true])
+      expect(
+        (await request(app).post("/api/tracking/hydration").set(auth(u.token)).send({ amountMl: 250, errorMargin })).status,
+      ).toBe(400)
+    const history = await request(app).get("/api/tracking/hydration").set(auth(u.token))
+    const margins = Object.fromEntries(history.body.data.map((r: { id: number; errorMargin: number }) => [r.id, r.errorMargin]))
+    expect(margins[ok.body.id]).toBe(7.5)
+    expect(margins[entryId]).toBe(0)
+    await request(app).delete(`/api/tracking/hydration/${ok.body.id}`).set(auth(u.token))
+  })
+
   // The hydration goal is stored in /api/settings with every other preference now.
   it("updates hydration settings with validation", async () => {
     const bad = await request(app)

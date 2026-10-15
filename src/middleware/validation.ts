@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express"
 import { ValidationError } from "./errorHandler.js"
+import { displayNameError, usernameError } from "../features/auth/nameFilter.js"
 
 // Prevents oversized strings from passing body-size checks and being stored.
 // Values match the DB column sizes in config/schema.sql.
@@ -253,11 +254,14 @@ export function validateRegistration(
       errors.push(
         "Username must be 3-20 characters (letters, numbers, underscores)",
       )
-    const lenErr = checkMaxLength(username, "username")
+    const lenErr = checkMaxLength(username, "username") ?? usernameError(username)
     if (lenErr) errors.push(lenErr)
   } else {
     errors.push("Username is required")
   }
+
+  if (req.body.name !== undefined && req.body.name !== null && req.body.name !== "")
+    errors.push(...displayNameErrors(req.body))
 
   if (email) {
     if (!validateEmail(email)) errors.push("Invalid email format")
@@ -297,6 +301,15 @@ export function validatePasswordChange(
   next()
 }
 
+/** Checks `body.name` and stores it trimmed. */
+function displayNameErrors(body: { name?: unknown }): string[] {
+  if (typeof body.name !== "string" || !body.name.trim()) return ["Name must be a non-empty string"]
+  const name = body.name.trim()
+  body.name = name
+  const err = checkMaxLength(name, "name") ?? displayNameError(name)
+  return err ? [err] : []
+}
+
 export function validateProfileUpdate(
   req: Request,
   _res: Response,
@@ -305,14 +318,7 @@ export function validateProfileUpdate(
   const { name, email } = req.body
   const errors: string[] = []
 
-  if (name !== undefined) {
-    if (typeof name !== "string" || !name.trim()) {
-      errors.push("Name must be a non-empty string")
-    } else {
-      const lenErr = checkMaxLength(name, "name")
-      if (lenErr) errors.push(lenErr)
-    }
-  }
+  if (name !== undefined) errors.push(...displayNameErrors(req.body))
 
   if (email !== undefined) {
     if (typeof email !== "string" || !validateEmail(email)) {

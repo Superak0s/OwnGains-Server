@@ -8,6 +8,7 @@ import { parseUuidParam } from "@/middleware/validation.js"
 import { pool, withTransaction } from "@/config/database.js"
 import { envInt } from "@/config/env.js"
 import { hashPassword } from "./password.js"
+import { displayNameError, usernameError } from "./nameFilter.js"
 import { logger } from "@/utils/logger.js"
 
 export { verifyPassword, DUMMY_PASSWORD_HASH } from "./password.js"
@@ -228,6 +229,7 @@ export async function unlinkGoogleSub(userId: number): Promise<boolean> {
 /** The email's local part as a valid username (3-20 of [A-Za-z0-9_]). */
 export function usernameFromEmail(email: string): string {
   const base = email.split("@")[0].replace(/[^A-Za-z0-9_]/g, "").slice(0, 15)
+  if (usernameError(base)) return "user"
   return base.length >= 3 ? base : `user${base}`
 }
 
@@ -244,11 +246,13 @@ export async function createGoogleUser(
 ): Promise<number> {
   const base = usernameFromEmail(email)
   const password = randomBytes(32).toString("base64url")
+  const trimmed = name?.trim().slice(0, 128)
+  const safeName = trimmed && !displayNameError(trimmed) ? trimmed : undefined
   for (let attempt = 0; ; attempt++) {
     const username =
       attempt === 0 ? base : `${base}_${randomBytes(3).toString("hex").slice(0, 4)}`
     try {
-      return await createUser(username, email, password, name ?? undefined, consent, sub)
+      return await createUser(username, email, password, safeName, consent, sub)
     } catch (err) {
       if (attempt >= 4 || !(await usernameTaken(username))) throw err
     }

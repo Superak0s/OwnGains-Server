@@ -10,6 +10,7 @@ database is always up to date. Version 0.1.0 is the baseline.
 | `002_demo_friends.sql` | `users.demo_owner_id` | 0.1.0 |
 | `003_google_sub.sql` | `users.google_sub`, `users.has_password` | 0.1.0 |
 | `004_workouts_start_index.sql` | `workouts` index `idx_w_start_user` | 0.1.0 |
+| `005_measurement_error_margin.sql` | `measurements.error_margin` | 0.1.0 |
 
 To alter an existing table on live boxes, add `NNN_description.sql` here,
 zero-padded to three digits (files run in `localeCompare` order, each at most

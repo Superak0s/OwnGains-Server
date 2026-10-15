@@ -64,6 +64,8 @@ Access rules: writes (anything but `GET`/`HEAD`/`DELETE`) outside `/api/auth` ne
 | POST   | `/refresh`        | **Unauthenticated.** Spend a refresh token for a new access token + a rotated refresh token. Reuse of a spent token kills the whole token family (`REFRESH_REUSED`). Without a `refreshToken` it answers 401 `REFRESH_TOKEN_REQUIRED` |
 | POST   | `/signout`        | Revoke the presented refresh token (`204`, even if unknown). With `allDevices: true` it revokes every refresh token, bumps `token_version` and answers `200 { token, refreshToken }` so this device remains signed in                                                                                                 |
 
+Usernames are 3 to 20 of `[A-Za-z0-9_]`. Display names (`name` at signup and in `PUT /profile`) are trimmed, at most 128 characters, and limited to letters of any script, digits, single inner spaces and `. ' - _`. Both are refused (400 `VALIDATION_ERROR`) when they contain a word on the ban list in `src/features/auth/nameFilter.ts`, matched after folding accents, case and common digit-for-letter swaps. A Google account whose name breaks these rules is created without one.
+
 ### Workout sessions (`/api/sessions`)
 
 `GET /` (history with `?split=`, `?dayNumber=`, `?limit=` default 30 max 365, `?includeTimings=true`, `?before=<nextCursor>`, returns `{ sessions, nextCursor }`) · `GET /exercise-records` (every session containing an all-time record set, trimmed to those sets) · `POST /start` · `POST /:sessionId/set` (record a set and push live WS updates) · `PATCH /:sessionId/sets/:setId` (edit a set) · `PATCH /:sessionId` (move a running workout to another program day, body `dayNumber`, optional `dayTitle`) · `POST /:sessionId/end` (a no-op returning `alreadyEnded: true` on an ended workout) · `GET /:sessionId` · `POST /rename-exercise` (bulk rename across a split's history) · `POST /demo` (body `days`, 1 to 14 program days, and optional `split`: replaces the caller's demo data with about five weeks of finished workouts, one suspended demo friend per sharing permission type, a pending friend request, and tracking and supplement entries for the features this server stores) · `DELETE /demo` (also returns `deletedFriends` and `deletedTracking`) · `DELETE /split/:split` · `DELETE /:sessionId/sets` (query `?exerciseName=&setIndex=`, 0-based). The deletes return `{ deletedCount }`.
@@ -94,7 +96,7 @@ Every tracking router requires auth. Writes also need recorded health consent (`
 
 - **`bodystats`**: weight log (`POST`/`GET /weight`, `GET /weight/current`, `DELETE /weight/:id`) and body fat (`POST`/`GET /bodyfat/log`, `DELETE /bodyfat/log/:id`) with the US-Navy calculation.
 - **`measurements`**: every scalar metric, built-in or user-defined: `POST /` (a map of metric → value), `GET /?metrics=a,b`, `GET /:metric/history` (one metric as a chart series), `GET`/`POST /definitions`, `DELETE /:id` (`?metrics=a,b` deletes the whole measuring session). `bodystats` and `hydration` are thin routers over it.
-- **`hydration`**: `POST /` (accepts `Idempotency-Key`), `GET /`, `DELETE /:id`.
+- **`hydration`**: `POST /` (accepts `Idempotency-Key`, optional `errorMargin` ± percent 0 to 100, default 0), `GET /` (each row has `errorMargin`), `DELETE /:id`.
 - **`soreness`**: `POST`/`GET /` (`?muscle=` and `?status=active` filter the list), `GET /active`, `GET /stats`, `GET /muscle/:muscle` (the last two are the list with one filter fixed), `POST /follow-ups` (check in on many episodes at once), `POST /:id/follow-ups` (deprecated: use the batch route), `DELETE /:id`.
 - **`menstrual`**: `POST`/`GET /`, `GET /stats`, `PATCH`/`DELETE /:id`.
 - **`injuries`**: `POST`/`GET /` (`?muscle=` and `?status=active` filter the list), `GET /active`, `GET /muscle/:muscle` (the list with one filter fixed), `PATCH`/`DELETE /:id`.
@@ -110,6 +112,10 @@ Every tracking router requires auth. Writes also need recorded health consent (`
 ### Settings (`/api/settings`)
 
 `GET /` and `PATCH /` read and update every user preference in one row: `hydrationGoalMl`, `hydrationErrorPercent`, `cyclePeriodDays`, `cycleLengthDays`, `macroProteinGoal`, `macroCarbsGoal`, `macroFatGoal`, `macroCaloriesGoal` (numbers ≥ 0, and the first, third and fourth must be integers). Unknown keys or an empty patch are 400, `null` values are skipped. Both routes return `{ success, data }` with `updatedAt`. Ranges are `CHECK` constraints in the schema, and a violation comes back as a 400. Part of the `tracking` group (cycle length is menstrual data): needs health consent for writes, answers `410 FEATURE_LOCAL_ONLY` when `tracking` is local-only, and is erased on consent withdrawal.
+
+### Profile photo (`/api/profile/photo`)
+
+Mounted on every server, `LOCAL_ONLY_FEATURES` included, since it is account data rather than tracking data. `PUT /` (multipart field `photo`, the same image checks and decode slots as progress photos, 20 uploads / 15 min per account) stores one metadata-free 400px JPEG per account and returns `{ hash }`. `GET /` returns the caller's own, and `GET /:userUuid` returns the caller's or an accepted friend's (`404` for anyone else, the same as no photo). Both send the hash as the `ETag` and answer `304` on a matching `If-None-Match`. `DELETE /` removes it (idempotent). `GET /api/friends` lists each friend's `photoHash` (`null` without one) so a client only downloads a photo when it changed.
 
 ### Social (`/api/friends` & `/api/sharing`)
 
@@ -158,6 +164,7 @@ SQL tables (`src/config/schema.sql`):
 - **menstrual_cycle** · **injuries** · **muscle_notes** · **macros_intake**: one table each, all `user_id`-owned.
 - **supplements** / **supplement_intake**: supplement definitions and intake.
 - **progress_photos** / **progress_photo_blobs** / **progress_photo_thumbs** / **progress_photo_muscles**: metadata, image bytes and thumbnails in their own tables, and muscle-group tags.
+- **profile_photos** / **profile_photo_blobs**: one profile photo per user, its hash and its bytes. The bytes are left out of the data export.
 - **friendships**: one row per pair, stored with `user_id < friend_id` and a `requested_by` column, so a duplicate request is a UNIQUE violation rather than a race.
 - **friend_request_cooldowns**: remembers declined/cancelled requests so they can't be re-sent straight away.
 - **user_blocks** / **user_reports**: blocks in both directions, and reports filed for the instance operator.

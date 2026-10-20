@@ -116,6 +116,7 @@ interface MetricSample {
   errorMargin?: number
 }
 
+/** One stored measurement sample. */
 export interface MetricEntry extends RowDataPacket {
   id: number
   metric: string
@@ -233,6 +234,13 @@ async function logAdditiveMetric(
   }
 }
 
+/**
+ * Lists samples of one metric, newest first.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param metric - Metric key.
+ * @param limit - Maximum samples to return.
+ */
 export async function getMetricHistory(
   userId: number,
   metric: string,
@@ -246,6 +254,13 @@ export async function getMetricHistory(
   return rows
 }
 
+/**
+ * Returns the newest sample of a metric.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param metric - Metric key.
+ * @returns The sample, or null when none exists.
+ */
 export async function getLatestMetric(
   userId: number,
   metric: string,
@@ -254,6 +269,14 @@ export async function getLatestMetric(
   return rows[0] ?? null
 }
 
+/**
+ * Deletes one sample.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entryId - `measurements.id`.
+ * @param metric - Metric the sample must belong to.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteMetricEntry(
   userId: number,
   entryId: number,
@@ -414,6 +437,16 @@ interface MetricDefinition extends RowDataPacket {
 const DEFINITION_COLS = `id, key_name AS keyName, label, unit,
   created_at AS createdAt, updated_at AS updatedAt`
 
+/**
+ * Defines a custom metric the user can log samples against.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param keyName - Unique key for the metric.
+ * @param label - Display label.
+ * @param unit - Display unit, if any.
+ * @returns The stored definition.
+ * @throws ValidationError for a missing or badly formed key or label.
+ */
 export async function createMetricDefinition(
   userId: number,
   keyName: string,
@@ -461,6 +494,11 @@ export async function createMetricDefinition(
   return rows[0]
 }
 
+/**
+ * Lists the user's custom metric definitions, oldest first.
+ *
+ * @param userId - Numeric id of the owner.
+ */
 export async function getMetricDefinitions(
   userId: number,
 ): Promise<MetricDefinition[]> {
@@ -499,6 +537,13 @@ export async function requireKnownMetrics(
     throw new ValidationError(`Unknown metric: ${unknown}`, null, "METRIC_UNKNOWN")
 }
 
+/**
+ * Single-metric form of the check that a metric is built in or defined by the user.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param metric - Metric key.
+ * @throws ValidationError `METRIC_UNKNOWN` for an unknown custom metric.
+ */
 export const requireKnownMetric = (
   userId: number,
   metric: string,

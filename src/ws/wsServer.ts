@@ -59,6 +59,7 @@ interface ExtendedWebSocket extends WebSocket {
   _tokenVersion?: number
 }
 
+/** Tunables for {@link createWsServer}. Each falls back to its environment variable. */
 export interface WsServerOptions {
   /** Same meaning as Express's `trust proxy` hop count. Default: TRUST_PROXY_HOPS. */
   trustProxyHops?: number
@@ -297,6 +298,13 @@ export function notifyJointSessionEnded(
 
 export { sendToUser }
 
+/**
+ * Sends a participant's progress to their partner in a joint workout.
+ *
+ * @param session - The joint session.
+ * @param fromUserId - Uuid of the user who made progress.
+ * @param progress - The progress to relay.
+ */
 export function notifyJointProgress(
   session: JointSession,
   fromUserId: string,
@@ -333,6 +341,7 @@ async function fetchTokenVersions(uuids: string[]): Promise<Map<string, number>>
 // just SIGTERM) also closes WS connections gracefully.
 let wsCleanup: (() => void) | null = null
 
+/** Closes the WebSocket server and stops its heartbeat. Safe to call before it started. */
 export function closeWsServer(): void {
   wsCleanup?.()
 }
@@ -340,6 +349,7 @@ export function closeWsServer(): void {
 /** Connection counts for the admin metrics page, or null before createWsServer. */
 let connectionStats: (() => { total: number; distinctIps: number; maxConnections: number }) | null = null
 
+/** Connection and user counts for the admin metrics page. */
 export function getWsStats() {
   let authenticatedSockets = 0
   for (const sockets of clients.values()) authenticatedSockets += sockets.size
@@ -355,6 +365,14 @@ export function getWsStats() {
   }
 }
 
+/**
+ * Attaches the `/ws` WebSocket server to an HTTP server. Clients authenticate
+ * with a JWT in their first message, and connection caps apply per IP and overall.
+ *
+ * @param httpServer - The server to share a port with.
+ * @param options - Overrides for the proxy hop count and connection caps.
+ * @returns The WebSocket server.
+ */
 export function createWsServer(
   httpServer: http.Server,
   options: WsServerOptions = {},

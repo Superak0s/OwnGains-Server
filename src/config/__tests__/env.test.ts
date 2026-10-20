@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest"
-import { envBool, envInt, readLocalOnlyFeatures, readMinAppVersion } from "../env.js"
+import { envBool, envInt, readDisabledFeatures, readLocalOnlyFeatures, readMinAppVersion } from "../env.js"
 
 afterEach(() => {
   delete process.env.X_TEST
   delete process.env.LOCAL_ONLY_FEATURES
+  delete process.env.DISABLED_FEATURES
   delete process.env.MIN_APP_VERSION
 })
 
@@ -34,6 +35,15 @@ describe("env parsing fails at boot on a malformed value", () => {
     expect(readLocalOnlyFeatures()).toEqual(["tracking", "supplements"])
     process.env.LOCAL_ONLY_FEATURES = "tracking,workouts"
     expect(() => readLocalOnlyFeatures()).toThrow('unknown feature "workouts"')
+  })
+})
+
+describe("readDisabledFeatures", () => {
+  it("lowercases known names and refuses unknown ones", () => {
+    process.env.DISABLED_FEATURES = " Messages ,"
+    expect(readDisabledFeatures()).toEqual(["messages"])
+    process.env.DISABLED_FEATURES = "messages,friends"
+    expect(() => readDisabledFeatures()).toThrow(/DISABLED_FEATURES: unknown feature "friends"/)
   })
 })
 

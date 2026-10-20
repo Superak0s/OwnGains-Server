@@ -60,7 +60,7 @@ describe("authenticateToken", () => {
   })
 
   it("attaches req.user for a valid token", async () => {
-    const u = await signup("ok")
+    const u = await signup("okay")
     const { next, req } = await run(u.token)
     expect(next).toHaveBeenCalledWith()
     expect(req.user!.username).toBe(u.username)

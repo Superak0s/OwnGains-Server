@@ -1,10 +1,9 @@
 // Photo route paths the main suite doesn't reach: the per-account upload
-// limiter (skipped under vitest), the beforeId cursor, and a busy lazy thumb.
+// limiter (skipped under vitest), the beforeId cursor, and a missing thumb.
 import { describe, it, expect, beforeAll, afterEach, vi } from "vitest"
 import request from "supertest"
 import sharp from "sharp"
 import { pool } from "@/config/database.js"
-import { tryAcquireDecodeSlot } from "@/middleware/imageUpload.js"
 import { app, signup, auth } from "../../../../tests/helpers.js"
 
 afterEach(() => vi.unstubAllEnvs())
@@ -38,16 +37,9 @@ describe("progressPhoto route edges", () => {
     expect(res.status).toBe(200)
   })
 
-  it("answers 503 for a missing thumb while every decode slot is taken", async () => {
+  it("answers 404 for a photo whose thumb row is missing", async () => {
     await pool.execute(`DELETE FROM progress_photo_thumbs WHERE photo_id = ?`, [photoId])
-    const held = []
-    for (let r = tryAcquireDecodeSlot(); r; r = tryAcquireDecodeSlot()) held.push(r)
-    try {
-      const res = await request(app).get(`/api/tracking/photos/muscle/${photoId}/thumb`).set(auth(u.token))
-      expect(res.status).toBe(503)
-      expect(res.headers["retry-after"]).toBe("5")
-    } finally {
-      held.forEach((release) => release())
-    }
+    const res = await request(app).get(`/api/tracking/photos/muscle/${photoId}/thumb`).set(auth(u.token))
+    expect(res.status).toBe(404)
   })
 })

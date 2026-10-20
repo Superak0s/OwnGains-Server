@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   endStaleSessions: vi.fn(),
   purgeDeletedAccounts: vi.fn(),
   purgeJointSessions: vi.fn(),
+  sendToUser: vi.fn(),
 }))
 vi.mock("../../features/workouts/workouts.model.js", () => ({ endStaleSessions: m.endStaleSessions }))
 vi.mock("../../features/auth/auth.model.js", () => ({
@@ -19,7 +20,7 @@ vi.mock("../../features/social/friends/friends.model.js", () => ({
   purgeExpiredCooldowns: vi.fn(),
   purgeOldReports: vi.fn(),
 }))
-vi.mock("../../ws/wsServer.js", () => ({ sendToUser: vi.fn() }))
+vi.mock("../../ws/wsServer.js", () => ({ sendToUser: m.sendToUser }))
 
 const { logger } = await import("../../utils/logger.js")
 const job = await import("../sessionCleanup.js")
@@ -52,5 +53,22 @@ describe("sessionCleanup sweep", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("tells the trainer, as well as the owner, when it ends a trainer-run workout", async () => {
+    m.endStaleSessions.mockReset().mockResolvedValue([
+      { id: 5, userId: "client", trainer: { uuid: "coach", username: "Coach" } },
+      { id: 6, userId: "solo", trainer: null },
+    ])
+    m.purgeJointSessions.mockReset()
+    m.sendToUser.mockReset()
+    await job.runStaleSessionCleanup()
+    const payload = { traineeId: "client", trainerId: "coach", trainerUsername: "Coach", sessionId: 5 }
+    expect(m.sendToUser.mock.calls).toEqual([
+      ["client", "session_auto_ended", { sessionId: 5 }],
+      ["client", "trainer_session_ended", payload],
+      ["coach", "trainer_session_ended", payload],
+      ["solo", "session_auto_ended", { sessionId: 6 }],
+    ])
   })
 })

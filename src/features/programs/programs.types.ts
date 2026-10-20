@@ -20,6 +20,7 @@ export interface MachineFields {
   machineMeta?: Record<string, MachineMeta>
 }
 
+/** An exercise in a program day, with its set count and machine settings. */
 export interface Exercise extends MachineFields {
   name: string
   primaryMuscles?: string[]
@@ -46,6 +47,7 @@ interface SplitWorkout {
   totalSets: number
 }
 
+/** One training day of a program. */
 export interface ProgramDay {
   dayNumber: number
   dayTitle: string
@@ -57,11 +59,13 @@ export interface ProgramDay {
   split: Record<string, SplitWorkout>
 }
 
+/** The program document the app uploads: its days and the order of its splits. */
 export interface ProgramData {
   days: ProgramDay[]
   split: string[]
 }
 
+/** A program as stored for a user, with upload details. */
 export interface StoredProgram {
   programData: ProgramData
   originalFilename: string

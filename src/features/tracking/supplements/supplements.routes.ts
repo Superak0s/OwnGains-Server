@@ -97,7 +97,7 @@ async function requireSupplement(userId: number, supplementId: number) {
 
 router.get("/", async (req: Request, res: Response) => {
   const summaries = await listSupplementSummaries(req.user!.id)
-  res.json({ success: true, data: summaries, supplements: summaries })
+  res.json({ success: true, data: summaries })
 })
 
 router.post("/", async (req: Request, res: Response) => {
@@ -131,7 +131,7 @@ router.post("/", async (req: Request, res: Response) => {
   })
   const [summary] = await listSupplementSummaries(req.user!.id, supplementId)
 
-  res.status(201).json({ success: true, data: summary, supplement: summary })
+  res.status(201).json({ success: true, data: summary })
 })
 
 router.patch("/:id", async (req: Request, res: Response) => {
@@ -168,7 +168,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
   })
   const [updated] = await listSupplementSummaries(req.user!.id, supplementId)
 
-  res.json({ success: true, data: updated, supplement: updated })
+  res.json({ success: true, data: updated })
 })
 
 router.delete("/:id", async (req: Request, res: Response) => {
@@ -203,7 +203,7 @@ router.post("/:id/log", idempotent, async (req: Request, res: Response) => {
 
   res
     .status(201)
-    .json({ success: true, data: { id: entryId, streak }, id: entryId, streak })
+    .json({ success: true, data: { id: entryId, streak } })
 })
 
 router.get("/:id/log", async (req: Request, res: Response) => {
@@ -216,8 +216,7 @@ router.get("/:id/log", async (req: Request, res: Response) => {
   const streak = await getStreak(req.user!.id, supplementId)
   const todayEntry = await hasTakenTodayServer(req.user!.id, supplementId)
 
-  const log = { entries, streak, takenToday: !!todayEntry, todayEntry }
-  res.json({ success: true, data: log, ...log })
+  res.json({ success: true, data: { entries, streak, takenToday: !!todayEntry, todayEntry } })
 })
 
 router.delete("/:id/log/:entryId", async (req: Request, res: Response) => {

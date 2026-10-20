@@ -1,6 +1,7 @@
 // Types shared across more than one tracking sub-feature. A type used by a
 // feature on its own is defined in that feature's own model file instead.
 
+/** A body fat reading with the measurements it was derived from. */
 export interface BodyFatEntry {
   id: number
   percentage: number
@@ -16,6 +17,7 @@ export interface BodyFatEntry {
   date: Date | string
 }
 
+/** One logged food intake. */
 export interface MacrosEntry {
   id: number
   name: string | null

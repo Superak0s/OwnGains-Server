@@ -23,6 +23,8 @@ process.env.AUTH_RATE_LIMIT = "20"
 process.env.SIGNUP_RATE_LIMIT = "20"
 process.env.API_RATE_LIMIT = "200"
 process.env.LARGE_BODY_RATE_LIMIT = "20"
+// Messages are only served with an FCM key. This one is never used: no test user sends to a registered device.
+process.env.FCM_SERVICE_ACCOUNT = JSON.stringify({ project_id: "test", client_email: "test@test", private_key: "test" })
 
 process.loadEnvFile(envPath)
 

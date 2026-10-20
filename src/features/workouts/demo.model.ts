@@ -53,24 +53,39 @@ const FRIEND_DAYS: DemoDay[] = [
   },
 ]
 
-const ALL_PERMISSIONS = ["history", "analytics", "program", "joint_session", "watch_session", "trainer"]
+const ALL_PERMISSIONS = ["history", "analytics", "program", "joint_session", "watch_session", "trainer", "tracking"]
 
-// Named after what each one grants the caller, so every permission can be tried.
+// Named after how much each one shares with the caller.
 const FRIENDS = [
-  { name: "History", strength: 1.2, status: "accepted", grants: ["history"] },
-  { name: "Analytics", strength: 0.8, status: "accepted", grants: ["history", "analytics"] },
-  { name: "Program", strength: 1, status: "accepted", grants: ["program"] },
-  { name: "Joint", strength: 1.1, status: "accepted", grants: ["joint_session"] },
-  { name: "Watch", strength: 0.9, status: "accepted", grants: ["watch_session"] },
-  { name: "Trainer", strength: 1, status: "accepted", grants: ["trainer"] },
-  { name: "All", strength: 1.3, status: "accepted", grants: ALL_PERMISSIONS },
-  { name: "None", strength: 1, status: "accepted", grants: [] },
-  { name: "Pending", strength: 1, status: "pending", grants: [] },
+  { name: "None", strength: 1, grants: [] },
+  { name: "Half", strength: 0.9, grants: ["history", "analytics", "program", "watch_session"] },
+  { name: "All", strength: 1.3, grants: ALL_PERMISSIONS },
 ] as const
+type FriendName = (typeof FRIENDS)[number]["name"]
 
-/** FRIEND_DAYS in the program shape a `program` grant carries. */
-const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
-  programData: {
+// Sender, recipient ("me" is the caller), minutes ago, text. The caller's
+// messages from the last hour stay unread.
+const DEMO_MESSAGES: [FriendName | "me", FriendName | "me", number, string][] = [
+  ["None", "me", 1500, "Hey! Just joined OwnGains."],
+  ["me", "None", 1490, "Welcome! Share your history whenever you like."],
+  ["None", "me", 1480, "Will do once I have a few workouts in."],
+  ["Half", "me", 2900, "How do you like the new program?"],
+  ["me", "Half", 2880, "Loving it, my squat is finally moving."],
+  ["Half", "me", 25, "I'll watch your next session, curious how you pace the rests."],
+  ["All", "me", 4300, "Nice session yesterday! Thanks for logging it for me."],
+  ["me", "All", 4280, "Anytime. I suggested two workouts for next week."],
+  ["All", "me", 4270, "Saw them, accepted the first one."],
+  ["All", "me", 40, "I suggested a morning workout for you too, have a look."],
+  ["None", "Half", 3000, "Are you training tomorrow?"],
+  ["Half", "None", 2990, "Yes, lower day at 7."],
+  ["Half", "All", 2000, "Can I copy your program?"],
+  ["All", "Half", 1990, "Sure, it's shared with you."],
+  ["All", "None", 1000, "Welcome to the group!"],
+  ["None", "All", 990, "Thanks!"],
+]
+
+/** FRIEND_DAYS in the program shape the app uploads and a `program` grant carries. */
+const FRIEND_PROGRAM = {
     name: "Upper/Lower Program, 2 Days",
     totalDays: FRIEND_DAYS.length,
     split: ["Me"],
@@ -97,9 +112,8 @@ const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({
         },
       },
     })),
-  },
-  message: null,
-})
+}
+const FRIEND_PROGRAM_PAYLOAD = JSON.stringify({ programData: FRIEND_PROGRAM, message: null })
 
 /** Deterministic, so a refill produces the same numbers rather than noise. */
 const baseWeight = (name: string): number => {
@@ -121,7 +135,7 @@ async function insertWorkouts(
   days: DemoDay[],
   split: string | null,
   count: number,
-  opts: { isDemo: boolean; strength: number; linkProgram: boolean; now: number },
+  opts: { isDemo: boolean; strength: number; linkProgram: boolean; now: number; loggedBy?: number },
 ): Promise<{ sessions: number; sets: number }> {
   const exerciseIds = new Map<string, number>()
   for (const day of days)
@@ -147,8 +161,8 @@ async function insertWorkouts(
 
     const [workout] = await conn.execute<ResultSetHeader>(
       `INSERT INTO workouts (user_id, program_day_id, day_number, day_title, split,
-         start_time, end_time, total_duration, completed_sets, is_demo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         start_time, end_time, total_duration, completed_sets, is_demo, logged_by_trainer_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         programDayIds.get(day.dayNumber) ?? null,
@@ -160,6 +174,8 @@ async function insertWorkouts(
         Math.round((end - start) / 1000),
         sets.length,
         opts.isDemo ? 1 : 0,
+        // Every other one, so the client's history mixes trainer-run and own workouts.
+        opts.loggedBy && i % 2 ? opts.loggedBy : null,
       ],
     )
     await conn.execute(
@@ -171,6 +187,35 @@ async function insertWorkouts(
     totalSets += sets.length
   }
   return { sessions: count, sets: totalSets }
+}
+
+/**
+ * An open workout two sets in, the last ending a minute before `now`, so the
+ * friend shows as mid-workout to watchers and trainers. sessionCleanup ends it
+ * after 30 idle minutes.
+ */
+async function insertLiveWorkout(
+  conn: PoolConnection,
+  userId: number,
+  strength: number,
+  now: number,
+): Promise<void> {
+  const day = FRIEND_DAYS[0]
+  const ex = { ...day.exercises[0], sets: 2 }
+  const exerciseId = await findOrCreateExercise(userId, ex.name, ex.primaryMuscles, ex.secondaryMuscles, conn)
+  const start = now - 2 * SET_MS - REST_MS - 60_000
+  const { sets } = demoSetRows({ ...day, exercises: [ex] }, start, new Map([[ex.name, exerciseId]]), strength * 1.1)
+  const [workout] = await conn.execute<ResultSetHeader>(
+    `INSERT INTO workouts (user_id, day_number, day_title, split, start_time, completed_sets, is_demo)
+     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+    [userId, day.dayNumber, day.dayTitle, "Upper/Lower", formatDateForMySQL(new Date(start)), sets.length],
+  )
+  await conn.execute(
+    `INSERT INTO workout_sets (workout_id, exercise_id, set_index, start_time, end_time,
+       set_duration, rest_time, weight, reps)
+     VALUES ${sets.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+    sets.flatMap((row) => [workout.insertId, ...row]),
+  )
 }
 
 /** One workout's set rows, back to back from `start`, and when the last ends. */
@@ -205,7 +250,8 @@ function demoSetRows(
 
 /**
  * Suspended from creation, so they can never sign in or show up in search,
- * and cascade-deleted with their owner.
+ * and cascade-deleted with their owner. Consented, since no person stands
+ * behind them and their owner logs workouts for them in trainer mode.
  */
 async function createDemoUser(
   conn: PoolConnection,
@@ -215,12 +261,14 @@ async function createDemoUser(
   const uuid = randomUUID()
   const [result] = await conn.execute<ResultSetHeader>(
     `INSERT INTO users (uuid, username, email, password_hash, name,
-       disabled_at, disabled_reason, demo_owner_id)
-     VALUES (?, ?, ?, '!', ?, NOW(), 'Demo account', ?)`,
-    [uuid, `demo_${randomBytes(6).toString("hex")}`, `${uuid}@demo.invalid`, name, ownerId],
+       disabled_at, disabled_reason, demo_owner_id, health_consent_at)
+     VALUES (?, ?, ?, '!', ?, NOW(), 'Demo account', ?, NOW())`,
+    [uuid, `demo_${name.toLowerCase()}_${randomBytes(3).toString("hex")}`, `${uuid}@demo.invalid`, name, ownerId],
   )
   return result.insertId
 }
+
+const SCHEDULE_TABLE = "scheduled_workouts"
 
 const DEMO_TABLES = [
   "measurements",
@@ -236,7 +284,7 @@ type DemoTable = (typeof DEMO_TABLES)[number]
 type Row = (string | number | null)[]
 
 // Black placeholders naming the muscle, one font per photo so they tell apart
-// when compared. Thumbnails are built on the first GET /:id/thumb.
+// when compared. They are small enough to be their own thumbnail.
 const DEMO_PHOTO_MUSCLES = [
   ["chest_upper", "front"],
   ["lats", "back"],
@@ -255,7 +303,7 @@ const DEMO_PHOTO_DAYS_AGO = [28, 14, 0]
 async function insertDemoRows(
   conn: PoolConnection,
   userId: number,
-  table: DemoTable,
+  table: DemoTable | typeof SCHEDULE_TABLE,
   columns: string[],
   rows: Row[],
 ): Promise<number> {
@@ -361,6 +409,7 @@ async function insertDemoPhotos(conn: PoolConnection, userId: number, at: DemoAt
         [userId],
       )
       await conn.execute(`INSERT INTO progress_photo_blobs (photo_id, data) VALUES (?, ?)`, [id, data])
+      await conn.execute(`INSERT INTO progress_photo_thumbs (photo_id, data) VALUES (?, ?)`, [id, data])
       await conn.execute(`INSERT INTO progress_photo_muscles (photo_id, muscle_group) VALUES (?, ?)`, [id, muscle])
     }
   return count
@@ -412,6 +461,12 @@ async function deleteDemoData(conn: PoolConnection, userId: number) {
     )
     tracking += rows.affectedRows
   }
+  await conn.execute(
+    `DELETE t FROM ${SCHEDULE_TABLE} t
+     JOIN demo_rows d ON d.user_id = t.user_id AND d.table_name = ? AND d.row_id = t.id
+     WHERE t.user_id = ?`,
+    [SCHEDULE_TABLE, userId],
+  )
   await conn.execute(`DELETE FROM demo_rows WHERE user_id = ?`, [userId])
   const [workouts] = await conn.execute<ResultSetHeader>(
     `DELETE FROM workouts WHERE user_id = ? AND is_demo = 1`,
@@ -426,9 +481,10 @@ async function deleteDemoData(conn: PoolConnection, userId: number) {
 
 /**
  * Replaces the caller's demo data in one transaction: their own demo workouts
- * for `days`, one demo friend per permission they grant the caller, one
- * pending friend request, and tracking/supplement entries. Refilling never stacks a
- * second copy.
+ * for `days`, three demo friends sharing nothing, half or everything (the last
+ * two mid-workout), messages among all four, scheduled workouts and trainer
+ * suggestions both ways, a received and a sent trainer request, and
+ * tracking/supplement entries. Refilling never stacks a second copy.
  */
 export async function fillDemoData(
   userId: number,
@@ -446,24 +502,15 @@ export async function fillDemoData(
       now,
     })
 
-    let friends = 0
+    const friendIds = new Map<FriendName, number>()
     for (const friend of FRIENDS) {
       const friendId = await createDemoUser(conn, userId, friend.name)
+      friendIds.set(friend.name, friendId)
       await conn.execute(
         `INSERT INTO friendships (user_id, friend_id, requested_by, status, accepted_at)
-         VALUES (LEAST(?, ?), GREATEST(?, ?), ?, ?, ?)`,
-        [
-          userId,
-          friendId,
-          userId,
-          friendId,
-          friendId,
-          friend.status,
-          friend.status === "accepted" ? formatDateForMySQL(new Date(now)) : null,
-        ],
+         VALUES (LEAST(?, ?), GREATEST(?, ?), ?, 'accepted', ?)`,
+        [userId, friendId, userId, friendId, friendId, formatDateForMySQL(new Date(now))],
       )
-      if (friend.status !== "accepted") continue
-      friends++
       if (friend.grants.length > 0)
         await conn.execute(
           `INSERT INTO sharing_permissions (from_user_id, to_user_id, permission_type, payload)
@@ -482,15 +529,131 @@ export async function fillDemoData(
         strength: friend.strength,
         linkProgram: false,
         now,
+        loggedBy: (friend.grants as readonly string[]).includes("trainer") ? userId : undefined,
       })
+      if ((friend.grants as readonly string[]).includes("trainer"))
+        await insertFriendProgram(conn, friendId)
+      if (friend.grants.some((g) => g === "watch_session" || g === "trainer"))
+        await insertLiveWorkout(conn, friendId, friend.strength, now)
     }
+
+    // Coach asks to train the owner, and the owner has asked None.
+    const coachId = await createDemoUser(conn, userId, "Coach")
+    await conn.execute(
+      `INSERT INTO trainer_requests (from_user_id, to_user_id) VALUES (?, ?), (?, ?)`,
+      [coachId, userId, userId, friendIds.get("None")!],
+    )
+
+    await insertMessages(conn, userId, friendIds, now)
+    await insertSchedule(conn, userId, friendIds.get("All")!, days[0]?.dayNumber ?? null, now)
 
     const tracking = await insertTracking(conn, userId, now)
 
-    return { ...own, friends, tracking }
+    return { ...own, friends: FRIENDS.length, tracking }
   })
 }
 
+async function insertMessages(
+  conn: PoolConnection,
+  userId: number,
+  friendIds: Map<FriendName, number>,
+  now: number,
+): Promise<void> {
+  const id = (who: FriendName | "me") => (who === "me" ? userId : friendIds.get(who)!)
+  await conn.execute(
+    `INSERT INTO messages (sender_id, recipient_id, body, created_at, read_at)
+     VALUES ${DEMO_MESSAGES.map(() => "(?, ?, ?, ?, ?)").join(", ")}`,
+    DEMO_MESSAGES.flatMap(([from, to, minutesAgo, body]) => {
+      const at = formatDateForMySQL(new Date(now - minutesAgo * 60_000))
+      return [id(from), id(to), body, at, to === "me" && minutesAgo < 60 ? null : at]
+    }),
+  )
+}
+
+/**
+ * Two upcoming workouts of the caller's own, one pending suggestion from All
+ * (who the caller makes their trainer for it), and the caller's own pending and
+ * accepted suggestions for All, who already has them as trainer.
+ */
+async function insertSchedule(
+  conn: PoolConnection,
+  userId: number,
+  allId: number,
+  programDay: number | null,
+  now: number,
+): Promise<void> {
+  const at = (daysAhead: number, hour: number) => {
+    const d = new Date(now + daysAhead * DAY_MS)
+    d.setUTCHours(hour, 0, 0, 0)
+    return formatDateForMySQL(d)
+  }
+  await conn.execute(
+    `INSERT INTO sharing_permissions (from_user_id, to_user_id, permission_type) VALUES (?, ?, 'trainer')`,
+    [userId, allId],
+  )
+  const columns = ["title", "program_day", "start_at", "duration_min", "reminder_minutes", "created_by_trainer_id", "accepted_at"]
+  const accepted = formatDateForMySQL(new Date(now))
+  await insertDemoRows(conn, userId, SCHEDULE_TABLE, columns, [
+    ["Demo workout", programDay, at(1, 16), 60, 30, null, accepted],
+    ["Demo workout", programDay, at(3, 16), 60, 30, null, accepted],
+    ["Morning session", null, at(2, 6), 45, 15, allId, null],
+  ])
+  await conn.execute(
+    `INSERT INTO ${SCHEDULE_TABLE} (user_id, ${columns.join(", ")})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      ...[allId, "Upper", 1, at(2, 17), 60, 30, userId, accepted],
+      ...[allId, "Lower", 2, at(4, 17), 60, 30, userId, null],
+    ],
+  )
+}
+
+/**
+ * Stores FRIEND_PROGRAM as a demo client's own program, so a trainer's edits
+ * have rows to change. Plain inserts on the fill's connection: the user is new,
+ * and upsertProgram's own transaction deadlocked against it.
+ */
+async function insertFriendProgram(conn: PoolConnection, userId: number): Promise<void> {
+  const [program] = await conn.execute<ResultSetHeader>(
+    `INSERT INTO programs (user_id, original_filename, split_order) VALUES (?, ?, ?)`,
+    [userId, "Demo program", JSON.stringify(FRIEND_PROGRAM.split)],
+  )
+  for (const day of FRIEND_DAYS) {
+    const [dayRow] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO program_days (program_id, day_number, title, primary_muscles)
+       VALUES (?, ?, ?, ?)`,
+      [
+        program.insertId,
+        day.dayNumber,
+        day.dayTitle,
+        JSON.stringify([...new Set(day.exercises.flatMap((ex) => ex.primaryMuscles ?? []))]),
+      ],
+    )
+    const slots = await Promise.all(
+      day.exercises.map(async (ex, position) => [
+        dayRow.insertId,
+        "Me",
+        position,
+        await findOrCreateExercise(userId, ex.name, ex.primaryMuscles, ex.secondaryMuscles, conn),
+        ex.sets,
+        "8-10",
+      ]),
+    )
+    await conn.execute(
+      `INSERT INTO program_exercises
+         (program_day_id, split_name, position, exercise_id, target_sets, target_reps)
+       VALUES ${slots.map(() => "(?, ?, ?, ?, ?, ?)").join(", ")}`,
+      slots.flat(),
+    )
+  }
+}
+
+/**
+ * Removes all demo workouts, friends and tracking data of a user.
+ *
+ * @param userId - Numeric id of the owner.
+ * @returns How many workouts, friends and tracking rows were removed.
+ */
 export async function clearDemoData(
   userId: number,
 ): Promise<{ sessions: number; friends: number; tracking: number }> {

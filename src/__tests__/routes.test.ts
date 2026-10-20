@@ -27,6 +27,41 @@ describe("app-level routes", () => {
     expect((await request(gated).get("/api/sessions")).status).toBe(401)
   })
 
+  it("answers 410 FEATURE_DISABLED for messages and push when DISABLED_FEATURES lists messages", async () => {
+    process.env.DISABLED_FEATURES = "Messages"
+    vi.resetModules()
+    const { registerRoutes, disabledFeatures } = await import("../routes.js")
+    const gated = express()
+    registerRoutes(gated)
+    delete process.env.DISABLED_FEATURES
+
+    expect(disabledFeatures).toEqual(["messages"])
+    const res = await request(gated).get("/api/messages")
+    expect(res.status).toBe(410)
+    expect(res.body).toMatchObject({ code: "FEATURE_DISABLED", feature: "messages" })
+    expect((await request(gated).put("/api/push/token")).status).toBe(410)
+    expect((await request(gated).get("/api/sessions")).status).toBe(401)
+  })
+
+  it("disables messages while FCM_SERVICE_ACCOUNT is unset, keeping sign-out unregistration", async () => {
+    const key = process.env.FCM_SERVICE_ACCOUNT
+    process.env.FCM_SERVICE_ACCOUNT = ""
+    vi.resetModules()
+    const { registerRoutes, currentDisabledFeatures } = await import("../routes.js")
+    const gated = express()
+    registerRoutes(gated)
+
+    expect(currentDisabledFeatures()).toEqual(["messages"])
+    expect((await request(gated).get("/api/messages")).body).toMatchObject({ code: "FEATURE_DISABLED" })
+    expect((await request(gated).put("/api/push/token")).status).toBe(410)
+    expect((await request(gated).delete("/api/push/token").send({})).status).toBe(400)
+    process.env.FCM_SERVICE_ACCOUNT = key
+  })
+
+  it("publishes disabledFeatures on /healthz", async () => {
+    expect((await request(app).get("/healthz")).body.disabledFeatures).toEqual([])
+  })
+
   it("unknown API routes 404", async () => {
     const res = await request(app).get("/api/definitely-not-a-route")
     expect(res.status).toBe(404)

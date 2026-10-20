@@ -2,15 +2,11 @@
 
 `src/config/schema.sql` is the one source of truth: it describes the current
 shape of every table and re-runs idempotently on every boot, so a fresh
-database is always up to date. Version 0.1.0 is the baseline.
+database is always up to date. Version 0.6.0 is the baseline: the migrations
+before it were removed, so a database from an earlier release is not upgraded.
 
 | File | Change | Minimum prior schema |
 |---|---|---|
-| `001_suspension_reason.sql` | `users.disabled_reason` | 0.1.0 |
-| `002_demo_friends.sql` | `users.demo_owner_id` | 0.1.0 |
-| `003_google_sub.sql` | `users.google_sub`, `users.has_password` | 0.1.0 |
-| `004_workouts_start_index.sql` | `workouts` index `idx_w_start_user` | 0.1.0 |
-| `005_measurement_error_margin.sql` | `measurements.error_margin` | 0.1.0 |
 
 To alter an existing table on live boxes, add `NNN_description.sql` here,
 zero-padded to three digits (files run in `localeCompare` order, each at most

@@ -22,7 +22,7 @@ describe("sharing route edges", () => {
   })
 
   it("refuses non-friends and missing grants, and 404s a friend with no workout", async () => {
-    expect((await as(c).get(`/joint-sessions/friend/${a.user.id}/status`)).status).toBe(403)
+    expect((await as(c).get(`/joint-sessions/status?friendIds=${a.user.id}`)).body.statuses).toEqual({})
     expect((await as(c).get(`/watch/friend/${a.user.id}/active`)).status).toBe(403)
     expect((await as(c).get(`/watch/friend/${a.user.id}/session/1/live`)).status).toBe(403)
     expect((await as(b).get(`/watch/friend/${a.user.id}/session/1/live`)).status).toBe(403)

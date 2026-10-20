@@ -22,9 +22,9 @@ describe("measurement routes", () => {
   it("needs metrics to list, and deletes an entry whole or by metric", async () => {
     expect((await request(app).get(api).set(auth(u.token))).status).toBe(400)
     const log = () => request(app).post(api).set(auth(u.token)).send({ values: { waist_cm: 80, chest_cm: 100 } })
-    const whole = (await log()).body.id
+    const whole = (await log()).body.data.id
     expect((await request(app).delete(`${api}/${whole}`).set(auth(u.token))).status).toBe(200)
-    const part = (await log()).body.id
+    const part = (await log()).body.data.id
     expect((await request(app).delete(`${api}/${part}?metrics=waist_cm`).set(auth(u.token))).status).toBe(200)
   })
 })

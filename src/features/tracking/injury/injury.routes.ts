@@ -26,7 +26,7 @@ const LIST_LIMIT = (req: Request) => queryLimit(req, { def: 100, max: 500 })
 router.use(authenticateToken)
 router.use(healthConsentGuard)
 
-/** ?muscle= and ?status=active, shared by every list route below. */
+/** ?muscle= and ?status=active on the list route. */
 function injuryFilter(req: Request): InjuryFilter {
   return {
     muscle: listMuscleFilter(req),
@@ -53,32 +53,9 @@ router.post("/", idempotent, async (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: result })
 })
 
-/**
- * GET /?muscle=<group>&status=active: both filters optional. /active and
- * /muscle/:muscle below are the same list with one filter fixed, kept for
- * app builds that call them.
- */
+/** GET /?muscle=<group>&status=active: both filters optional. */
 router.get("/", async (req: Request, res: Response) => {
   const injuries = await listInjuries(req.user!.id, injuryFilter(req), LIST_LIMIT(req))
-  res.json({ success: true, data: injuries })
-})
-
-// Static paths before the dynamic /:id routes.
-router.get("/active", async (req: Request, res: Response) => {
-  const injuries = await listInjuries(
-    req.user!.id,
-    { ...injuryFilter(req), activeOnly: true },
-    LIST_LIMIT(req),
-  )
-  res.json({ success: true, data: injuries })
-})
-
-router.get("/muscle/:muscle", async (req: Request, res: Response) => {
-  const injuries = await listInjuries(
-    req.user!.id,
-    { ...injuryFilter(req), muscle: String(req.params.muscle) },
-    LIST_LIMIT(req),
-  )
   res.json({ success: true, data: injuries })
 })
 

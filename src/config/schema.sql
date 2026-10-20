@@ -257,6 +257,9 @@ CREATE TABLE IF NOT EXISTS workouts (
   -- count. Saves a correlated COUNT(*) per row on every history page.
   completed_sets INT          NOT NULL DEFAULT 0,
   is_demo        TINYINT(1)   NOT NULL DEFAULT 0,
+  -- The trainer who started it with X-Trainee-Id. NULL when the owner did, and
+  -- SET NULL when the trainer's account goes.
+  logged_by_trainer_id INT UNSIGNED    DEFAULT NULL,
   PRIMARY KEY (id),
   KEY idx_w_user_start (user_id, start_time),
   KEY idx_w_user_split_start (user_id, split, start_time),
@@ -268,6 +271,7 @@ CREATE TABLE IF NOT EXISTS workouts (
   KEY idx_w_start_user (start_time, user_id),
   CONSTRAINT fk_w_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT fk_w_program_day FOREIGN KEY (program_day_id) REFERENCES program_days (id) ON DELETE SET NULL,
+  CONSTRAINT fk_w_trainer FOREIGN KEY (logged_by_trainer_id) REFERENCES users (id) ON DELETE SET NULL,
   CONSTRAINT ck_w_times CHECK (end_time IS NULL OR end_time >= start_time),
   CONSTRAINT ck_w_duration CHECK (total_duration IS NULL OR total_duration >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -565,9 +569,8 @@ CREATE TABLE IF NOT EXISTS progress_photos (
   mime_type        VARCHAR(64)  NOT NULL,
   file_size        INT UNSIGNED NOT NULL,
   -- SHA-256 hex of the stored bytes: the image's ETag, so a revalidation is
-  -- answered 304 without reading the blob. NULL until backfilled on first read
-  -- for photos from before it existed.
-  content_hash     CHAR(64)              DEFAULT NULL,
+  -- answered 304 without reading the blob.
+  content_hash     CHAR(64)     NOT NULL,
   taken_at         DATETIME     NOT NULL,
   note             TEXT                  DEFAULT NULL,
   angle            ENUM('front','back','side','custom') NOT NULL DEFAULT 'custom',
@@ -662,7 +665,7 @@ CREATE TABLE IF NOT EXISTS sharing_permissions (
   from_user_id    INT UNSIGNED NOT NULL,
   to_user_id      INT UNSIGNED NOT NULL,
   permission_type ENUM('history','analytics','program','joint_session',
-                       'watch_session','trainer') NOT NULL,
+                       'watch_session','trainer','tracking') NOT NULL,
   -- Per-grant options. JSON, not TEXT: the driver parses it on read and MySQL
   -- validates it on write.
   payload         JSON                  DEFAULT NULL,
@@ -674,6 +677,68 @@ CREATE TABLE IF NOT EXISTS sharing_permissions (
   CONSTRAINT fk_sp_from FOREIGN KEY (from_user_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT fk_sp_to FOREIGN KEY (to_user_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT ck_sp_distinct CHECK (from_user_id <> to_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Someone asking to become another user's trainer. Accepting deletes the row
+-- and creates the `trainer` grant (and the friendship, if missing). Rejecting
+-- deletes it too. The pair key makes a second pending request a 409.
+CREATE TABLE IF NOT EXISTS trainer_requests (
+  id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  from_user_id     INT UNSIGNED NOT NULL,
+  to_user_id       INT UNSIGNED NOT NULL,
+  include_tracking TINYINT(1)   NOT NULL DEFAULT 0,
+  created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_tr_pair (from_user_id, to_user_id),
+  KEY idx_tr_to (to_user_id),
+  CONSTRAINT fk_tr_from FOREIGN KEY (from_user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_tr_to FOREIGN KEY (to_user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT ck_tr_distinct CHECK (from_user_id <> to_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A trainer device's X25519 public key for the Tracking Access relay. The
+-- private key never leaves the device. A changed key is a new row, so clients
+-- see a key they have never sent to and send the full history again.
+CREATE TABLE IF NOT EXISTS trainer_device_keys (
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id     INT UNSIGNED NOT NULL,
+  device_id   VARCHAR(64)  NOT NULL,
+  public_key  CHAR(44)     NOT NULL,
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_tdk_device (user_id, device_id),
+  CONSTRAINT fk_tdk_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Ciphertext a client sent to one trainer device, held until that device
+-- acknowledges it, the grant ends (cascade) or it is 30 days old. The server
+-- cannot read it. One row per slot: a newer snapshot or photo replaces the old.
+CREATE TABLE IF NOT EXISTS tracking_messages (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  permission_id  INT UNSIGNED    NOT NULL,
+  device_key_id  INT UNSIGNED    NOT NULL,
+  kind           ENUM('snapshot','photo') NOT NULL,
+  ref            VARCHAR(64)     NOT NULL DEFAULT '',
+  nonce          CHAR(32)        NOT NULL,
+  sender_key     CHAR(44)        NOT NULL,
+  ciphertext     MEDIUMTEXT      NOT NULL,
+  created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_tm_slot (permission_id, device_key_id, kind, ref),
+  KEY idx_tm_device (device_key_id, id),
+  KEY idx_tm_created (created_at),
+  CONSTRAINT fk_tm_permission FOREIGN KEY (permission_id) REFERENCES sharing_permissions (id) ON DELETE CASCADE,
+  CONSTRAINT fk_tm_device FOREIGN KEY (device_key_id) REFERENCES trainer_device_keys (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A trainer device asking a client to send everything again.
+CREATE TABLE IF NOT EXISTS tracking_resend_requests (
+  permission_id  INT UNSIGNED NOT NULL,
+  device_key_id  INT UNSIGNED NOT NULL,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (permission_id, device_key_id),
+  CONSTRAINT fk_trr_permission FOREIGN KEY (permission_id) REFERENCES sharing_permissions (id) ON DELETE CASCADE,
+  CONSTRAINT fk_trr_device FOREIGN KEY (device_key_id) REFERENCES trainer_device_keys (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_blocks (
@@ -862,4 +927,55 @@ CREATE TABLE IF NOT EXISTS metrics_events (
   PRIMARY KEY (id),
   KEY idx_me_kind_at (kind, at_ms),
   KEY idx_me_at (at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Kept until either account is deleted. The FKs cascade both ways.
+CREATE TABLE IF NOT EXISTS messages (
+  id           INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  sender_id    INT UNSIGNED  NOT NULL,
+  recipient_id INT UNSIGNED  NOT NULL,
+  body         VARCHAR(2000) NOT NULL,
+  created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at      DATETIME      DEFAULT NULL,
+  edited_at    DATETIME      DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_msg_recipient (recipient_id, sender_id, id),
+  KEY idx_msg_sender (sender_id, recipient_id, id),
+  CONSTRAINT fk_msg_sender FOREIGN KEY (sender_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_msg_recipient FOREIGN KEY (recipient_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT ck_msg_distinct CHECK (sender_id <> recipient_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- FCM registration tokens, one row per device. A token moves to whoever signs
+-- in on that device last.
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token      VARCHAR(255) NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (token),
+  KEY idx_push_user (user_id),
+  CONSTRAINT fk_push_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Planned workouts. A trainer's suggestion has created_by_trainer_id set and
+-- accepted_at NULL until the user accepts it. Cancelled rows are kept so a
+-- trainer, who may not delete, can still withdraw a suggestion.
+CREATE TABLE IF NOT EXISTS scheduled_workouts (
+  id                    INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+  user_id               INT UNSIGNED      NOT NULL,
+  title                 VARCHAR(100)      NOT NULL,
+  program_day           SMALLINT UNSIGNED DEFAULT NULL,
+  start_at              DATETIME          NOT NULL,
+  duration_min          SMALLINT UNSIGNED NOT NULL DEFAULT 60,
+  reminder_minutes      SMALLINT UNSIGNED DEFAULT NULL,
+  alarm                 TINYINT(1)        NOT NULL DEFAULT 0,
+  created_by_trainer_id INT UNSIGNED      DEFAULT NULL,
+  accepted_at           DATETIME          DEFAULT NULL,
+  cancelled_at          DATETIME          DEFAULT NULL,
+  created_at            DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_sched_user_start (user_id, start_at),
+  CONSTRAINT fk_sched_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_sched_trainer FOREIGN KEY (created_by_trainer_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

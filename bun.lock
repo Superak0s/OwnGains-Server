@@ -17,6 +17,7 @@
         "multer": "^2.4.0",
         "mysql2": "^3.24.4",
         "sharp": "^0.35.4",
+        "tweetnacl": "1.0.3",
         "ws": "^8.21.3",
       },
       "devDependencies": {
@@ -665,6 +666,8 @@
     "tsc-alias": ["tsc-alias@1.9.5", "", { "dependencies": { "chokidar": "3.6.0", "commander": "9.5.0", "get-tsconfig": "4.14.3", "globby": "11.1.0", "mylas": "2.1.14", "normalize-path": "3.0.0", "plimit-lit": "1.6.1" }, "bin": { "tsc-alias": "dist/bin/index.js" } }, "sha512-B2M3D2Fsb8dPT04Jc52R2Erp9u7QUjXpjb648dvKb0esKVmo0CC28KFe98sFkjmnY36D+PFqnAE/UDbHGbV+mA=="],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
+
+    "tweetnacl": ["tweetnacl@1.0.3", "", {}, "sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw=="],
 
     "type-is": ["type-is@2.1.0", "", { "dependencies": { "content-type": "2.1.0", "media-typer": "1.1.1", "mime-types": "3.0.2" } }, "sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA=="],
 

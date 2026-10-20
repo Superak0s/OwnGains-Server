@@ -75,7 +75,7 @@ describe("progressPhoto routes", () => {
       .field("notes", "week 1")
       .field("angle", "front")
     expect(ok.status).toBe(201)
-    photoId = ok.body.id
+    photoId = ok.body.data.id
 
     const all = await request(app).get("/api/tracking/photos/muscle").set(auth(u.token))
     expect(all.body.data.length).toBe(1)
@@ -111,15 +111,9 @@ describe("progressPhoto routes", () => {
       .set(auth(u.token))
       .set("If-None-Match", `"${"0".repeat(64)}"`)
     expect(stale.status).toBe(200)
-    // A photo from before hashes were stored gets one on its first full read.
-    await pool.execute(`UPDATE progress_photos SET content_hash = NULL WHERE id = ?`, [photoId])
-    const legacy = await request(app)
-      .get(`/api/tracking/photos/muscle/${photoId}/image`)
-      .set(auth(u.token))
-    expect(legacy.status).toBe(200)
-    expect(legacy.headers.etag).toBe(etag)
+    // Migration 008 backfills old rows with SQL's SHA2, which must match the upload hash.
     const [[stored]] = await pool.execute<RowDataPacket[]>(
-      `SELECT content_hash AS hash FROM progress_photos WHERE id = ?`,
+      `SELECT SHA2(data, 256) AS hash FROM progress_photo_blobs WHERE photo_id = ?`,
       [photoId],
     )
     expect(`"${stored!.hash}"`).toBe(etag)
@@ -132,13 +126,6 @@ describe("progressPhoto routes", () => {
     expect(thumb.headers["content-type"]).toContain("image/jpeg")
     const meta = await sharp(thumb.body as Buffer).metadata()
     expect([meta.width, meta.height]).toEqual([400, 300])
-
-    // A photo from before thumbnails existed gets one built on first request.
-    await pool.execute(`DELETE FROM progress_photo_thumbs WHERE photo_id = ?`, [photoId])
-    const lazy = await request(app)
-      .get(`/api/tracking/photos/muscle/${photoId}/thumb`)
-      .set(auth(u.token))
-    expect(lazy.status).toBe(200)
 
     const other = await signup("photo2")
     const foreign = await request(app)
@@ -164,7 +151,7 @@ describe("progressPhoto routes", () => {
         .field("takenAt", takenAt)
     const ids: number[] = []
     for (const t of ["2024-01-01T09:00:00Z", "2024-01-02T09:00:00Z", "2024-01-02T09:00:00Z"])
-      ids.push((await up(t)).body.id)
+      ids.push((await up(t)).body.data.id)
     const list = (q: string) =>
       request(app).get(`/api/tracking/photos/muscle${q}`).set(auth(pager.token))
 
@@ -232,7 +219,7 @@ describe("progressPhoto routes", () => {
     const res = await upload(owner.token, withExif, "image/jpeg")
     expect(res.status).toBe(201)
     const image = await request(app)
-      .get(`/api/tracking/photos/muscle/${res.body.id}/image`)
+      .get(`/api/tracking/photos/muscle/${res.body.data.id}/image`)
       .set(auth(owner.token))
       .buffer(true)
     const meta = await sharp(image.body as Buffer).metadata()

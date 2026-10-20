@@ -12,6 +12,9 @@ if [ -z "${SONAR_TOKEN:-}" ]; then
   exit 1
 fi
 
+# Sonar reads coverage/lcov.info, so build it fresh first (needs the test MariaDB running)
+bun run test --coverage
+
 npx @sonar/scan \
   -Dsonar.host.url=https://sonarqube.superak0s.com \
   -Dsonar.token="$SONAR_TOKEN" \

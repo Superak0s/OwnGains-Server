@@ -1,8 +1,8 @@
-import { Application, Request, Response, Router } from "express"
+import { Application, NextFunction, Request, Response, Router } from "express"
 
 import { version } from "@/config/version.js"
 import { authenticateToken } from "./middleware/auth.js"
-import { envBool, readLocalOnlyFeatures } from "./config/env.js"
+import { envBool, readDisabledFeatures, readLocalOnlyFeatures } from "./config/env.js"
 import authRoutes from "./features/auth/auth.routes.js"
 import adminRoutes from "./features/auth/admin.routes.js"
 import settingsRoutes from "./features/settings/settings.routes.js"
@@ -11,6 +11,12 @@ import sessionRoutes from "./features/workouts/workouts.routes.js"
 import programRoutes from "./features/programs/programs.routes.js"
 import friendRoutes from "./features/social/friends/friends.routes.js"
 import sharingRoutes from "./features/social/sharing/sharing.routes.js"
+import trainerRoutes from "./features/trainer/trainer.routes.js"
+import messageRoutes from "./features/messages/messages.routes.js"
+import pushRoutes from "./features/push/push.routes.js"
+import { pushEnabled } from "./features/push/fcm.js"
+import scheduleRoutes from "./features/schedule/schedule.routes.js"
+import trackingRelayRoutes from "./features/trainer/trackingRelay.routes.js"
 import macrosRoutes from "./features/tracking/macros/macros.routes.js"
 import bodyStatsRoutes from "./features/tracking/bodyStats/bodyStats.routes.js"
 import measurementsRoutes from "./features/tracking/measurements/measurements.routes.js"
@@ -29,9 +35,26 @@ import { metricsEnabled, metricsPageEnabled } from "./features/metrics/metrics.c
 
 // Features this deployment refuses to store. The client reads the same list
 // from /healthz and logs them on-device instead.
+/** Feature groups from `LOCAL_ONLY_FEATURES` that this instance does not store. */
 export const localOnlyFeatures = readLocalOnlyFeatures()
 
 const serves = (feature: string): boolean => !localOnlyFeatures.includes(feature)
+
+/** Features from `DISABLED_FEATURES` that this instance switched off. */
+export const disabledFeatures = readDisabledFeatures()
+
+/** `disabledFeatures` plus messages while FCM push is not working. */
+export const currentDisabledFeatures = (): string[] =>
+  pushEnabled() || disabledFeatures.includes("messages") ? disabledFeatures : [...disabledFeatures, "messages"]
+
+const refuseDisabled = (feature: string) => (_req: Request, res: Response) => {
+  res.status(410).json({
+    success: false,
+    code: "FEATURE_DISABLED",
+    feature,
+    error: `This server has ${feature} switched off`,
+  })
+}
 
 // A local-only feature's routes answer 410 instead of 404, so a client with a
 // stale feature list (or an offline-queued write) learns to keep it on-device
@@ -59,6 +82,11 @@ const trackingRoutes: [string, Router][] = [
   ["/api/settings", settingsRoutes],
 ]
 
+/**
+ * Mounts every router on the app. Features listed in {@link localOnlyFeatures} answer 410 instead.
+ *
+ * @param app - The Express app.
+ */
 export function registerRoutes(app: Application): void {
   // Auth-gated: the exact server version could be used to target known CVEs.
   app.get("/api/version", authenticateToken, (_req: Request, res: Response) => {
@@ -78,7 +106,21 @@ export function registerRoutes(app: Application): void {
   app.use("/api/program", programRoutes)
   app.use("/api/friends", friendRoutes)
   app.use("/api/profile/photo", profilePhotoRoutes)
+  // Ahead of /api/sharing, so its authenticateToken doesn't run twice.
+  app.use("/api/sharing/tracking", trackingRelayRoutes)
   app.use("/api/sharing", sharingRoutes)
+  app.use("/api/trainer", trainerRoutes)
+  app.use("/api/schedule", scheduleRoutes)
+  if (disabledFeatures.includes("messages")) {
+    app.use("/api/messages", refuseDisabled("messages"))
+    app.use("/api/push", refuseDisabled("messages"))
+  } else {
+    const whilePushWorks = (req: Request, res: Response, next: NextFunction) =>
+      // Unregistering a device on sign-out keeps working, so no token outlives its session.
+      pushEnabled() || req.method === "DELETE" ? next() : refuseDisabled("messages")(req, res)
+    app.use("/api/messages", whilePushWorks, messageRoutes)
+    app.use("/api/push", whilePushWorks, pushRoutes)
+  }
   if (serves("tracking")) {
     for (const [path, router] of trackingRoutes) app.use(path, router)
   } else {

@@ -53,10 +53,6 @@ const EXERCISE_KEYS: ReadonlySet<string> = new Set([
   "sets",
   "reps",
   "exerciseId",
-  // Legacy: superseded by exerciseId = CUSTOM_EXERCISE_ID, but programs saved
-  // before that still store it on device and the app's migration doesn't strip
-  // it, so rejecting it would 400 a re-upload of an older program.
-  "custom",
   ...MACHINE_FIELDS,
 ])
 
@@ -94,6 +90,12 @@ interface SlotRow extends RowDataPacket {
   machine: Record<string, unknown> | null
 }
 
+/**
+ * Rebuilds a user's program in the JSON shape the app uploaded.
+ *
+ * @param userId - Numeric id of the owner.
+ * @returns The stored program, or null when none was uploaded.
+ */
 export async function getProgramByUserId(
   userId: number,
 ): Promise<StoredProgram | null> {
@@ -476,6 +478,12 @@ function machineOf(exercise: Exercise): Record<string, unknown> {
   )
 }
 
+/**
+ * Deletes a user's program.
+ *
+ * @param userId - Numeric id of the owner.
+ * @returns False when there was no program.
+ */
 export async function deleteProgramByUserId(userId: number): Promise<boolean> {
   const [result] = await pool.execute<ResultSetHeader>(
     `DELETE FROM programs WHERE user_id = ?`,
@@ -569,6 +577,20 @@ async function requireDayId(userId: number, dayNumber: number): Promise<number> 
   return id
 }
 
+/**
+ * Points an exercise slot at another exercise name. History then reads under the new name.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param dayNumber - Program day holding the slot.
+ * @param split - Split the day belongs to.
+ * @param exerciseIndex - Position of the slot in the day.
+ * @param rename - The replacement.
+ * @param rename.newName - New exercise name.
+ * @param rename.newPrimaryMuscles - Primary muscles for a newly created exercise.
+ * @param rename.newSecondaryMuscles - Secondary muscles for a newly created exercise.
+ * @param rename.newExerciseId - Id of an existing exercise to use instead of matching by name.
+ * @returns Old and new names with the slot index.
+ */
 export async function renameExercise(
   userId: number,
   dayNumber: number,
@@ -604,6 +626,22 @@ export async function renameExercise(
   return { oldName: slot.name, newName: trimmed, exerciseIndex }
 }
 
+/**
+ * Appends an exercise to a program day.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param dayNumber - Program day to add to.
+ * @param split - Split the day belongs to.
+ * @param exercise - The exercise.
+ * @param exercise.name - Exercise name (required).
+ * @param exercise.sets - Number of sets (required, a non-negative integer).
+ * @param exercise.primaryMuscles - Primary muscle groups.
+ * @param exercise.secondaryMuscles - Secondary muscle groups.
+ * @param exercise.reps - Free-text rep target such as `8-12`.
+ * @param exercise.exerciseId - Id of an existing exercise to reuse.
+ * @returns The slot index and the stored exercise.
+ * @throws ValidationError for a missing name or invalid set count.
+ */
 export async function addExercise(
   userId: number,
   dayNumber: number,
@@ -720,9 +758,8 @@ export async function addExercise(
 }
 
 /**
- * Targeted machine-settings patch. Exists so trainer mode has a way to change a
- * trainee's machine setup without `POST /program/upload`, which is a whole-
- * program replace and so needs `denyTrainer`. Only the keys in
+ * Targeted machine-settings patch, so a machine change doesn't need a
+ * whole-program `POST /program/upload` from a possibly stale copy. Only the keys in
  * MACHINE_FIELDS are merged, so this cannot rewrite names, sets, or anything
  * else in the program.
  */
@@ -779,6 +816,17 @@ export async function patchExerciseMachine(
   return { exerciseIndex }
 }
 
+/**
+ * Changes the set count of an exercise slot by a relative amount.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param dayNumber - Program day holding the slot.
+ * @param split - Split the day belongs to.
+ * @param exerciseIndex - Position of the slot in the day.
+ * @param additionalSets - Sets to add. Negative removes sets.
+ * @returns The slot index and its new set count.
+ * @throws ValidationError when `additionalSets` is not an integer.
+ */
 export async function patchExerciseSets(
   userId: number,
   dayNumber: number,

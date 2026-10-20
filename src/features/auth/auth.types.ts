@@ -1,3 +1,4 @@
+/** Claims inside an access token. */
 export interface JwtPayload {
   /** The user's public uuid. */
   userId: string

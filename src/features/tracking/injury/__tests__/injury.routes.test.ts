@@ -26,13 +26,13 @@ describe("injury routes", () => {
     const all = await request(app).get("/api/tracking/injuries").set(auth(u.token))
     expect(all.body.data.length).toBe(1)
 
-    const active = await request(app).get("/api/tracking/injuries/active").set(auth(u.token))
+    const active = await request(app).get("/api/tracking/injuries?status=active").set(auth(u.token))
     expect(active.body.data.length).toBe(1)
 
-    const byMuscle = await request(app).get("/api/tracking/injuries/muscle/shoulder").set(auth(u.token))
+    const byMuscle = await request(app).get("/api/tracking/injuries?muscle=shoulder").set(auth(u.token))
     expect(byMuscle.body.data.length).toBe(1)
 
-    const other = await request(app).get("/api/tracking/injuries/muscle/legs").set(auth(u.token))
+    const other = await request(app).get("/api/tracking/injuries?muscle=legs").set(auth(u.token))
     expect(other.body.data.length).toBe(0)
   })
 
@@ -71,7 +71,7 @@ describe("injury routes", () => {
     expect(healed.status).toBe(200)
     expect(healed.body.data.status).toBe("recovered")
 
-    const active = await request(app).get("/api/tracking/injuries/active").set(auth(u.token))
+    const active = await request(app).get("/api/tracking/injuries?status=active").set(auth(u.token))
     expect(active.body.data.some((i: { id: number }) => i.id === id)).toBe(false)
 
     const other = await signup("injur2")

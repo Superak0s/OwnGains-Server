@@ -14,6 +14,17 @@ const ALLOWED_FIELDS = [
 ] as const
 type ProfileField = (typeof ALLOWED_FIELDS)[number]
 
+/**
+ * Updates the whitelisted profile columns (name, email, body-fat formula sex,
+ * height and the two unit preferences). Unknown keys and `undefined` values
+ * are skipped.
+ *
+ * @param userId - Numeric `users.id`.
+ * @param updates - Column names (snake_case) mapped to new values.
+ * @returns True once the update ran.
+ * @throws ValidationError when nothing valid was given, the height is outside 1 to 300 cm, or the formula sex is not male or female.
+ * @throws ConflictError `ACCOUNT_UNAVAILABLE` when the email is taken.
+ */
 export async function updateUserProfile(
   userId: number,
   updates: Partial<Record<ProfileField, unknown>>,
@@ -60,6 +71,13 @@ export async function updateUserProfile(
   return true
 }
 
+/**
+ * Reads the body settings used by body-fat and weight calculations.
+ *
+ * @param userId - Numeric `users.id`.
+ * @returns Height, formula sex (defaults to male) and weight unit.
+ * @throws NotFoundError when the user does not exist.
+ */
 export async function getUserBodyData(userId: number): Promise<UserBodyData> {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT height_cm, bf_formula_sex, weight_unit FROM users WHERE id = ?`,
@@ -85,9 +103,10 @@ export async function getUserBodyData(userId: number): Promise<UserBodyData> {
  *
  * `refresh_tokens` is excluded deliberately: those are auth state, not user
  * data. Wiping them would log the caller out of the very request doing the
- * wiping, and their hashes have no business in a data export.
+ * wiping, and their hashes have no business in a data export. `push_tokens`
+ * are device addresses for the same reason, and go with the account.
  */
-const EXCLUDED_TABLES = new Set(["refresh_tokens"])
+const EXCLUDED_TABLES = new Set(["refresh_tokens", "push_tokens"])
 
 // Columns holding a users.id with no FK to declare it, so the schema walk
 // can't see them. idempotency_keys.actor_id is the acting trainer (0 = the
@@ -108,6 +127,14 @@ const OUTBOUND_ONLY: Record<string, string> = {
   // A cooldown protects the recipient from the requester. The requester
   // clearing their data must not lift it, but the recipient clearing theirs may.
   friend_request_cooldowns: "recipient_id",
+  // logged_by_trainer_id names the trainer, not the owner. A trainer wiping
+  // their own data must not take their clients' workouts with it.
+  workouts: "user_id",
+  // Same for a trainer's suggestions in their clients' schedules.
+  scheduled_workouts: "user_id",
+  // Received messages are the sender's words. Account deletion still removes
+  // both directions through the FKs.
+  messages: "sender_id",
 }
 
 /**
@@ -184,11 +211,12 @@ function buildChildExports(
 
   // Each reached table's path up to its root: the FK column pairs of every
   // hop, child first. A root is an owned table whose ownership is one column
-  // the user authored, never a two-sided table like friendships, whose
-  // "children" would include the other person's rows.
+  // the user authored (an OUTBOUND_ONLY table's is already narrowed to it),
+  // never a two-sided table like friendships, whose "children" would include
+  // the other person's rows.
   const paths = new Map<string, { hops: ForeignKeyRow[][]; rootWhere: string }>()
   for (const [table, cols] of owned) {
-    if (cols.length !== 1 || OUTBOUND_ONLY[table]) continue
+    if (cols.length !== 1) continue
     paths.set(table, { hops: [], rootWhere: cols[0] })
   }
 

@@ -9,6 +9,14 @@ interface AnalyticsSummary extends RowDataPacket {
   last_session: Date | string | null
 }
 
+/**
+ * Totals a user's training: workouts, sets, volume and first and last workout dates.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param split - Only workouts of this split.
+ * @param dayNumber - Only workouts of this program day.
+ * @param days - Length of the window in days.
+ */
 export async function getAnalytics(
   userId: number,
   split?: string | null,

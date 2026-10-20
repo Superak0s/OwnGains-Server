@@ -12,6 +12,7 @@ import { logger } from "@/utils/logger.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim()
 const chatId = process.env.TELEGRAM_CHAT_ID?.trim()
+/** True when both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set. Otherwise every alert is skipped. */
 export const botAlertsEnabled = Boolean(token && chatId)
 /** Refused requests from one IP within one minute that trigger an alert. */
 const THRESHOLD = envInt("BOT_ALERT_THRESHOLD", 60, 1)
@@ -52,9 +53,22 @@ const lastAlert = new Map<string, number>()
 
 const bump = <K>(m: Map<K, number>, k: K) => m.set(k, (m.get(k) ?? 0) + 1)
 
+/**
+ * Whether a response looks like scanner or credential-stuffing traffic.
+ *
+ * @param status - Response status code.
+ * @param routed - Whether a route matched the request. An unrouted 404 counts.
+ */
 export const isSuspicious = (status: number, routed: boolean) =>
   status === 401 || status === 403 || status === 429 || (status === 404 && !routed)
 
+/**
+ * Counts one refused request against its client IP, for the bot-traffic alert.
+ *
+ * @param ip - Client IP, or undefined when unknown (ignored).
+ * @param status - Response status code.
+ * @param path - Request path, kept as a sample in the alert.
+ */
 export function noteSuspicious(ip: string | undefined, status: number, path: string): void {
   if (!botAlertsEnabled || !ip) return
   let h = hits.get(ip)
@@ -89,6 +103,7 @@ export async function checkBotTraffic(now = Date.now()): Promise<void> {
   )
 }
 
+/** Request health over the recent alert window. */
 export interface Health {
   requests: number
   serverErrors: number

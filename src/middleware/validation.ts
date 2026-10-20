@@ -89,8 +89,11 @@ export function queryLimit(
   return Math.min(Math.max(Number.parseInt(queryString(req, key) ?? "", 10) || def, 1), max)
 }
 
+/** Whether a string looks like an email address (`a@b.c`). Length is checked separately. */
 export const validateEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
-export const validateUsername = (v: string) => /^\w{3,20}$/.test(v)
+/** Whether a string is 3 to 20 word characters (letters, digits, underscore) with at least 3 letters. */
+export const validateUsername = (v: string) =>
+  /^\w{3,20}$/.test(v) && (v.match(/[A-Za-z]/g)?.length ?? 0) >= 3
 
 const PASSWORD_MIN_LENGTH = 8
 /** bcrypt only reads the first 72 bytes. Anything past that was silently ignored. */
@@ -241,6 +244,15 @@ export function consentFieldErrors(body: {
   return errors
 }
 
+/**
+ * Express middleware that validates a signup body: username, optional name, email, password policy and consent fields.
+ *
+ * Throws a {@link ValidationError} listing every problem found.
+ *
+ * @param req - Request whose `body` is checked.
+ * @param _res - Unused.
+ * @param next - Called when the body is valid.
+ */
 export function validateRegistration(
   req: Request,
   _res: Response,
@@ -252,7 +264,7 @@ export function validateRegistration(
   if (username) {
     if (!validateUsername(username))
       errors.push(
-        "Username must be 3-20 characters (letters, numbers, underscores)",
+        "Username must be 3-20 characters (letters, numbers, underscores), at least 3 of them letters",
       )
     const lenErr = checkMaxLength(username, "username") ?? usernameError(username)
     if (lenErr) errors.push(lenErr)
@@ -260,7 +272,7 @@ export function validateRegistration(
     errors.push("Username is required")
   }
 
-  if (req.body.name !== undefined && req.body.name !== null && req.body.name !== "")
+  if (![undefined, null, ""].includes(req.body.name))
     errors.push(...displayNameErrors(req.body))
 
   if (email) {
@@ -280,6 +292,15 @@ export function validateRegistration(
   next()
 }
 
+/**
+ * Express middleware that validates a password change body (`currentPassword`, `newPassword`).
+ *
+ * Throws a {@link ValidationError} listing every problem found.
+ *
+ * @param req - Request whose `body` is checked.
+ * @param _res - Unused.
+ * @param next - Called when the body is valid.
+ */
 export function validatePasswordChange(
   req: Request,
   _res: Response,
@@ -310,6 +331,15 @@ function displayNameErrors(body: { name?: unknown }): string[] {
   return err ? [err] : []
 }
 
+/**
+ * Express middleware that validates a profile update body. Only `name` and `email` are checked, and only when present.
+ *
+ * Throws a {@link ValidationError} listing every problem found.
+ *
+ * @param req - Request whose `body` is checked.
+ * @param _res - Unused.
+ * @param next - Called when the body is valid.
+ */
 export function validateProfileUpdate(
   req: Request,
   _res: Response,
@@ -333,6 +363,16 @@ export function validateProfileUpdate(
   next()
 }
 
+/**
+ * Express middleware that validates a signin body. Both fields must be
+ * non-empty strings under a sanity length. The password policy is not applied,
+ * so accounts made under an older policy can still sign in.
+ *
+ * @param req - Request whose `body` holds `username` and `password`.
+ * @param _res - Unused.
+ * @param next - Called when the body is valid.
+ * @throws ValidationError when a field is missing, not a string or too long.
+ */
 export function validateLogin(
   req: Request,
   _res: Response,
@@ -355,6 +395,15 @@ export function validateLogin(
   next()
 }
 
+/**
+ * Express middleware that requires `body.weightKg` to be a positive number.
+ * The allowed range is enforced later, in the measurements model.
+ *
+ * @param req - Request whose `body.weightKg` is checked.
+ * @param _res - Unused.
+ * @param next - Called when the weight is valid.
+ * @throws ValidationError when the weight is not a positive number.
+ */
 export function validateWeightEntry(
   req: Request,
   _res: Response,
@@ -368,6 +417,15 @@ export function validateWeightEntry(
   next()
 }
 
+/**
+ * Express middleware that validates the body that starts a workout session (day number and title, muscle lists, optional start time).
+ *
+ * Throws a {@link ValidationError} listing every problem found.
+ *
+ * @param req - Request whose `body` is checked.
+ * @param _res - Unused.
+ * @param next - Called when the body is valid.
+ */
 export function validateSessionCreation(
   req: Request,
   _res: Response,

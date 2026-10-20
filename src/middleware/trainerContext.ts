@@ -17,18 +17,18 @@ import { logger } from "../utils/logger.js"
  * particular DELETE /api/auth/account/data remains scoped to the caller, so a
  * trainer cannot wipe a trainee's account.
  *
- * The grant is read/write but never destructive. `denyTrainer` guards every
- * route in the covered routers that erases or overwrites existing data:
+ * The grant is read/write, and the trainer may edit the trainee's program.
+ * `denyTrainer` guards every other route in the covered routers that erases
+ * or overwrites existing data:
  *   - the delete routes, including DELETE /api/sessions/:id/sets (one at a
  *     time is still the trainee's recorded history being deleted)
- *   - POST /api/program/upload (an upsert that replaces the whole program
- *     rather than merging into it)
  *   - POST /api/sessions/rename-exercise (a bulk rewrite of a split's entire
  *     set history) and PATCH /api/program/exercise/rename (re-points the slot
  *     at another shared `exercises` row, changing how the trainee's history
  *     reads)
- * What a trainer CAN write is additive: recording sets, starting and ending
- * workouts, PATCH /exercise/add, /exercise/sets and /exercise/machine, and
+ * What a trainer CAN write: recording sets, starting and ending workouts,
+ * POST /api/program/upload (refused when it would empty the program),
+ * PATCH /exercise/add, /exercise/sets and /exercise/machine, and
  * PUT /api/program/current-day: moving the trainee's day pointer is part of
  * running their session, and it overwrites a pointer rather than data.
  * Destroying a trainee's data stays the trainee's own call, so three routes
@@ -50,6 +50,15 @@ export function denyTrainer(
   next()
 }
 
+/**
+ * Swaps `req.user` to the trainee named by `X-Trainee-Id` when the caller
+ * holds an active trainer grant, keeping the caller on `req.trainer`. See
+ * {@link denyTrainer} for the rules on what a trainer may write.
+ *
+ * @param req - Authenticated request, optionally with the header.
+ * @param _res - Unused.
+ * @param next - Called with a 403 `NOT_A_TRAINER` {@link ForbiddenError} for a bad or ungranted header.
+ */
 export async function applyTrainerContext(
   req: Request,
   _res: Response,

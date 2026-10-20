@@ -22,6 +22,7 @@ import {
   purgeExpiredCooldowns,
   purgeOldReports,
 } from "../features/social/friends/friends.model.js"
+import { purgeExpiredTrackingMessages } from "../features/trainer/trackingRelay.model.js"
 import { sendToUser } from "../ws/wsServer.js"
 import { logger } from "../utils/logger.js"
 
@@ -55,6 +56,11 @@ function tick(): void {
 // or deadlock), log it, and legitimately do nothing until the next tick,
 // which is fine in production and makes any test that polls for a fixed
 // window after start racy by construction.
+/**
+ * Runs one sweep: ends idle workouts and notifies their owners, then purges
+ * expired idempotency keys, refresh tokens, throttle counters and similar rows.
+ * Errors are logged and never thrown.
+ */
 export async function runStaleSessionCleanup(): Promise<void> {
   try {
     const ended = await endStaleSessions(INACTIVITY_THRESHOLD_MINUTES)
@@ -64,8 +70,15 @@ export async function runStaleSessionCleanup(): Promise<void> {
       // still posts is kept: recordSetTiming accepts it and moves end_time
       // forward. A user with no open socket misses it and re-syncs on next launch.
       // Only workouts this sweep actually ended are listed.
-      for (const { id, userId } of ended)
+      for (const { id, userId, trainer } of ended) {
         sendToUser(userId, "session_auto_ended", { sessionId: id })
+        // The trainer's phone runs the workout but isn't its owner, so it needs its own event.
+        if (trainer) {
+          const payload = { traineeId: userId, trainerId: trainer.uuid, trainerUsername: trainer.username, sessionId: id }
+          sendToUser(userId, "trainer_session_ended", payload)
+          sendToUser(trainer.uuid, "trainer_session_ended", payload)
+        }
+      }
     }
   } catch (err) {
     logger.error(
@@ -82,6 +95,7 @@ export async function runStaleSessionCleanup(): Promise<void> {
     // Used to run unbounded inside every token issue.
     ["Refresh-token", () => purgeExpiredRefreshTokens()],
     ["Joint-session", () => purgeJointSessions()],
+    ["Tracking-message", () => purgeExpiredTrackingMessages()],
     ["Friend-request cooldown", () => purgeExpiredCooldowns()],
     ["User-report", () => purgeOldReports()],
     ["Sign-in throttle", () => purgeStaleThrottles()],
@@ -106,6 +120,7 @@ export async function runStaleSessionCleanup(): Promise<void> {
   }
 }
 
+/** Runs a sweep now, then every few minutes. A second call while running is ignored. */
 export function startStaleSessionCleanup(): void {
   if (cleanupTimer) {
     logger.warn("[SESSION_CLEANUP] Already running, ignoring duplicate start")

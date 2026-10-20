@@ -13,7 +13,7 @@ describe("hydration routes", () => {
       .set(auth(u.token))
       .send({ amountMl: 500, note: "morning" })
     expect(res.status).toBe(201)
-    entryId = res.body.id
+    entryId = res.body.data.id
   })
 
   it("lists entries", async () => {
@@ -34,9 +34,9 @@ describe("hydration routes", () => {
       ).toBe(400)
     const history = await request(app).get("/api/tracking/hydration").set(auth(u.token))
     const margins = Object.fromEntries(history.body.data.map((r: { id: number; errorMargin: number }) => [r.id, r.errorMargin]))
-    expect(margins[ok.body.id]).toBe(7.5)
+    expect(margins[ok.body.data.id]).toBe(7.5)
     expect(margins[entryId]).toBe(0)
-    await request(app).delete(`/api/tracking/hydration/${ok.body.id}`).set(auth(u.token))
+    await request(app).delete(`/api/tracking/hydration/${ok.body.data.id}`).set(auth(u.token))
   })
 
   // The hydration goal is stored in /api/settings with every other preference now.
@@ -86,18 +86,18 @@ describe("hydration routes", () => {
     const a = await log(250)
     const b = await log(250)
     expect([a.status, b.status]).toEqual([201, 201])
-    expect(a.body.id).not.toBe(b.body.id)
+    expect(a.body.data.id).not.toBe(b.body.data.id)
 
     const first = await log(330, "drink-1")
     const replay = await log(330, "drink-1")
     expect(replay.status).toBe(201)
-    expect(replay.body.id).toBe(first.body.id)
+    expect(replay.body.data.id).toBe(first.body.data.id)
 
     const history = await request(app).get("/api/tracking/hydration").set(auth(drinker.token))
     expect(history.body.data.map((e: { value: number }) => e.value).sort()).toEqual([250, 250, 330])
 
     // Deleting one drink leaves its twin.
-    await request(app).delete(`/api/tracking/hydration/${a.body.id}`).set(auth(drinker.token)).expect(200)
+    await request(app).delete(`/api/tracking/hydration/${a.body.data.id}`).set(auth(drinker.token)).expect(200)
     const after = await request(app).get("/api/tracking/hydration").set(auth(drinker.token))
     expect(after.body.data.length).toBe(2)
   })

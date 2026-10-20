@@ -16,6 +16,7 @@ import { envInt } from "@/config/env.js"
  * anything past that is refused with 429 rather than piling up unbounded.
  */
 
+/** bcrypt work factor. Keep {@link DUMMY_PASSWORD_HASH} at the same cost. */
 export const BCRYPT_COST = 12
 
 const MAX_CONCURRENT = envInt("BCRYPT_MAX_CONCURRENCY", 2, 1)
@@ -48,9 +49,23 @@ async function withHashSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Hashes a password with bcrypt. Concurrent hashes are capped, and a full queue
+ * rejects with 429 `AUTH_BUSY`.
+ *
+ * @param plain - The plain password.
+ * @returns The bcrypt hash.
+ */
 export const hashPassword = (plain: string): Promise<string> =>
   withHashSlot(() => bcrypt.hash(plain, BCRYPT_COST))
 
+/**
+ * Checks a password against a stored bcrypt hash, under the same concurrency cap as {@link hashPassword}.
+ *
+ * @param plain - The password to test.
+ * @param hashed - The stored hash.
+ * @returns True when they match.
+ */
 export const verifyPassword = (plain: string, hashed: string): Promise<boolean> =>
   withHashSlot(() => bcrypt.compare(plain, hashed))
 

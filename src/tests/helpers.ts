@@ -14,7 +14,7 @@ export function uniqueName(prefix: string): string {
   return `${prefix}_${stamp}${n}`.slice(0, 20)
 }
 
-export async function signup(prefix = "u", password = "Passw0rd-123") {
+export async function signup(prefix = "user", password = "Passw0rd-123") {
   const username = uniqueName(prefix)
   const res = await request(app)
     .post("/api/auth/signup")

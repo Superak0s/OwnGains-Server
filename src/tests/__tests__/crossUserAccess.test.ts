@@ -69,22 +69,22 @@ beforeAll(async () => {
   v.setId = set.body.timing.id
 
   v.weightId = (await post("/api/tracking/bodystats/weight", { weightKg: 70.5 }))
-    .body.id
+    .body.data.id
   v.bodyFatId = (
     await post("/api/tracking/bodystats/bodyfat/log", {
       percentage: 15,
       measurements: { waist: 80, neck: 38, unit: "cm" },
     })
-  ).body.entry.id
+  ).body.data.id
   v.measurementId = (
     await post("/api/tracking/measurements", {
       values: { waist_cm: 81 },
       note: "monday",
     })
-  ).body.id
+  ).body.data.id
   v.hydrationId = (
     await post("/api/tracking/hydration", { amountMl: 500, note: "morning" })
-  ).body.id
+  ).body.data.id
   v.sorenessId = (
     await post("/api/tracking/soreness", { muscleGroup: "chest", intensity: 6 })
   ).body.data.id
@@ -97,13 +97,13 @@ beforeAll(async () => {
       protein: 20,
       takenAt: "2024-06-01T12:30:00Z",
     })
-  ).body.entry.id
+  ).body.data.id
   v.supplementId = (
     await post("/api/tracking/supplements", { name: "Vitamin D" })
-  ).body.supplement.id
+  ).body.data.id
   v.supplementLogId = (
     await post(`/api/tracking/supplements/${v.supplementId}/log`, { amount: 1 })
-  ).body.id
+  ).body.data.id
   // A metric only this user has defined: the attacker must not be able to
   // write against it, and it must not appear in their definitions list.
   await post("/api/tracking/measurements/definitions", {
@@ -127,7 +127,7 @@ beforeAll(async () => {
       "p.png",
     )
   expect(photo.status).toBe(201)
-  v.photoId = photo.body.id
+  v.photoId = photo.body.data.id
 
   await post("/api/program/upload", {
     originalFilename: "plan.xlsx",
@@ -159,15 +159,15 @@ describe("cross-user reads are denied", () => {
   // [url, key holding the array in the response envelope]
   const lists: [string, string][] = [
     ["/api/sessions", "sessions"],
-    ["/api/tracking/bodystats/weight", "entries"],
-    ["/api/tracking/bodystats/bodyfat/log", "entries"],
+    ["/api/tracking/bodystats/weight", "data"],
+    ["/api/tracking/bodystats/bodyfat/log", "data"],
     ["/api/tracking/measurements?metrics=waist_cm", "data"],
     ["/api/tracking/hydration", "data"],
     ["/api/tracking/soreness", "data"],
-    ["/api/tracking/soreness/active", "data"],
+    ["/api/tracking/soreness?status=active", "data"],
     ["/api/tracking/menstrual", "data"],
-    ["/api/tracking/macros/log", "entries"],
-    ["/api/tracking/supplements", "supplements"],
+    ["/api/tracking/macros/log", "data"],
+    ["/api/tracking/supplements", "data"],
     ["/api/tracking/photos/muscle", "data"],
     ["/api/tracking/measurements/definitions", "data"],
   ]
@@ -285,14 +285,6 @@ describe("cross-user writes and deletes are denied", () => {
           .set(auth(attacker.token)),
     ],
     [
-      "follow up on someone else's soreness entry",
-      () =>
-        request(app)
-          .post(`/api/tracking/soreness/${v.sorenessId}/follow-ups`)
-          .set(auth(attacker.token))
-          .send({ intensity: 1, status: "recovered" }),
-    ],
-    [
       "rename someone else's supplement",
       () =>
         request(app)
@@ -331,6 +323,14 @@ describe("cross-user writes and deletes are denied", () => {
     expect(DENIED).toContain(res.status)
   })
 
+  it("skips someone else's soreness entry in a follow-up batch", async () => {
+    const res = await request(app)
+      .post("/api/tracking/soreness/follow-ups")
+      .set(auth(attacker.token))
+      .send({ updates: [{ sorenessId: v.sorenessId, intensity: 1, status: "recovered" }] })
+    expect(res.body).toMatchObject({ data: [], skipped: [v.sorenessId] })
+  })
+
   it("leaves the victim's data intact after the whole sweep", async () => {
     const session = await request(app)
       .get(`/api/sessions/${v.sessionId}`)
@@ -350,7 +350,7 @@ describe("cross-user writes and deletes are denied", () => {
       .get("/api/tracking/supplements")
       .set(auth(victim.token))
     expect(list.status).toBe(200)
-    const kept = list.body.supplements.find((s: { id: number }) => s.id === v.supplementId)
+    const kept = list.body.data.find((s: { id: number }) => s.id === v.supplementId)
     expect(kept?.name).toBe("Vitamin D")
 
     const log = await request(app)
@@ -476,7 +476,7 @@ describe("trainer mode stays inside its routers", () => {
   })
 
   const offLimits: [string, string][] = [
-    ["/api/tracking/bodystats/weight", "entries"],
+    ["/api/tracking/bodystats/weight", "data"],
     ["/api/tracking/menstrual", "data"],
     ["/api/tracking/photos/muscle", "data"],
     ["/api/tracking/measurements?metrics=waist_cm", "data"],

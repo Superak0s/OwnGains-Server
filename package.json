@@ -1,6 +1,6 @@
 {
   "name": "owngains-server",
-  "version": "0.5.2",
+  "version": "1.0.0",
   "description": "Sync, accounts and social backend for the OwnGains fitness app — central instance or self-hosted",
   "main": "dist/server.js",
   "scripts": {
@@ -35,6 +35,7 @@
     "multer": "^2.4.0",
     "mysql2": "^3.24.4",
     "sharp": "^0.35.4",
+    "tweetnacl": "1.0.3",
     "ws": "^8.21.3"
   },
   "devDependencies": {

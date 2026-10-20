@@ -28,7 +28,7 @@ describe("measurements routes", () => {
         note: "morning",
       })
     expect(res.status).toBe(201)
-    groupId = res.body.id
+    groupId = res.body.data.id
   })
 
   it("pivots one measuring session into a values map", async () => {
@@ -163,7 +163,7 @@ describe("measurements routes", () => {
       { waist_cm: 89, hip_cm: null },
       { waist_cm: 90, hip_cm: 100 },
     ])
-    expect(res.body.data[1]).toMatchObject({ id: s1.body.id, note: "one" })
+    expect(res.body.data[1]).toMatchObject({ id: s1.body.data.id, note: "one" })
     expect(Object.keys(res.body.data[0])).toEqual(["id", "measuredAt", "note", "values"])
 
     const limited = await request(app)
@@ -227,6 +227,6 @@ describe("measurements routes", () => {
     const replay = await send()
     expect(first.status).toBe(201)
     expect(replay.status).toBe(201)
-    expect(replay.body.id).toBe(first.body.id)
+    expect(replay.body.data.id).toBe(first.body.data.id)
   })
 })

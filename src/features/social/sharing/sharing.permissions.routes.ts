@@ -71,20 +71,13 @@ router.post("/permissions", async (req: Request, res: Response) => {
     .json({ success: true, message: "Permission granted", permissionId })
 })
 
-// Payloads are left out of the lists unless asked for. See getPermissions.
-const includePayload = (req: Request) => req.query.includePayload === "true"
-
 router.get("/permissions/granted", async (req: Request, res: Response) => {
-  const permissions = await getPermissions(req.user!.id, "granted", {
-    includePayload: includePayload(req),
-  })
+  const permissions = await getPermissions(req.user!.id, "granted")
   res.json({ success: true, permissions })
 })
 
 router.get("/permissions/received", async (req: Request, res: Response) => {
-  const permissions = await getPermissions(req.user!.id, "received", {
-    includePayload: includePayload(req),
-  })
+  const permissions = await getPermissions(req.user!.id, "received")
   res.json({ success: true, permissions })
 })
 

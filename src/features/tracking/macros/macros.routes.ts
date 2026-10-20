@@ -78,14 +78,13 @@ router.post("/log", idempotent, async (req: Request, res: Response) => {
     note,
   })
 
-  // `entry` is the legacy key. See the note on the envelope in bodyStats.routes.ts.
-  res.status(201).json({ success: true, data: entry, entry })
+  res.status(201).json({ success: true, data: entry })
 })
 
 router.get("/log", async (req: Request, res: Response) => {
   const days = queryLimit(req, { def: 30, max: 365, key: "days" })
   const entries = await getMacrosHistory(req.user!.id, days)
-  res.json({ success: true, data: entries, entries })
+  res.json({ success: true, data: entries })
 })
 
 // Macro goals are stored in /api/settings with every other preference. There is no

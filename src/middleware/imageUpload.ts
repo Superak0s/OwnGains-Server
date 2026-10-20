@@ -8,6 +8,7 @@ import { AppError, ValidationError } from "./errorHandler.js"
 // model rejects meant a 10 MB GIF was uploaded in full and then 400'd.
 const ALLOWED_MIMETYPES = new Set(["image/jpeg", "image/png", "image/webp"])
 
+/** Multer instance for photo uploads: one image in memory, 10 MB cap, JPEG, PNG or WebP only. */
 export const photoUpload = multer({
   storage: multer.memoryStorage(),
   // Every limit, not just fileSize: busboy's defaults are unlimited fields and
@@ -70,9 +71,11 @@ export function assertImageUpload(
 // sharp shares with gzip, fs and DNS. Past that a caller gets 503 + Retry-After
 // instead of a place in an unbounded queue. In-process state, like every other
 // limiter here: the server is single-instance.
+/** Photo decodes allowed at once, process-wide. */
 export const MAX_CONCURRENT_DECODES = 2
 let decodesInFlight = 0
 
+/** All photo decode slots are taken (503 `UPLOAD_BUSY`). */
 export class UploadBusyError extends AppError {
   constructor() {
     super("Server is busy processing other photos; retry shortly", 503, null, "UPLOAD_BUSY")
@@ -100,6 +103,11 @@ export function tryAcquireDecodeSlot(): (() => void) | null {
  * Route middleware, mounted *before* multer so a busy server refuses the
  * request without buffering its body. The slot is held until the response
  * finishes or the socket closes, whichever comes first.
+ *
+ * @param _req - Unused.
+ * @param res - Gets `Retry-After: 5` when no slot is free. The slot is released on `finish` or `close`.
+ * @param next - Called once a slot is held.
+ * @throws UploadBusyError when all slots are taken.
  */
 export function uploadSlot(_req: Request, res: Response, next: NextFunction): void {
   const release = tryAcquireDecodeSlot()

@@ -43,6 +43,8 @@ interface FriendWorkoutRow extends RowDataPacket {
   endTime: Date | string | null
   totalDuration: number | null
   completedSets: number
+  loggedByTrainerId: string | null
+  loggedByTrainerUsername: string | null
   primaryMuscles: unknown
   secondaryMuscles: unknown
 }
@@ -78,6 +80,7 @@ const VALID_PERMISSION_TYPES: ReadonlySet<PermissionType> = new Set([
   "joint_session",
   "watch_session",
   "trainer",
+  "tracking",
 ])
 
 const INVITE_TTL_SECONDS = 120
@@ -88,12 +91,6 @@ export const MAX_PAYLOAD_BYTES = 256 * 1024
 const MAX_GRANTS_PER_USER = 300
 /** Of those, how many may be `program` grants, i.e. have a payload. */
 const MAX_PROGRAM_GRANTS_PER_USER = 25
-/**
- * With `?includePayload=true`, a permissions list inlines at most this many
- * payloads. Any others come back with `payload: null, hasPayload: true` and
- * are fetched one at a time from GET /permissions/:id/payload.
- */
-const MAX_INLINE_PAYLOADS = 10
 
 /**
  * MySQL's JSON type comes back from the driver already parsed. MariaDB's JSON
@@ -120,6 +117,19 @@ const ACCEPTED_FRIENDSHIP_JOIN = `JOIN friendships f
       AND f.user_id = LEAST(sp.from_user_id, sp.to_user_id)
       AND f.friend_id = GREATEST(sp.from_user_id, sp.to_user_id)`
 
+/**
+ * Grants a permission to another user, or replaces the payload of an
+ * existing identical grant. Per-user caps apply to new grants only.
+ *
+ * @param fromUserId - Numeric id of the grantor.
+ * @param toUserId - Numeric id of the grantee.
+ * @param permissionType - What is being granted.
+ * @param payload - Program snapshot to share. Kept only for `program` grants.
+ * @returns The `sharing_permissions.id`, new or existing.
+ * @throws ValidationError for an unknown permission type.
+ * @throws AppError 409 `TOO_MANY_GRANTS` when a cap would be exceeded.
+ * @throws ConflictError `TRAINER_REQUIRED` for `tracking` without a `trainer` grant to the same user.
+ */
 export async function grantPermission(
   fromUserId: number,
   toUserId: number,
@@ -132,6 +142,16 @@ export async function grantPermission(
   // Only a program grant has anything to carry. Any other type's payload was
   // stored and then listed back verbatim: 2 MB of arbitrary JSON per grant.
   if (permissionType !== "program") payload = null
+
+  if (permissionType === "tracking") {
+    const [trainer] = await pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM sharing_permissions
+       WHERE from_user_id = ? AND to_user_id = ? AND permission_type = 'trainer'`,
+      [fromUserId, toUserId],
+    )
+    if (!trainer.length)
+      throw new ConflictError("Grant Trainer Access first", "TRAINER_REQUIRED")
+  }
 
   // Re-granting an existing triple only replaces its payload, so it never
   // counts against the caps.
@@ -180,15 +200,32 @@ export async function grantPermission(
   return result.insertId
 }
 
+/**
+ * Deletes a grant the caller made.
+ *
+ * @param userId - Numeric id of the grantor.
+ * @param permissionId - `sharing_permissions.id`.
+ * @throws NotFoundError when the grant is not the caller's or does not exist.
+ */
 export async function revokePermission(
   userId: number,
   permissionId: number,
 ): Promise<void> {
-  const [result] = await pool.execute<ResultSetHeader>(
-    `DELETE FROM sharing_permissions WHERE id = ? AND from_user_id = ?`,
-    [permissionId, userId],
-  )
-  if (result.affectedRows === 0) throw new NotFoundError("Permission")
+  await withTransaction(async (conn) => {
+    // Tracking Access only exists alongside Trainer Access, so it ends with it.
+    await conn.execute(
+      `DELETE t FROM sharing_permissions t
+       JOIN sharing_permissions sp ON sp.from_user_id = t.from_user_id AND sp.to_user_id = t.to_user_id
+       WHERE sp.id = ? AND sp.from_user_id = ? AND sp.permission_type = 'trainer'
+         AND t.permission_type = 'tracking'`,
+      [permissionId, userId],
+    )
+    const [result] = await conn.execute<ResultSetHeader>(
+      `DELETE FROM sharing_permissions WHERE id = ? AND from_user_id = ?`,
+      [permissionId, userId],
+    )
+    if (result.affectedRows === 0) throw new NotFoundError("Permission")
+  })
 }
 
 /**
@@ -197,8 +234,7 @@ export async function revokePermission(
  *
  * The payload (a whole program snapshot) is NOT selected here: 500 rows of it
  * was up to a gigabyte in one response. Each row says `hasPayload`, and the
- * payload itself comes from getPermissionPayload or, with `includePayload`,
- * inlined for the first MAX_INLINE_PAYLOADS rows that have one.
+ * payload itself comes from getPermissionPayload.
  *
  * The friendship join is not belt-and-braces: removeFriend and blockUser both
  * delete the grant rows in the same transaction, so there is no reachable
@@ -209,7 +245,6 @@ export async function revokePermission(
 export async function getPermissions(
   userId: number,
   direction: "granted" | "received",
-  { includePayload = false }: { includePayload?: boolean } = {},
 ): Promise<Permission[]> {
   const [self, other] =
     direction === "granted"
@@ -218,32 +253,14 @@ export async function getPermissions(
   const label = direction === "granted" ? "to" : "from"
   const [rows] = await pool.execute<PermissionRow[]>(
     `SELECT sp.id, u.uuid AS ${label}UserId, sp.permission_type AS permissionType,
-            NULL AS payload, sp.payload IS NOT NULL AS hasPayload,
+            sp.payload IS NOT NULL AS hasPayload,
             sp.created_at AS createdAt, sp.updated_at AS updatedAt, u.username AS ${label}Username
      FROM sharing_permissions sp JOIN users u ON u.id = sp.${other}
      ${ACCEPTED_FRIENDSHIP_JOIN}
      WHERE sp.${self} = ? ORDER BY sp.permission_type, sp.created_at DESC LIMIT 500`,
     [userId],
   )
-  const perms: Permission[] = rows.map((r) => ({
-    ...r,
-    payload: null,
-    hasPayload: !!r.hasPayload,
-  }))
-  if (!includePayload) return perms
-
-  // ids come from the query above, never from the request.
-  const inline = perms.filter((p) => p.hasPayload).slice(0, MAX_INLINE_PAYLOADS)
-  if (inline.length === 0) return perms
-  const [payloads] = await pool.execute<
-    (RowDataPacket & { id: number; payload: unknown })[]
-  >(
-    `SELECT id, payload FROM sharing_permissions
-     WHERE id IN (${inline.map(() => "?").join(",")})`,
-    inline.map((p) => p.id),
-  )
-  const byId = new Map(payloads.map((p) => [p.id, parsePayload(p.payload)]))
-  return perms.map((p) => (byId.has(p.id) ? { ...p, payload: byId.get(p.id)! } : p))
+  return rows.map((r) => ({ ...r, hasPayload: !!r.hasPayload }))
 }
 
 /**
@@ -281,6 +298,14 @@ interface LiveAudienceRow extends RowDataPacket {
   permissionType: "watch_session" | "trainer"
 }
 
+/**
+ * Lists the friends who should receive live events about a user's workout.
+ * A grant only counts while the two are still accepted friends.
+ *
+ * @param userId - Numeric id of the user working out.
+ * @param types - `watchers` for spectators only, `all` to include trainers.
+ * @returns Recipients with their uuid, username and permission type.
+ */
 export async function getLiveAudience(
   userId: number,
   types: "watchers" | "all" = "all",
@@ -347,9 +372,11 @@ export async function resolveFriendAccess(
 const FRIEND_WORKOUT_COLS = `w.id, w.day_number AS dayNumber, w.day_title AS dayTitle,
        w.start_time AS startTime, w.end_time AS endTime,
        w.total_duration AS totalDuration, w.completed_sets AS completedSets,
+       t.uuid AS loggedByTrainerId, t.username AS loggedByTrainerUsername,
        pd.primary_muscles AS primaryMuscles,
        pd.secondary_muscles AS secondaryMuscles
-     FROM workouts w LEFT JOIN program_days pd ON pd.id = w.program_day_id`
+     FROM workouts w LEFT JOIN program_days pd ON pd.id = w.program_day_id
+     LEFT JOIN users t ON t.id = w.logged_by_trainer_id`
 
 const withMuscles = (w: FriendWorkoutRow) => ({
   ...w,
@@ -411,11 +438,18 @@ export async function getFriendSessions(
     if (list) list.push(set)
     else bySession.set(sessionId, [set])
   }
-  // Every session gets the field, [] included: the app reads a missing
-  // setTimings as an older server and falls back to per-session calls.
+  // Every session gets the field, [] included.
   return sessions.map((s) => ({ ...s, setTimings: bySession.get(s.id) ?? [] }))
 }
 
+/**
+ * Loads one finished or running workout of a friend with all its sets.
+ * Demo workouts are excluded. The caller must already have checked the grant.
+ *
+ * @param friendId - Numeric id of the workout's owner.
+ * @param sessionId - `workouts.id`.
+ * @returns The workout with `setTimings`, or null when it is not the friend's.
+ */
 export async function getFriendSessionDetails(
   friendId: number,
   sessionId: number,
@@ -440,6 +474,15 @@ export async function getFriendSessionDetails(
   }
 }
 
+/**
+ * Invites a friend to a joint workout. Any earlier pending invite between the
+ * same pair is declined first.
+ *
+ * @param fromUserId - Numeric id of the inviter.
+ * @param toUserId - Numeric id of the invitee.
+ * @param fromSessionId - Inviter's running workout, if one already started.
+ * @returns The new invite id.
+ */
 export async function createJointInvite(
   fromUserId: number,
   toUserId: number,
@@ -461,6 +504,12 @@ export async function createJointInvite(
   })
 }
 
+/**
+ * Loads an invite with the inviter's name and uuid.
+ *
+ * @param inviteId - `joint_session_invites.id`.
+ * @returns The invite, or null.
+ */
 export async function getInvite(inviteId: number): Promise<InviteRow | null> {
   const [rows] = await pool.execute<InviteRow[]>(
     `SELECT i.id, i.from_user_id, i.to_user_id, i.from_workout_id, i.status, i.expires_at, i.created_at, u.username AS from_username,
@@ -471,6 +520,15 @@ export async function getInvite(inviteId: number): Promise<InviteRow | null> {
   return rows[0] ?? null
 }
 
+/**
+ * Accepts a pending invite and creates the joint session with both users as participants.
+ *
+ * @param inviteId - `joint_session_invites.id`.
+ * @param acceptingUserId - Numeric id of the invitee.
+ * @param acceptingSessionId - Invitee's running workout, if any.
+ * @returns The new joint session id.
+ * @throws ConflictError when the invite is missing, already used or expired.
+ */
 export async function acceptInvite(
   inviteId: number,
   acceptingUserId: number,
@@ -515,6 +573,13 @@ export async function acceptInvite(
   })
 }
 
+/**
+ * Declines a pending invite addressed to the caller.
+ *
+ * @param inviteId - `joint_session_invites.id`.
+ * @param decliningUserId - Numeric id of the invitee.
+ * @throws NotFoundError when there is no pending invite for the caller.
+ */
 export async function declineInvite(
   inviteId: number,
   decliningUserId: number,
@@ -526,6 +591,12 @@ export async function declineInvite(
   if (result.affectedRows === 0) throw new NotFoundError("Invite")
 }
 
+/**
+ * Loads a joint session with each participant's progress.
+ *
+ * @param jointSessionId - `joint_sessions.id`.
+ * @returns The session, or null.
+ */
 export async function getJointSession(
   jointSessionId: number,
 ): Promise<JointSession | null> {

@@ -33,6 +33,7 @@ import {
   deleteAllSessionsForSplit,
 } from "./workouts.model.js"
 import { clearDemoData, fillDemoData } from "./demo.model.js"
+import { sendDemoTracking } from "@/features/trainer/demoTracking.js"
 import { getLiveAudience } from "../social/sharing/sharing.model.js"
 import { pushWatchProgress } from "../social/sharing/sharing.watch.routes.js"
 
@@ -48,7 +49,8 @@ router.use(authenticateToken, applyTrainerContext, healthConsentGuard)
 
 router.get("/", async (req: Request, res: Response) => {
   const userId = req.user!.id
-  const { dayNumber, includeTimings } = req.query
+  const { includeTimings } = req.query
+  const dayNumber = queryString(req, "dayNumber")
   const split = queryString(req, "split")
 
   // With timings, a page is capped at HISTORY_TIMINGS_MAX sessions: ?limit=1000
@@ -69,7 +71,7 @@ router.get("/", async (req: Request, res: Response) => {
   const sessions = await getSessionHistory(
     userId,
     split || null,
-    dayNumber ? parseIntParam(String(dayNumber), "dayNumber") : null,
+    dayNumber ? parseIntParam(dayNumber, "dayNumber") : null,
     limit,
     withTimings,
     before,
@@ -77,7 +79,7 @@ router.get("/", async (req: Request, res: Response) => {
 
   // No `total`: it was sessions.length, which a client can read off the array
   // itself, and it read like a full-history count that it never was.
-  // nextCursor (added, older clients ignore it) is null on the last page.
+  // nextCursor is null on the last page.
   const last = sessions.at(-1)
   res.json({
     success: true,
@@ -113,6 +115,7 @@ router.post("/start", idempotent, validateSessionCreation, async (req: Request, 
     req.body.startTime || null,
     req.body.isDemo === true,
     req.body.split || null,
+    req.trainer?.userId ?? null,
   )
 
   const session = await getSessionDetails(newSessionId, userId)
@@ -279,6 +282,7 @@ router.patch("/:sessionId/sets/:setId", validateSetTiming, async (req: Request, 
 
 router.post("/demo", denyTrainer, validateDemoFill, async (req: Request, res: Response) => {
   const result = await fillDemoData(req.user!.id, req.body.days, req.body.split ?? null)
+  await sendDemoTracking(req.user!.id)
   res.json({ success: true, ...result })
 })
 

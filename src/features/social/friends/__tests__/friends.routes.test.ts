@@ -41,20 +41,15 @@ describe("friends routes", () => {
     expect(wild.body.users).toHaveLength(0)
   })
 
-  it("search shows a real name to friends only", async () => {
+  it("search never returns or matches a real name", async () => {
     const s1 = await signup("srcha")
     const s2 = await signup("srchb")
     await request(app).put("/api/auth/profile").set(auth(s2.token)).send({ name: "Secret Realname" })
 
-    const stranger = await request(app).get(`/api/friends/search?q=${s2.username}`).set(auth(s1.token))
-    expect(stranger.body.users[0].username).toBe(s2.username)
-    expect(stranger.body.users[0].name).toBe(s2.username)
+    const res = await request(app).get(`/api/friends/search?q=${s2.username}`).set(auth(s1.token))
+    expect(res.body.users[0].username).toBe(s2.username)
+    expect(res.body.users[0].name).toBeUndefined()
     expect((await request(app).get("/api/friends/search?q=Secret").set(auth(s1.token))).body.users).toHaveLength(0)
-
-    const req = await request(app).post("/api/friends/request").set(auth(s1.token)).send({ username: s2.username })
-    await request(app).post(`/api/friends/request/${req.body.friendshipId}/accept`).set(auth(s2.token))
-    const friend = await request(app).get(`/api/friends/search?q=${s2.username}`).set(auth(s1.token))
-    expect(friend.body.users[0].name).toBe("Secret Realname")
   })
 
   it("rejects self-requests and unknown users", async () => {

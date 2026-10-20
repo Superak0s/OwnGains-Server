@@ -95,8 +95,11 @@ def fetch_page(page: int, out_file: str):
         f"&issueStatuses={ISSUE_STATUSES}"
         f"&ps={PAGE_SIZE}&p={page}"
     )
+    # The proxy in front of SonarQube answers curl's default User-Agent with a 200 plain-text refusal.
     cmd = [
         "curl",
+        "-A",
+        "OwnGains-sonarqube-script",
         "-u",
         f"{SONAR_USER_TOKEN}:",
         url,
@@ -144,7 +147,11 @@ while True:
     fetch_page(page, out_file)
     PART_FILES.append(out_file)
     with open(out_file, encoding="utf-8") as f:
-        issue_total = json.load(f)["paging"]["total"]
+        body = f.read()
+    try:
+        issue_total = json.loads(body)["paging"]["total"]
+    except (json.JSONDecodeError, KeyError):
+        sys.exit(f"Page {page} is not a SonarQube issues response: {body[:500]}")
     if page * PAGE_SIZE >= min(issue_total, 10000):  # SonarQube won't page past 10k results
         break
     page += 1

@@ -11,6 +11,21 @@ type MacrosIntakeRow = MacrosEntry & RowDataPacket
 const MACROS_COLS = `id, name, protein, carbs, fat, calories,
        error_margin AS errorMargin, taken_at AS takenAt, note`
 
+/**
+ * Records a meal or food intake.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entry - The intake.
+ * @param entry.name - Food name, or null.
+ * @param entry.protein - Protein in grams, or null.
+ * @param entry.carbs - Carbohydrates in grams, or null.
+ * @param entry.fat - Fat in grams, or null.
+ * @param entry.calories - Energy in kcal, or null.
+ * @param entry.errorMargin - Uncertainty of the figures, in percent.
+ * @param entry.takenAt - When it was eaten.
+ * @param entry.note - Optional free text.
+ * @returns The stored entry.
+ */
 export async function logMacrosIntake(
   userId: number,
   entry: {
@@ -50,6 +65,12 @@ export async function logMacrosIntake(
   return rows[0]
 }
 
+/**
+ * Lists intake entries from the last days, newest first, with a row cap.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param days - Length of the window in days (clamped by the caller to 365).
+ */
 export async function getMacrosHistory(
   userId: number,
   days = 30,
@@ -66,6 +87,13 @@ export async function getMacrosHistory(
   return rows
 }
 
+/**
+ * Deletes an intake entry.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entryId - Id of the entry.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteMacrosEntry(
   userId: number,
   entryId: number,

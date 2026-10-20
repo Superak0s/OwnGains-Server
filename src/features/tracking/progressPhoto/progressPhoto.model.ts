@@ -176,8 +176,26 @@ export async function encodeAvatar(photo: Buffer): Promise<Buffer> {
   }
 }
 
+/** Hex SHA-256 digest of a buffer, used as the photo content hash. */
 export const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex")
 
+/**
+ * Stores a progress photo: re-encodes it to a metadata-free JPEG, bakes a
+ * thumbnail, checks the user and instance quotas, and tags the muscle groups.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param photoBuffer - The uploaded image bytes.
+ * @param mimeType - Declared type (JPEG, PNG or WebP).
+ * @param meta - Photo details.
+ * @param meta.muscleGroups - Muscle groups the photo shows.
+ * @param meta.note - Optional free text.
+ * @param meta.angle - Which side or angle was photographed.
+ * @param meta.customSideName - Name for a custom angle, or null.
+ * @param meta.takenAt - When it was taken. Defaults to now.
+ * @returns The new `progress_photos.id`.
+ * @throws ValidationError for empty, oversized, undecodable or unsupported images.
+ * @throws AppError 503 `UPLOAD_BUSY` when no decode slot is free and 507 when storage is full.
+ */
 export async function uploadPhoto(
   userId: number,
   photoBuffer: Buffer,
@@ -312,6 +330,13 @@ export async function getAllPhotos(
   }
 }
 
+/**
+ * Lists a user's photos tagged with a muscle group, without the image data.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param muscleGroup - Muscle group to filter by.
+ * @param limit - Maximum photos to return.
+ */
 export async function getPhotosByMuscle(
   userId: number,
   muscleGroup: string,
@@ -330,10 +355,9 @@ export async function getPhotosByMuscle(
 
 /**
  * The stored content hash, without touching the blob: what lets a revalidation
- * (If-None-Match) be answered 304 from a metadata row. Null for a photo from
- * before hashes were stored until its first full read backfills it.
+ * (If-None-Match) be answered 304 from a metadata row.
  */
-export async function getPhotoHash(userId: number, photoId: number): Promise<string | null> {
+export async function getPhotoHash(userId: number, photoId: number): Promise<string> {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT content_hash AS hash FROM progress_photos WHERE id = ? AND user_id = ?`,
     [photoId, userId],
@@ -342,6 +366,14 @@ export async function getPhotoHash(userId: number, photoId: number): Promise<str
   return rows[0].hash
 }
 
+/**
+ * Loads the stored image of a photo.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param photoId - `progress_photos.id`.
+ * @returns The bytes, mime type and content hash.
+ * @throws NotFoundError when the photo is not the user's.
+ */
 export async function getPhotoImage(
   userId: number,
   photoId: number,
@@ -353,44 +385,28 @@ export async function getPhotoImage(
     [photoId, userId],
   )
   if (!rows[0]) throw new NotFoundError("Photo")
-  let hash: string | null = rows[0].hash
-  if (!hash) {
-    hash = sha256(rows[0].photoData)
-    await pool.execute(
-      `UPDATE progress_photos SET content_hash = ? WHERE id = ? AND content_hash IS NULL`,
-      [hash, photoId],
-    )
-  }
-  return { photoData: rows[0].photoData, mimeType: rows[0].mimeType, hash }
+  return { photoData: rows[0].photoData, mimeType: rows[0].mimeType, hash: rows[0].hash }
 }
 
-/**
- * The stored thumbnail, or null for a photo uploaded before thumbnails existed
- * (the caller builds it with buildMissingThumb under a decode slot).
- */
-export async function getPhotoThumb(userId: number, photoId: number): Promise<Buffer | null> {
+/** The stored thumbnail, written with the photo. */
+export async function getPhotoThumb(userId: number, photoId: number): Promise<Buffer> {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT t.data AS thumb FROM progress_photos p
-     LEFT JOIN progress_photo_thumbs t ON t.photo_id = p.id
+     JOIN progress_photo_thumbs t ON t.photo_id = p.id
      WHERE p.id = ? AND p.user_id = ?`,
     [photoId, userId],
   )
   if (!rows[0]) throw new NotFoundError("Photo")
-  return rows[0].thumb ?? null
+  return rows[0].thumb
 }
 
-/** Build a pre-thumbnail photo's thumb once, with the same bounded decode as an upload, and keep it. */
-export async function buildMissingThumb(userId: number, photoId: number): Promise<Buffer> {
-  const { photoData } = await getPhotoImage(userId, photoId)
-  await assertDecodable(photoData)
-  const thumb = await makeThumb(photoData)
-  await pool.execute(
-    `INSERT IGNORE INTO progress_photo_thumbs (photo_id, data) VALUES (?, ?)`,
-    [photoId, thumb],
-  )
-  return thumb
-}
-
+/**
+ * Deletes a photo with its image and tags.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param photoId - `progress_photos.id`.
+ * @returns False when nothing was deleted.
+ */
 export async function deletePhoto(
   userId: number,
   photoId: number,

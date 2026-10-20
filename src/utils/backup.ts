@@ -16,6 +16,7 @@ const NAME = /^owngains-\d{8}-\d{6}\.sql\.gz(\.age)?$/
 // mysqldump ends every dump with this comment, and a backup contains two dumps.
 const DONE_MARK = "-- Dump completed"
 
+/** Folder that holds backups: `BACKUP_DIR`, default `./backups`. */
 export const backupDir = (): string => process.env.BACKUP_DIR || "./backups"
 const retentionDays = (): number => envInt("BACKUP_RETENTION_DAYS", 30, 1)
 

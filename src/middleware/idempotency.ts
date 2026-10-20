@@ -25,6 +25,18 @@ const PENDING = 0
 const isDuplicate = (err: unknown) =>
   (err as { code?: string }).code === "ER_DUP_ENTRY"
 
+/**
+ * Makes a write route safe to replay. With an `Idempotency-Key` header, the
+ * first request runs and its 2xx response is stored for 48 hours. A replay
+ * gets the stored response, and a concurrent duplicate gets 409
+ * `IDEMPOTENCY_KEY_IN_FLIGHT`. Without the header it does nothing.
+ *
+ * @param req - Request carrying the optional header, scoped by user and trainer actor.
+ * @param res - Response whose `json` is wrapped to store or release the key.
+ * @param next - Called once this request owns the key.
+ * @throws ValidationError when the key is not 1 to 64 characters.
+ * @throws AppError 422 `IDEMPOTENCY_KEY_REUSED` when the key was used for a different route or body.
+ */
 export async function idempotent(req: Request, res: Response, next: NextFunction) {
   const key = req.get("Idempotency-Key")
   if (key === undefined) return next()

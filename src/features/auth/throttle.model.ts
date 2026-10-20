@@ -24,6 +24,7 @@ import { logger } from "@/utils/logger.js"
  * against new signins. Devices that already have a refresh token are unaffected.
  */
 
+/** What is being guarded: a signin attempt or a re-check of the password of a signed-in user. */
 export type ThrottleScope = "signin" | "reauth"
 
 const FREE_FAILURES = 5
@@ -35,6 +36,13 @@ const WINDOW_HOURS = 1
 const subjectHash = (subject: string): string =>
   createHash("sha256").update(subject.trim().toLowerCase()).digest("hex")
 
+/**
+ * Lockout length for a failure count: free up to 5, then 30s doubling per
+ * miss, capped at 15 minutes.
+ *
+ * @param failures - Consecutive failures inside the counting window.
+ * @returns Seconds to lock, or 0.
+ */
 export function lockSecondsFor(failures: number): number {
   if (failures <= FREE_FAILURES) return 0
   return Math.min(
@@ -43,6 +51,7 @@ export function lockSecondsFor(failures: number): number {
   )
 }
 
+/** Too many failed attempts (429 `AUTH_THROTTLED`). `retryAfter` is the remaining lock in seconds. */
 export class ThrottledError extends AppError {
   retryAfter: number
   constructor(retryAfter: number) {
@@ -70,6 +79,13 @@ export async function assertNotThrottled(
   if (rows[0]) throw new ThrottledError(Math.max(1, Number(rows[0].wait)))
 }
 
+/**
+ * Counts one failed attempt and locks the subject once the free allowance is
+ * used up. Occasionally sweeps stale rows.
+ *
+ * @param scope - Which guard the failure belongs to.
+ * @param subject - Username, email or user id. Hashed before storage, case-insensitive.
+ */
 export async function recordFailure(
   scope: ThrottleScope,
   subject: string,
@@ -89,7 +105,7 @@ export async function recordFailure(
     `SELECT failures FROM auth_throttle WHERE scope = ? AND subject_hash = ?`,
     [scope, hash],
   )
-  const lock = lockSecondsFor(Number(rows[0]!.failures))
+  const lock = lockSecondsFor(Number(rows[0].failures))
   if (lock > 0) {
     await pool.execute(
       `UPDATE auth_throttle SET locked_until = NOW() + INTERVAL ? SECOND
@@ -104,6 +120,11 @@ export async function recordFailure(
   if (Math.random() < 0.05) await purgeStaleThrottles(500)
 }
 
+/**
+ * Deletes counters idle for over a day that are no longer locked.
+ *
+ * @param limit - Maximum rows to delete in this call.
+ */
 export async function purgeStaleThrottles(limit = 5000): Promise<void> {
   await pool.execute(
     `DELETE FROM auth_throttle
@@ -113,6 +134,12 @@ export async function purgeStaleThrottles(limit = 5000): Promise<void> {
   )
 }
 
+/**
+ * Forgets the failures of a subject after a successful attempt.
+ *
+ * @param scope - Which guard to reset.
+ * @param subject - Same value that was passed to {@link recordFailure}.
+ */
 export async function clearFailures(
   scope: ThrottleScope,
   subject: string,

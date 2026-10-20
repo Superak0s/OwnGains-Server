@@ -1,6 +1,10 @@
 import { Request, Response, NextFunction } from "express"
 import { logger } from "../utils/logger.js"
 
+/**
+ * Base class for every error the API raises on purpose. The global
+ * {@link errorHandler} turns it into a JSON response with `statusCode`.
+ */
 export class AppError extends Error {
   statusCode: number
   details: unknown
@@ -22,30 +26,35 @@ export class AppError extends Error {
   }
 }
 
+/** A malformed or out-of-range request (400). */
 export class ValidationError extends AppError {
   constructor(message: string, details: unknown = null, code?: string) {
     super(message, 400, details, code)
   }
 }
 
+/** A missing resource (404). The message reads `<resource> not found`. */
 export class NotFoundError extends AppError {
   constructor(resource = "Resource") {
     super(`${resource} not found`, 404)
   }
 }
 
+/** Missing, invalid or revoked credentials (401). */
 export class UnauthorizedError extends AppError {
   constructor(message = "Unauthorized", code?: string) {
     super(message, 401, null, code)
   }
 }
 
+/** Authenticated, but not allowed to do this (403). */
 export class ForbiddenError extends AppError {
   constructor(message = "Access denied", code?: string) {
     super(message, 403, null, code)
   }
 }
 
+/** The request clashes with current state, such as a duplicate (409). */
 export class ConflictError extends AppError {
   constructor(message: string, code?: string, details: unknown = null) {
     super(message, 409, details, code)
@@ -86,6 +95,12 @@ const RETRYABLE_DB_CODES = new Set([
 ])
 const DB_RETRY_AFTER_S = 5
 
+/**
+ * Whether an error means the database is overloaded or briefly unreachable.
+ *
+ * @param err - Any thrown value, usually a mysql2 error.
+ * @returns True when the client should back off and retry (503).
+ */
 export function isDbUnavailableError(err: unknown): boolean {
   const e = err as { errno?: number; code?: string; message?: string }
   // mysql2 raises a plain Error with no code when the pool's queue is full.
@@ -106,6 +121,17 @@ interface ErrorResponse {
   stack?: string
 }
 
+/**
+ * Express error middleware and the last stop of every request. Answers with a
+ * `{ success: false, error }` body, masks internal details for 5xx in
+ * production, and maps multer, out-of-range and DB-overload errors to their
+ * own statuses.
+ *
+ * @param err - The thrown or forwarded error.
+ * @param req - The failed request, used for logging and `reqId`.
+ * @param res - The response to answer on.
+ * @param _next - Only called when headers were already sent.
+ */
 export function errorHandler(
   err: AppError | Error,
   req: Request,

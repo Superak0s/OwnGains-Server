@@ -25,14 +25,14 @@ describe("bodyStats routes", () => {
       .set(auth(u.token))
       .send({ weightKg: 70.5 })
     expect(ok.status).toBe(201)
-    const id = ok.body.id
+    const id = ok.body.data.id
 
     const current = await request(app).get("/api/tracking/bodystats/weight/current").set(auth(u.token))
-    expect(current.body.entry).not.toBeNull()
-    expect(current.body.entry.value).toBe(70.5)
+    expect(current.body.data).not.toBeNull()
+    expect(current.body.data.value).toBe(70.5)
 
     const history = await request(app).get("/api/tracking/bodystats/weight?limit=5").set(auth(u.token))
-    expect(history.body.entries.length).toBe(1)
+    expect(history.body.data.length).toBe(1)
 
     const del = await request(app).delete(`/api/tracking/bodystats/weight/${id}`).set(auth(u.token))
     expect(del.status).toBe(200)
@@ -54,13 +54,13 @@ describe("bodyStats routes", () => {
       .set(auth(u.token))
       .send({ percentage: 21.4, measurements: null, measuredAt: "2026-01-05T07:00:00.000Z" })
     expect(pctOnly.status).toBe(201)
-    expect(pctOnly.body.entry.measurements).toMatchObject({ waist: null, neck: null, hip: null })
+    expect(pctOnly.body.data.measurements).toMatchObject({ waist: null, neck: null, hip: null })
     const pctOnlyHistory = await request(app).get("/api/tracking/bodystats/bodyfat/log").set(auth(u.token))
-    expect(pctOnlyHistory.body.entries[0]).toMatchObject({
+    expect(pctOnlyHistory.body.data[0]).toMatchObject({
       percentage: 21.4,
       measurements: { waist: null, neck: null, hip: null },
     })
-    await request(app).delete(`/api/tracking/bodystats/bodyfat/log/${pctOnly.body.entry.id}`).set(auth(u.token))
+    await request(app).delete(`/api/tracking/bodystats/bodyfat/log/${pctOnly.body.data.id}`).set(auth(u.token))
 
     const badPct = await request(app)
       .post("/api/tracking/bodystats/bodyfat/log")
@@ -85,10 +85,10 @@ describe("bodyStats routes", () => {
       .set(auth(u.token))
       .send({ percentage: 15, measurements: { waist: 80, neck: 38, unit: "cm" } })
     expect(ok.status).toBe(201)
-    const id = ok.body.entry.id
+    const id = ok.body.data.id
 
     const history = await request(app).get("/api/tracking/bodystats/bodyfat/log").set(auth(u.token))
-    expect(history.body.entries.length).toBe(1)
+    expect(history.body.data.length).toBe(1)
 
     const del = await request(app).delete(`/api/tracking/bodystats/bodyfat/log/${id}`).set(auth(u.token))
     expect(del.status).toBe(200)

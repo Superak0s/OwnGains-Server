@@ -357,9 +357,9 @@ describe("auth routes", () => {
       },
     })
     const sup = await post("/api/tracking/supplements", { name: "Creatine" })
-    await post(`/api/tracking/supplements/${sup.body.supplement.id}/log`, { amount: 5 })
+    await post(`/api/tracking/supplements/${sup.body.data.id}/log`, { amount: 5 })
     const sore = await post("/api/tracking/soreness", { muscleGroup: "chest", intensity: 5 })
-    await post(`/api/tracking/soreness/${sore.body.data.id}/follow-ups`, { intensity: 2, status: "better" })
+    await post("/api/tracking/soreness/follow-ups", { updates: [{ sorenessId: sore.body.data.id, intensity: 2, status: "better" }] })
 
     // Someone else's rows in the same child tables must stay out.
     const other = await signup("expot")

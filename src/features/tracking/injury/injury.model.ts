@@ -55,6 +55,18 @@ const INJURY_COLS = `id, muscle_group AS muscleGroup, injury_type AS injuryType,
        recovery_date AS recoveryDate, note, status,
        created_at AS createdAt, updated_at AS updatedAt`
 
+/**
+ * Records an injury.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param muscleGroup - Affected muscle group.
+ * @param injuryType - One of the allowed injury types.
+ * @param painLevel - Pain level at the start.
+ * @param startDate - When the injury began.
+ * @param note - Optional free text.
+ * @returns The stored injury.
+ * @throws ValidationError for an unknown injury type.
+ */
 export async function logInjury(
   userId: number,
   muscleGroup: string,
@@ -100,6 +112,7 @@ async function getInjuryById(
   return rows[0]
 }
 
+/** Narrowing options for listing injuries. */
 export interface InjuryFilter {
   /** Only this muscle group. */
   muscle?: string
@@ -109,9 +122,8 @@ export interface InjuryFilter {
 
 /**
  * The injury list, optionally narrowed by muscle and/or to unhealed ones.
- * GET /, /active and /muscle/:muscle were three functions that differed only
- * in the WHERE clause. They all come through here now, and GET / takes the
- * filters as ?muscle= and ?status=active. Four fixed statement shapes at most.
+ * GET / takes the filters as ?muscle= and ?status=active. Four fixed
+ * statement shapes at most.
  */
 export async function listInjuries(
   userId: number,
@@ -196,6 +208,13 @@ export async function updateInjury(
   }
 }
 
+/**
+ * Deletes an injury.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param injuryId - Id of the injury.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteInjury(
   userId: number,
   injuryId: number,

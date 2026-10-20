@@ -22,18 +22,16 @@ describe("soreness routes", () => {
     expect(history.body.data[0].muscleGroup).toBe("chest")
     expect(history.body.data[0].followUps).toEqual([])
 
-    const active = await request(app).get("/api/tracking/soreness/active").set(auth(u.token))
+    const active = await request(app).get("/api/tracking/soreness?status=active").set(auth(u.token))
     expect(active.body.data.length).toBe(1)
   })
 
-  // The follow-up endpoints used to be a second feature (/api/tracking/doms)
-  // over the same table. They are these two routes now.
-  it("records follow-ups, singly and in a batch", async () => {
+  it("records follow-ups", async () => {
     const one = await request(app)
-      .post(`/api/tracking/soreness/${entryId}/follow-ups`)
+      .post("/api/tracking/soreness/follow-ups")
       .set(auth(u.token))
-      .send({ intensity: 3, status: "better" })
-    expect(one.status).toBe(201)
+      .send({ updates: [{ sorenessId: entryId, intensity: 3, status: "better" }] })
+    expect(one.status).toBe(200)
 
     const batch = await request(app)
       .post("/api/tracking/soreness/follow-ups")
@@ -42,9 +40,9 @@ describe("soreness routes", () => {
     expect(batch.status).toBe(200)
 
     const bad = await request(app)
-      .post(`/api/tracking/soreness/${entryId}/follow-ups`)
+      .post("/api/tracking/soreness/follow-ups")
       .set(auth(u.token))
-      .send({ intensity: 11, status: "better" })
+      .send({ updates: [{ sorenessId: entryId, intensity: 11, status: "better" }] })
     expect(bad.status).toBe(400)
 
     const history = await request(app).get("/api/tracking/soreness").set(auth(u.token))
@@ -77,10 +75,10 @@ describe("soreness routes", () => {
 
     // Recover one. The rest remain active.
     await request(app)
-      .post(`/api/tracking/soreness/${a.body.data.id}/follow-ups`)
+      .post("/api/tracking/soreness/follow-ups")
       .set(auth(s.token))
-      .send({ intensity: 0, status: "recovered" })
-      .expect(201)
+      .send({ updates: [{ sorenessId: a.body.data.id, intensity: 0, status: "recovered" }] })
+      .expect(200)
 
     const res = await request(app).get("/api/tracking/soreness/stats").set(auth(s.token))
     expect(res.status).toBe(200)
@@ -136,23 +134,19 @@ describe("soreness routes", () => {
     expect(cleared.body.data[0]).toMatchObject({ note: null, status: "recovering" })
 
     const longNote = await request(app)
-      .post(`/api/tracking/soreness/${id}/follow-ups`)
+      .post("/api/tracking/soreness/follow-ups")
       .set(auth(f.token))
-      .send({ intensity: 1, status: "better", note: "x".repeat(1001) })
+      .send({ updates: [{ sorenessId: id, intensity: 1, status: "better", note: "x".repeat(1001) }] })
     expect(longNote.status).toBe(400)
   })
 
-  it("lists by muscle, by path or by ?muscle=", async () => {
+  it("lists by ?muscle=", async () => {
     const s2 = await signup("sormu")
     for (const muscleGroup of ["quads", "quads", "calves"])
       await request(app)
         .post("/api/tracking/soreness")
         .set(auth(s2.token))
         .send({ muscleGroup, intensity: 4 })
-
-    const byPath = await request(app).get("/api/tracking/soreness/muscle/quads").set(auth(s2.token))
-    expect(byPath.status).toBe(200)
-    expect(byPath.body.data).toHaveLength(2)
 
     const byQuery = await request(app).get("/api/tracking/soreness?muscle=calves").set(auth(s2.token))
     expect(byQuery.body.data.map((e: { muscleGroup: string }) => e.muscleGroup)).toEqual(["calves"])

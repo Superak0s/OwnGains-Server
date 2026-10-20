@@ -16,6 +16,7 @@ const simpleTimeToMySQL = (t: string): string => {
   return `${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`
 }
 
+/** A supplement a user tracks, as returned to the client. */
 export interface Supplement extends RowDataPacket {
   id: number
   name: string
@@ -65,6 +66,23 @@ function withBooleans(row: Supplement): Supplement {
   return row
 }
 
+/**
+ * Creates a supplement.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param fields - Supplement settings. Only `name` is required.
+ * @param fields.name - Display name.
+ * @param fields.unit - Dose unit, such as `g` or `mg` (default `g`).
+ * @param fields.defaultAmount - Amount pre-filled when logging a dose (default 5).
+ * @param fields.dosesPerDay - How many doses make a full day (default 1).
+ * @param fields.doseIntervalMinutes - Minimum minutes between doses, or null for no spacing (default null).
+ * @param fields.reminderEnabled - Whether a reminder fires (default false).
+ * @param fields.reminderTime - Reminder time as `HH:MM`, or null (default null).
+ * @param fields.color - Display color, or null (default null).
+ * @param fields.icon - Icon name, or null (default null).
+ * @returns The new `supplements.id`.
+ * @throws ValidationError `SUPPLEMENT_LIMIT` at 100 supplements.
+ */
 export async function createSupplement(
   userId: number,
   fields: {
@@ -126,6 +144,13 @@ export async function createSupplement(
   return result.insertId
 }
 
+/**
+ * Loads one supplement.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @returns The supplement, or null when it is not the user's.
+ */
 export async function getSupplementById(
   userId: number,
   supplementId: number,
@@ -240,6 +265,13 @@ function streakFromDays(days: string[]): number {
   return streak
 }
 
+/**
+ * Updates the given settings of a supplement. Omitted fields stay unchanged.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @param fields - Same properties as in {@link createSupplement}, all optional.
+ */
 export async function updateSupplement(
   userId: number,
   supplementId: number,
@@ -290,6 +322,13 @@ export async function updateSupplement(
   )
 }
 
+/**
+ * Deletes a supplement and, by cascade, its intake history.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteSupplement(
   userId: number,
   supplementId: number,
@@ -302,6 +341,16 @@ export async function deleteSupplement(
   return result.affectedRows > 0
 }
 
+/**
+ * Records a dose.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @param amount - Amount taken, in the supplement's unit.
+ * @param takenAt - When it was taken. Defaults to now.
+ * @param note - Optional free text.
+ * @returns The new `supplement_intake.id`.
+ */
 export async function logSupplement(
   userId: number,
   supplementId: number,
@@ -323,6 +372,13 @@ export async function logSupplement(
   return result.insertId
 }
 
+/**
+ * Finds the latest dose logged today.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @returns That dose, or null when none was logged today.
+ */
 export async function hasTakenTodayServer(
   userId: number,
   supplementId: number,
@@ -337,6 +393,13 @@ export async function hasTakenTodayServer(
   return rows[0] ?? null
 }
 
+/**
+ * Lists recent doses, newest first.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @param limit - Maximum rows to return.
+ */
 export async function getHistory(
   userId: number,
   supplementId: number,
@@ -351,6 +414,13 @@ export async function getHistory(
   return rows
 }
 
+/**
+ * Counts consecutive days with a dose, looking back at most 366 days.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id`.
+ * @returns The streak length in days.
+ */
 export async function getStreak(
   userId: number,
   supplementId: number,
@@ -368,6 +438,14 @@ export async function getStreak(
   return streakFromDays(rows.map((r) => r.day))
 }
 
+/**
+ * Deletes one logged dose.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param supplementId - `supplements.id` the dose must belong to.
+ * @param entryId - `supplement_intake.id`.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteLogEntry(
   userId: number,
   supplementId: number,

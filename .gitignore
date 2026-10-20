@@ -50,3 +50,6 @@ backups/
 
 # sonarqube.py output
 scripts/sonarqube/
+
+# Firebase service-account key for FCM_SERVICE_ACCOUNT
+firebase-key.json

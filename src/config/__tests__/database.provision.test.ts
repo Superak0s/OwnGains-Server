@@ -43,6 +43,21 @@ async function load(env: Record<string, string | undefined> = {}): Promise<Db> {
   return db
 }
 
+// No real migration ships, so the runner gets a fixture: re-adding a column
+// schema.sql already has, which a re-run counts as done (ER_DUP_FIELDNAME).
+const FIXTURE = "001_fixture.sql"
+const FIXTURE_SQL = "ALTER TABLE users ADD COLUMN disabled_reason VARCHAR(500) DEFAULT NULL"
+const readReal = fs.readFileSync
+const readdirReal = fs.readdirSync
+function withFixtureMigration(sql = FIXTURE_SQL, edit = (_path: string, text: string) => text) {
+  vi.spyOn(fs, "readdirSync").mockImplementation(((p: fs.PathLike, o?: unknown) => {
+    const names = readdirReal(p, o as BufferEncoding)
+    return String(p).endsWith("migrations") ? [...names, FIXTURE] : names
+  }) as typeof fs.readdirSync)
+  vi.spyOn(fs, "readFileSync").mockImplementation(((p: fs.PathOrFileDescriptor, o?: unknown) =>
+    String(p).endsWith(FIXTURE) ? sql : edit(String(p), readReal(p, o as BufferEncoding))) as typeof fs.readFileSync)
+}
+
 const migrations = async (db: Db) => {
   const [rows] = await db.pool.query<RowDataPacket[]>("SELECT name FROM _migrations ORDER BY name")
   return rows.map((r) => r.name as string)
@@ -90,18 +105,15 @@ afterAll(async () => {
 describe.skipIf(!canCreate)(`database provisioning (needs CREATE on ${scratch})`, () => {
   it("creates a fresh database, stamps every migration, then applies only unrecorded ones", async () => {
     // schema.sql never contains USE, but a hand-edited one must not switch databases.
-    const read = fs.readFileSync
-    vi.spyOn(fs, "readFileSync").mockImplementation(((p: fs.PathOrFileDescriptor, o?: unknown) => {
-      const text = read(p, o as BufferEncoding)
-      return String(p).endsWith("schema.sql") ? `USE elsewhere;\n${text}` : text
-    }) as typeof fs.readFileSync)
+    withFixtureMigration(FIXTURE_SQL, (p, text) => (p.endsWith("schema.sql") ? `USE elsewhere;\n${text}` : text))
 
     let db = await load()
     await db.testDatabaseConnection()
     expect(exit).not.toHaveBeenCalled()
     const all = await migrations(db)
-    expect(all.length).toBeGreaterThan(0)
+    expect(all).toEqual([FIXTURE])
     vi.restoreAllMocks()
+    withFixtureMigration()
     exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
 
     // The column is already there, so the re-run's ER_DUP_FIELDNAME counts as done.
@@ -114,11 +126,9 @@ describe.skipIf(!canCreate)(`database provisioning (needs CREATE on ${scratch})`
 
   it("names the migration that failed, and exits", async () => {
     const db = await load()
-    const [last] = (await migrations(db)).slice(-1)
+    const last = FIXTURE
     await db.pool.query("DELETE FROM _migrations WHERE name = ?", [last])
-    const read = fs.readFileSync
-    vi.spyOn(fs, "readFileSync").mockImplementation(((p: fs.PathOrFileDescriptor, o?: unknown) =>
-      String(p).endsWith(last!) ? "FAIL_NO_CODE" : read(p, o as BufferEncoding)) as typeof fs.readFileSync)
+    withFixtureMigration("FAIL_NO_CODE")
     interceptConnections(db, (sql) => (sql === "FAIL_NO_CODE" ? Promise.reject(new Error("boom")) : undefined))
     const err = vi.spyOn(console, "error").mockImplementation(() => {})
 

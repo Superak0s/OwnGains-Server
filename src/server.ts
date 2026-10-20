@@ -47,7 +47,7 @@ const trustProxyHops = envInt("TRUST_PROXY_HOPS", 0)
 
 import { testDatabaseConnection, pool } from "./config/database.js"
 import { createWsServer, closeWsServer } from "./ws/wsServer.js"
-import { registerRoutes, localOnlyFeatures } from "./routes.js"
+import { registerRoutes, localOnlyFeatures, currentDisabledFeatures } from "./routes.js"
 import { errorHandler } from "./middleware/errorHandler.js"
 import { authenticateToken } from "./middleware/auth.js"
 
@@ -62,6 +62,7 @@ declare global {
   }
 }
 
+/** The Express app, exported for tests. */
 export const app = express()
 const PORT = process.env.PORT || 5000
 
@@ -242,6 +243,13 @@ for (const path of ["/api/program/upload", "/api/sharing/permissions"])
     largeBodyLimiter,
     express.json({ limit: "2mb" }),
   )
+// One encrypted progress photo per request, capped at 3 MB of base64 by the route.
+app.use(
+  "/api/sharing/tracking/messages",
+  authenticateToken,
+  largeBodyLimiter,
+  express.json({ limit: "4mb" }),
+)
 app.use(express.json({ limit: "50kb" }))
 
 // express.json leaves req.body undefined when no body (or no Content-Type)
@@ -292,6 +300,7 @@ app.get("/healthz", async (_req: Request, res: Response) => {
     status: "OK",
     fqdn: process.env.SERVER_FQDN || null,
     localOnlyFeatures,
+    disabledFeatures: currentDisabledFeatures(),
     minAppVersion,
   })
 })
@@ -331,6 +340,11 @@ const mdnsEnabled = envBool("MDNS_ENABLED", true)
 // on a machine with Docker/WSL/VirtualBox/Hyper-V adapters it can bind
 // multicast to one of those instead, so the announcement never reaches the
 // actual Wi-Fi/Ethernet network.
+/**
+ * Picks the address of a physical LAN adapter for mDNS, skipping virtual ones.
+ *
+ * @returns The IPv4 address, or undefined when none is found.
+ */
 export function getLanInterface(): string | undefined {
   const virtualAdapter = /loopback|vEthernet|VirtualBox|Virtual|VPN|Tailscale|ZeroTier|Docker/i
   for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
@@ -347,6 +361,7 @@ export function getLanInterface(): string | undefined {
 let bonjour: Bonjour | undefined
 let mdnsService: Service | undefined
 
+/** Connects the database, then starts the HTTP and WebSocket servers and mDNS. */
 export async function start() {
   await testDatabaseConnection()
   createWsServer(server)
@@ -388,6 +403,11 @@ export async function start() {
 
 let shuttingDown = false
 
+/**
+ * Drains and stops the server, then exits. Safe to call more than once.
+ *
+ * @param exitCode - Process exit code.
+ */
 export function shutdown(exitCode: number) {
   // SIGTERM followed by SIGINT (or a signal during a crash) used to run the
   // whole teardown twice: a second server.close() errors, and a second

@@ -48,15 +48,25 @@ const KNOWN_LOCAL_ONLY = ["tracking", "supplements"] as const
  * same list rather than re-parsing the variable its own way.
  */
 export function readLocalOnlyFeatures(): string[] {
-  return (process.env.LOCAL_ONLY_FEATURES ?? "")
+  return readFeatureList("LOCAL_ONLY_FEATURES", KNOWN_LOCAL_ONLY)
+}
+
+// Features a deployment can switch off entirely. The app hides them.
+const KNOWN_DISABLEABLE = ["messages"] as const
+
+/** DISABLED_FEATURES, validated and lowercased the same way as LOCAL_ONLY_FEATURES. */
+export function readDisabledFeatures(): string[] {
+  return readFeatureList("DISABLED_FEATURES", KNOWN_DISABLEABLE)
+}
+
+function readFeatureList(name: string, known: readonly string[]): string[] {
+  return (process.env[name] ?? "")
     .split(",")
     .map((f) => f.trim().toLowerCase())
     .filter(Boolean)
     .map((f) => {
-      if (!(KNOWN_LOCAL_ONLY as readonly string[]).includes(f))
-        throw new Error(
-          `LOCAL_ONLY_FEATURES: unknown feature "${f}". Accepted values are: ${KNOWN_LOCAL_ONLY.join(", ")}`,
-        )
+      if (!known.includes(f))
+        throw new Error(`${name}: unknown feature "${f}". Accepted values are: ${known.join(", ")}`)
       return f
     })
 }

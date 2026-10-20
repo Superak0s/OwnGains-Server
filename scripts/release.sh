@@ -27,12 +27,13 @@ ${B}Usage:${R} scripts/release.sh [options]
 
   ${CYN}--no-push${R}         Skip the git commit/push/tag/GitHub release. The image is
                     still built and pushed, and the version bump stays local and uncommitted.
-  ${CYN}--no-test${R}         Skip vitest in the pre-build verification. Typecheck still runs.
+  ${CYN}--no-test${R}         Skip the local CI run (act) in the pre-build verification.
+                    Typecheck still runs.
   ${CYN}--no-docker-push${R}  Build the image but don't push it to Docker Hub.
   ${CYN}-h, --help${R}        Show this help.
 
 ${DIM}Steps: [0] origin/main sync check, [1] version + changelog, [2] typecheck +
-vitest, [3] docker build, [4] git commit/push/tag + GitHub release, [5] docker push.
+.github/workflows/ci.yml run locally by act, [3] docker build, [4] git commit/push/tag + GitHub release, [5] docker push.
 When the version is bumped, [Unreleased] in CHANGELOG.md is renamed to the new
 version and becomes the GitHub release notes. An empty [Unreleased] is left alone
 and the release gets default notes. A failed or Ctrl+C'd run before [4] reverts
@@ -54,6 +55,10 @@ for arg in "$@"; do
 done
 
 docker info >/dev/null 2>&1 || die "Docker is not running."
+# Checked before any prompt, so a missing act doesn't cost a version choice.
+if [ "$SKIP_TESTS" = false ] && ! command -v act >/dev/null 2>&1; then
+    die "act is not installed (winget install nektos.act). Or pass --no-test."
+fi
 
 cd "$SERVER_DIR"
 
@@ -164,15 +169,18 @@ ok "Version $CURRENT_VERSION -> ${B}$NEW_VERSION${R}"
 
 # [2/5] Verify
 if [ "$SKIP_TESTS" = true ]; then
-    step 2/5 "Verifying: typecheck (vitest skipped by --no-test)"
+    step 2/5 "Verifying: typecheck (CI run skipped by --no-test)"
 else
-    step 2/5 "Verifying: typecheck + vitest"
+    step 2/5 "Verifying: typecheck + CI under act"
 fi
 bunx tsc --noEmit
 ok "typecheck"
+# The GitHub workflow itself (fresh install, build, vitest on MariaDB 11.4 in
+# Linux), so a push doesn't turn up a CI failure that a local run missed.
+# act copies the working tree, uncommitted changes included, minus .gitignore.
 if [ "$SKIP_TESTS" = false ]; then
-    bun run test
-    ok "vitest"
+    act push -j test --rm -P ubuntu-latest=catthehacker/ubuntu:act-latest
+    ok "CI (act)"
 fi
 
 # [3/5] Build Docker image

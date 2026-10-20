@@ -41,7 +41,7 @@ describe("macros routes", () => {
   // Macro goals are /api/settings keys now, not PUT /api/tracking/macros/goals.
   it("lists, updates goals, and deletes", async () => {
     const history = await request(app).get("/api/tracking/macros/log?days=7").set(auth(u.token))
-    expect(history.body.entries.length).toBe(1)
+    expect(history.body.data.length).toBe(1)
 
     const bad = await request(app)
       .patch("/api/settings")
@@ -75,7 +75,7 @@ describe("macros routes", () => {
     const first = await send()
     const replay = await send()
     expect(first.status).toBe(201)
-    expect(replay.body.entry.id).toBe(first.body.entry.id)
+    expect(replay.body.data.id).toBe(first.body.data.id)
 
     const list = await request(app).get("/api/tracking/macros/log?days=2").set(auth(u.token))
     expect(list.body.data.filter((e: { name: string }) => e.name === "snack")).toHaveLength(1)

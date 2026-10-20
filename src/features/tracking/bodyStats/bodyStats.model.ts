@@ -14,6 +14,17 @@ import {
 
 // ─── Body fat percentage (US Navy formula) ────────────────────────────────────
 
+/**
+ * Estimates body fat percentage from tape measurements (U.S. Navy method).
+ *
+ * @param gender - Selects the formula. Women also need `hipCm`.
+ * @param heightCm - Height in centimetres.
+ * @param waistCm - Waist circumference in centimetres.
+ * @param neckCm - Neck circumference in centimetres.
+ * @param hipCm - Hip circumference in centimetres (female formula only).
+ * @returns Estimated body fat percentage.
+ * @throws ValidationError for a missing or non-positive measurement.
+ */
 export function calculateBodyFatPercentage(
   gender: "male" | "female",
   heightCm: number,
@@ -73,6 +84,17 @@ const BODY_FAT_PIVOT = {
 
 const BODY_FAT_METRICS = Object.values(BODY_FAT_PIVOT)
 
+/**
+ * Stores a body fat reading and the circumferences it came from as one measuring session.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param percentage - Body fat percentage.
+ * @param waistCm - Waist circumference, or null.
+ * @param neckCm - Neck circumference, or null.
+ * @param hipCm - Hip circumference, or null.
+ * @param measuredAt - When the measurement was taken.
+ * @returns The stored entry.
+ */
 export async function logBodyFat(
   userId: number,
   percentage: number,
@@ -99,6 +121,12 @@ export async function logBodyFat(
   }
 }
 
+/**
+ * Lists body fat entries, newest first.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param limit - Maximum entries to return.
+ */
 export async function getBodyFatHistory(
   userId: number,
   limit = 90,
@@ -123,6 +151,13 @@ export async function getBodyFatHistory(
   }))
 }
 
+/**
+ * Deletes a body fat entry together with its circumferences.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entryId - Id of the entry.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteBodyFatEntry(
   userId: number,
   entryId: number,

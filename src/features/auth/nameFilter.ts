@@ -9,11 +9,11 @@ const EMBEDDED = [
 
 // Refused only as a whole word, since they also occur inside real names
 // ("Hancock", "Grapes", "Spicer", "Analise", "Cumberland").
-const WHOLE = [
+const WHOLE = new Set([
   "fuk", "fck", "cock", "dick", "prick", "rape", "pedo", "paedo", "fag", "spic",
   "chink", "kike", "gook", "nazi", "kkk", "cum", "anal", "boob", "boobs", "tits",
   "penis", "sex", "nude", "milf", "xxx", "gamw", "gamo", "mouni",
-]
+])
 
 const LEET: Record<string, string> = {
   "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
@@ -42,8 +42,13 @@ function words(value: string): string[] {
 }
 
 // ponytail: a fixed word list, so misspellings and non-Latin scripts get through. Reports cover the rest.
+/**
+ * Whether a string contains a banned word, either as a whole word or inside another one.
+ *
+ * @param value - Username or display name to test.
+ */
 export function containsBannedWord(value: string): boolean {
-  return words(value).some((w) => WHOLE.includes(w) || EMBEDDED.some((b) => w.includes(b)))
+  return words(value).some((w) => WHOLE.has(w) || EMBEDDED.some((b) => w.includes(b)))
 }
 
 /** Letters (any script), digits, single inner spaces and . ' - _ */
@@ -56,6 +61,14 @@ export function displayNameError(name: string): string | null {
   return null
 }
 
+/**
+ * Why a username is refused by the word filter.
+ *
+ * @param username - Candidate username.
+ * @returns An error message, or null when it is allowed.
+ */
 export function usernameError(username: string): string | null {
+  // Demo accounts are named demo_<name>_<hex>, so nobody else may look like one.
+  if (/demo/i.test(username)) return "Username can't contain \"demo\""
   return containsBannedWord(username) ? "Username contains a word that isn't allowed" : null
 }

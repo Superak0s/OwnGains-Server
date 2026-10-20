@@ -16,3 +16,6 @@ coverage
 uploads/*
 !uploads/.gitkeep
 backups/
+
+# Firebase service-account key for FCM_SERVICE_ACCOUNT
+firebase-key.json

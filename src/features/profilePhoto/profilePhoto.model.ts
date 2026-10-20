@@ -35,6 +35,11 @@ async function firstPhoto(where: string, params: (string | number)[]): Promise<P
   return { data: rows[0].data, hash: rows[0].hash }
 }
 
+/**
+ * Loads a user's own profile photo.
+ *
+ * @param userId - Numeric id of the owner.
+ */
 export const getProfilePhoto = (userId: number) => firstPhoto("u.id = ?", [userId])
 
 /** Only the owner and accepted friends can see a photo. Anyone else gets the same 404 as no photo. */

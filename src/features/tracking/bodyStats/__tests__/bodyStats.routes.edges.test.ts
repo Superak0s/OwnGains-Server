@@ -40,7 +40,7 @@ describe("bodyfat log tape checks", () => {
       measurements: { waist: 30, neck: 13, hip: 38, unit: "in" },
     })
     expect(res.status).toBe(201)
-    expect(res.body.entry.measurements.hip).toBeCloseTo(96.52)
+    expect(res.body.data.measurements.hip).toBeCloseTo(96.52)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("Body fat calculation mismatch"))
   })
 
@@ -54,6 +54,6 @@ describe("bodyfat log tape checks", () => {
   it("skips the cross-check for a profile without a height", async () => {
     const res = await log(noHeight.token, { percentage: 18, measurements: { waist: 80, neck: 38 } })
     expect(res.status).toBe(201)
-    expect(res.body.entry.measurements.hip).toBeNull()
+    expect(res.body.data.measurements.hip).toBeNull()
   })
 })

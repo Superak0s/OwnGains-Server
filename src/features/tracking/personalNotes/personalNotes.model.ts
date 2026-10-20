@@ -24,6 +24,15 @@ function requireContent(content: unknown): string {
   return requireOptionalNote(content.trim(), "content")!
 }
 
+/**
+ * Adds a note to a muscle group.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param muscleGroup - Muscle group the note is about.
+ * @param content - Note text.
+ * @returns The stored note.
+ * @throws ValidationError when the muscle group is missing.
+ */
 export async function createNote(
   userId: number,
   muscleGroup: string,
@@ -48,6 +57,13 @@ async function getNoteById(userId: number, noteId: number): Promise<MuscleNote> 
   return rows[0]
 }
 
+/**
+ * Lists the notes of one muscle group.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param muscleGroup - Muscle group to filter by.
+ * @param limit - Maximum notes to return.
+ */
 export async function getNotesByMuscle(
   userId: number,
   muscleGroup: string,
@@ -61,6 +77,13 @@ export async function getNotesByMuscle(
   return rows
 }
 
+/**
+ * Deletes a note.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param noteId - Id of the note.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteNote(
   userId: number,
   noteId: number,

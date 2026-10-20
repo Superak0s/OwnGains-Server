@@ -50,8 +50,8 @@ describe("wsServer", () => {
 
   async function makeUser(username?: string): Promise<{ userId: string; token: string }> {
     const id = await createUser(
-      username ?? uniqueName("ws"),
-      `${uniqueName("ws")}@test.local`,
+      username ?? uniqueName("wsk"),
+      `${uniqueName("wsk")}@test.local`,
       "Passw0rd-123",
     )
     const userId = (await findUserById(id))!.uuid

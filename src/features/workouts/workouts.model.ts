@@ -40,6 +40,7 @@ interface SetTiming {
   machineName: string | null
 }
 
+/** A workout as sent to clients. `userId` is the owner's uuid. `setTimings` is empty unless sets were requested. */
 export interface Session {
   id: number
   /** Owner's uuid. */
@@ -54,6 +55,9 @@ export interface Session {
   completedSets: number
   split: string | null
   isDemo: boolean
+  /** Uuid of the trainer who logged it for the owner, or null. */
+  loggedByTrainerId: string | null
+  loggedByTrainerUsername: string | null
   userName: string
   setTimings: SetTiming[]
 }
@@ -84,6 +88,7 @@ const WORKOUT_COLS = `w.id, wu.uuid AS userId, w.day_number AS dayNumber,
   w.day_title AS dayTitle, w.start_time AS startTime,
   w.end_time AS endTime, w.total_duration AS totalDuration,
   w.completed_sets AS completedSets, w.split, w.is_demo AS isDemo,
+  lt.uuid AS loggedByTrainerId, lt.username AS loggedByTrainerUsername,
   pd.primary_muscles AS primaryMuscles, pd.secondary_muscles AS secondaryMuscles`
 
 // LEFT, not INNER: program_day_id is ON DELETE SET NULL, so a workout whose
@@ -91,6 +96,7 @@ const WORKOUT_COLS = `w.id, wu.uuid AS userId, w.day_number AS dayNumber,
 // `wu` supplies the owner's uuid, the only user id a response may include.
 const WORKOUT_FROM = `FROM workouts w
   JOIN users wu ON wu.id = w.user_id
+  LEFT JOIN users lt ON lt.id = w.logged_by_trainer_id
   LEFT JOIN program_days pd ON w.program_day_id = pd.id`
 
 /**
@@ -262,6 +268,18 @@ export async function findProgramDayId(
   return rows[0]?.id ?? null
 }
 
+/**
+ * Starts a workout, linked to the matching program day when one exists.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param dayNumber - Program day being trained.
+ * @param dayTitle - Title of that day.
+ * @param startTime - Start timestamp. Defaults to now.
+ * @param isDemo - Marks demo data, which is excluded from sharing.
+ * @param split - Name of the program split, or null.
+ * @param loggedByTrainerId - Numeric id of the trainer starting it with `X-Trainee-Id`, or null.
+ * @returns The new `workouts.id`.
+ */
 export async function createSession(
   userId: number,
   dayNumber: number,
@@ -269,11 +287,12 @@ export async function createSession(
   startTime: Timestamp | null = null,
   isDemo = false,
   split: string | null = null,
+  loggedByTrainerId: number | null = null,
 ): Promise<number> {
   const ts = formatDateForMySQL(startTime || new Date())
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO workouts (user_id, program_day_id, day_number, day_title, split, start_time, is_demo)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workouts (user_id, program_day_id, day_number, day_title, split, start_time, is_demo, logged_by_trainer_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userId,
       await findProgramDayId(userId, dayNumber),
@@ -282,11 +301,36 @@ export async function createSession(
       split,
       ts,
       isDemo ? 1 : 0,
+      loggedByTrainerId,
     ],
   )
   return result.insertId
 }
 
+/**
+ * Stores one set and bumps the workout's counters in the same transaction. The
+ * counter update doubles as the ownership check. A set for an already ended
+ * workout is still accepted and moves its end time forward.
+ *
+ * @param sessionId - `workouts.id`.
+ * @param userId - Numeric id of the workout's owner.
+ * @param set - The set to store.
+ * @param set.exerciseName - Exercise performed.
+ * @param set.setIndex - Position of the set within the exercise.
+ * @param set.startTime - When the set began (ISO timestamp).
+ * @param set.endTime - When the set ended (ISO timestamp).
+ * @param set.weight - Load used.
+ * @param set.reps - Repetitions done.
+ * @param set.note - Optional free text.
+ * @param set.isWarmup - Whether this is a warm-up set.
+ * @param set.primaryMuscles - Primary muscle groups trained.
+ * @param set.secondaryMuscles - Secondary muscle groups trained.
+ * @param set.machineName - Machine used, or null.
+ * @param set.rir - Reps in reserve, or null.
+ * @param options - Behaviour switches.
+ * @param options.openWorkoutOnly - Refuse the set when the workout has ended (used for trainer writes).
+ * @returns The stored set with derived duration and rest time.
+ */
 export async function recordSetTiming(
   sessionId: number,
   userId: number,
@@ -584,7 +628,7 @@ export async function deleteSetByIndex(
     `SELECT id FROM workouts WHERE id = ? AND user_id = ?`,
     [sessionId, userId],
   )
-  if (!owned.length) throw new NotFoundError("Session")
+  if (!owned.length) throw new ForbiddenError("Session not found or unauthorized", "SESSION_NOT_FOUND")
 
   return withTransaction(async (connection) => {
     // Same (exercise, index) can legitimately appear twice: a set re-logged
@@ -706,6 +750,15 @@ export async function endSession(
   }
 }
 
+/**
+ * Moves a workout to another program day.
+ *
+ * @param sessionId - `workouts.id`.
+ * @param userId - Numeric id of the owner.
+ * @param dayNumber - The new program day.
+ * @param dayTitle - New title, or null to clear it.
+ * @returns The updated workout.
+ */
 export async function updateSessionDay(
   sessionId: number,
   userId: number,
@@ -720,6 +773,14 @@ export async function updateSessionDay(
   return getSessionDetails(sessionId, userId)
 }
 
+/**
+ * Loads one workout with all of its sets.
+ *
+ * @param sessionId - `workouts.id`.
+ * @param userId - Numeric id of the owner.
+ * @returns The workout.
+ * @throws ForbiddenError `SESSION_NOT_FOUND` when it does not exist or belongs to someone else.
+ */
 export async function getSessionDetails(
   sessionId: number,
   userId: number,
@@ -770,6 +831,16 @@ export function parseHistoryCursor(raw: string): HistoryCursor | null {
   return { startTime: `${m[1]} ${m[2]}`, id }
 }
 
+/**
+ * Lists a user's workouts, newest first, with keyset paging.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param split - Only workouts of this split.
+ * @param dayNumber - Only workouts of this program day.
+ * @param limit - Maximum workouts to return.
+ * @param includeTimings - Also load each workout's sets.
+ * @param before - Cursor from {@link parseHistoryCursor}. Returns workouts strictly older than it.
+ */
 export async function getSessionHistory(
   userId: number,
   split?: string | null,
@@ -1021,6 +1092,13 @@ async function fetchKeptSets(
   return sets
 }
 
+/**
+ * Deletes every workout of a split. The sets go with them by cascade.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param split - Split name.
+ * @returns Number of workouts deleted.
+ */
 export async function deleteAllSessionsForSplit(
   userId: number,
   split: string,
@@ -1078,9 +1156,23 @@ const LAST_ACTIVITY = `GREATEST(
   )
 )`
 
+/**
+ * Ends open workouts that have had no activity for a while, in batches, under a
+ * database lock so only one process sweeps at a time.
+ *
+ * @param thresholdMinutes - Idle time after which a workout is ended.
+ * @returns Id and owner uuid of every workout ended, so owners can be notified.
+ */
+export interface EndedWorkout {
+  id: number
+  userId: string
+  /** The trainer who started it with X-Trainee-Id, if one did. */
+  trainer: { uuid: string; username: string } | null
+}
+
 export async function endStaleSessions(
   thresholdMinutes: number,
-): Promise<{ id: number; userId: string }[]> {
+): Promise<EndedWorkout[]> {
   const connection: PoolConnection = await pool.getConnection()
   try {
     // One sweep at a time across everything sharing this database: two
@@ -1091,7 +1183,7 @@ export async function endStaleSessions(
     )
     if (lock?.got !== 1) return []
     try {
-      const ended: { id: number; userId: string }[] = []
+      const ended: EndedWorkout[] = []
       for (let i = 0; i < STALE_MAX_BATCHES; i++) {
         const batch = await endStaleBatch(connection, thresholdMinutes)
         ended.push(...batch.ended)
@@ -1115,7 +1207,7 @@ export async function endStaleSessions(
 async function endStaleBatch(
   connection: PoolConnection,
   thresholdMinutes: number,
-): Promise<{ candidates: number; ended: { id: number; userId: string }[] }> {
+): Promise<{ candidates: number; ended: EndedWorkout[] }> {
   // READ COMMITTED for this transaction only: under the default REPEATABLE
   // READ the locking scan took next-key (gap) locks across the open-workout
   // range, blocking other users' starts and ends while it ran. Record locks on
@@ -1160,15 +1252,20 @@ async function endStaleBatch(
     )
     // Report exactly what this transaction closed, with the owner's public id.
     const [closed] = await connection.execute<RowDataPacket[]>(
-      `SELECT w.id, u.uuid AS userId
+      `SELECT w.id, u.uuid AS userId, t.uuid AS trainerId, t.username AS trainerUsername
        FROM workouts w JOIN users u ON u.id = w.user_id
+       LEFT JOIN users t ON t.id = w.logged_by_trainer_id
        WHERE w.id IN (${marks}) AND w.end_time IS NOT NULL`,
       ids,
     )
     await connection.commit()
     return {
       candidates: stale.length,
-      ended: closed.map((r) => ({ id: r.id as number, userId: r.userId as string })),
+      ended: closed.map((r) => ({
+        id: r.id as number,
+        userId: r.userId as string,
+        trainer: r.trainerId ? { uuid: r.trainerId as string, username: r.trainerUsername as string } : null,
+      })),
     }
   } catch (err) {
     await connection.rollback()

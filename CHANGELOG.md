@@ -6,24 +6,65 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-20
+
 ### Added
 
 - Profile photos on every server, `LOCAL_ONLY_FEATURES` included: `PUT`, `GET` and `DELETE /api/profile/photo` store, return (with an `ETag`) and remove one 400px JPEG per account, `GET /api/profile/photo/:userUuid` returns an accepted friend's, and `GET /api/friends` lists each friend's `photoHash`.
+- Demo data now adds three friends instead of nine: None shares nothing, Half shares history, analytics, program and watching, and All shares everything, Trainer and Tracking Access included. Half and All are left in the middle of a workout (ended after 30 idle minutes like any other), so watching and trainer mode can be tried, and their owner can act as All with `X-Trainee-Id`. Demo friends have health consent and readable `demo_<name>_` usernames. Every other past workout of All is marked as logged by its owner, and All has a stored program the owner can add to in trainer mode. The fill also seeds conversations between the owner and each friend (the last hour unread) and among the friends, two upcoming scheduled workouts with reminders, a pending workout All suggests to the owner (the owner grants All Trainer Access for it), the owner's pending and accepted suggestions for All, a trainer request from a demo "Coach" and one from the owner to None. There is no pending friend request any more.
 - Hydration entries carry their own measurement error: `POST /api/tracking/hydration` takes an optional `errorMargin` (± percent, 0 to 100, default 0, anything else is 400 `VALIDATION_ERROR`), and `GET` returns `errorMargin` on every row (0 for older entries). Other measurement histories now also return `errorMargin`, always 0.
+
+- Trainer requests at `/api/trainer`: `POST /requests` asks any user to become the caller's client, `GET /requests/received` and `/requests/sent` list pending ones, and `POST /requests/:id/accept` (friendship plus `trainer` grant in one step) or `/reject` answers one, and `DELETE /requests/:id` lets the sender cancel one. `DELETE /clients/:userId` stops coaching a client by removing their `trainer` and `tracking` grants, keeping the friendship. `GET /clients?weekStart=YYYY-MM-DD` lists the caller's clients with their last workout, workouts this week and program day count, the caller's All demo friend included.
+- Tracking Access: a `tracking` sharing permission (needs `trainer`, 409 `TRAINER_REQUIRED` otherwise) and an end to end encrypted relay at `/api/sharing/tracking` (`PUT /devices/key`, `GET /recipients`, `POST`/`GET /messages`, `POST /messages/ack`, `POST /resend-requests`). The server stores trainer public keys and ciphertext only, deletes messages once acknowledged, after 30 days, or when the grant is revoked. Accepting a trainer request with `includeTracking` grants it. A current trainer can send another request with `includeTracking: true` to ask for it alone (409 `ALREADY_TRAINER` only once both are granted), and `GET /api/trainer/clients` returns `hasTrackingAccess`. The All demo friend grants its owner Tracking Access, and the server sends the owner's devices an encrypted demo snapshot for it on demo fill and on device key registration.
+- Session reads (`GET /api/sessions`, `GET /api/sessions/:sessionId`, and the friend reads `GET /api/sharing/sessions/friend/:friendId` and `/:friendId/:sessionId`) return `loggedByTrainerId` and `loggedByTrainerUsername`, the uuid and username of the trainer who started the workout with `X-Trainee-Id`, or `null`.
+- Direct messages at `/api/messages`: `GET /` lists conversations with unread counts and the trainer/client relation, `GET /:userUuid` pages a thread, `POST /:userUuid` sends one (friends, or a trainer and client with an active grant, `403 NOT_ALLOWED` otherwise, idempotent, 30 a minute), `POST /:userUuid/read` marks a thread read, `PATCH /:userUuid/:messageId` edits one of the caller's messages within 15 minutes (`403 EDIT_WINDOW_CLOSED` after, messages carry `editedAt`), and `DELETE /:userUuid/:messageId` deletes one. The recipient gets `message_new`, `message_edited` and `message_deleted` WS events and the sender a `message_read` one. Messages are kept until either account is deleted.
+- Push notifications for new messages through Firebase Cloud Messaging, from the service-account key in `FCM_SERVICE_ACCOUNT`. Messages need it: while the key is unset, unreadable or refused by Google, messages are switched off (410 `FEATURE_DISABLED`, listed in `disabledFeatures` on `GET /healthz`), and a refused or unreadable key is retried every minute. `PUT /api/push/token` registers a device (answering `enabled`) and `DELETE /api/push/token` removes it. The push carries no message text or username. Removing a token needs no sign-in, so an app whose session was revoked can still stop its pushes.
+- `DISABLED_FEATURES=messages` switches direct messages off: `/api/messages` and `/api/push` answer 410 `FEATURE_DISABLED`, and `GET /healthz` publishes `disabledFeatures` so the app hides messaging.
+- Scheduled workouts at `/api/schedule`: list, create, edit and delete planned workouts with a time, program day, duration, reminder and alarm flag. A trainer can suggest one with `X-Trainee-Id`, which stays pending until the client accepts it, and can withdraw it but not delete it. `GET /api/schedule?includeCancelled=1` also lists cancelled entries, with `status: "cancelled"`. Both sides get a `schedule_changed` WS event.
 
 ### Changed
 
+- A trainer can replace a trainee's whole program with `POST /api/program/upload`, so they can edit it like their own. An upload with no days still answers 403 for a trainer, so the program can't be emptied.
 - Display names may only contain letters, digits, single spaces and `. ' - _`, and usernames and display names are refused when they contain a banned word. Signup now checks `name` too, and a Google account whose name breaks the rules is created without one.
+- Tracking responses carry their payload only in `data`. The duplicate `entry`, `entries`, `id`, `supplement`, `supplements`, `streak`, `takenToday` and `todayEntry` keys beside it are gone (bodystats, hydration, measurements, macros, supplements, progress photo upload).
+- `GET /api/sharing/permissions/{granted,received}` no longer include a `payload` field. Read it from `GET /permissions/:permissionId/payload` when `hasPayload` is true.
+- Program uploads reject the old `custom` exercise key with 400. Use `exerciseId: "custom"`.
+- `GET /api/friends/search` results no longer include `name`, so a friend's real name is not returned there either. Read it from the friends list.
+- `GET /api/tracking/photos/muscle/:id/thumb` no longer builds a missing thumbnail on request and answers 404 instead. Every upload and the demo fill store one.
+- `DELETE /api/sessions/:sessionId/sets` on a missing or foreign workout answers 403 `SESSION_NOT_FOUND` like the other session routes, not a 404 without a code.
+
+### Removed
+
+- `POST /api/tracking/soreness/:id/follow-ups`. Use `POST /api/tracking/soreness/follow-ups`.
+- `GET /api/tracking/soreness/active`, `/soreness/muscle/:muscle`, `/injuries/active` and `/injuries/muscle/:muscle`. Use `?status=active` and `?muscle=` on the list route.
+- `GET /api/sharing/joint-sessions/friend/:friendId/status`. Use `GET /api/sharing/joint-sessions/status?friendIds=`.
+- `?includePayload=true` on the sharing permission lists.
+- Every database migration. A database created by an earlier release is no longer upgraded on boot and has to be recreated.
 
 ### Fixed
 
+- When the 30-minute sweep ended a workout a trainer had started, only the client was told and the trainer's phone kept it open. Both now get `trainer_session_ended`.
 - The purge of sign-ups that never accepted the Terms failed on MySQL with error 1093 and deleted nothing. It now selects the empty accounts first and deletes them by id.
+- Usernames made from a Google account's email kept dots and other symbols and lost every capital W. Only letters, digits and underscores are kept now.
+
+### Security
+
+- Usernames need at least 3 letters and may not contain "demo" in any case, at signup, Google sign-up and `owngains create`, so nobody can pass for a demo account.
 
 ### Internal
 
-- Migration `005_measurement_error_margin.sql` adds `measurements.error_margin`.
+- Added TSDoc to exported functions, classes and types.
+- `scripts/sonarqube.py` sends its own User-Agent (the proxy refuses curl's default) and exits with the response body when a page is not JSON.
+- `schema.sql` adds `measurements.error_margin`, `workouts.logged_by_trainer_id` and the `trainer_requests` table.
+- Added the `tweetnacl` dependency for sealing demo tracking.
+- `schema.sql` adds the `tracking` permission type and the `trainer_device_keys`, `tracking_messages` and `tracking_resend_requests` tables, with route tests for the relay.
+- `scripts/release.sh` runs the CI workflow locally with act instead of a plain `bun run test`, and `ci.yml` points `DB_HOST` at the `mysql` service when run under act.
 - CI runs the test suite against MariaDB 11.4, the database the official server runs, and the README names it as the supported database.
 - The server lifecycle test sets `MDNS_ENABLED=true` itself, so it no longer fails when the environment (as in CI) disables mDNS.
+- `bun run sonar:scan` runs the tests with coverage first, so SonarQube gets a current `coverage/lcov.info` instead of reporting 0%.
+- SonarQube cleanup: `/api/auth/google` account linking moved into a helper, `dayNumber` read through `queryString` (a repeated `?dayNumber=` is still a 400, now with "given at most once"), and smaller readability fixes.
+- `progress_photos.content_hash` is `NOT NULL`, so the image route no longer backfills it on read.
+- The provisioning tests run the migration runner against a fixture file, since no migration ships.
 
 ## [0.5.2] - 2026-10-10
 
@@ -253,7 +294,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.0
 [0.5.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.2
 [0.5.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.0

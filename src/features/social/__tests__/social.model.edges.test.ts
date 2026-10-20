@@ -105,8 +105,8 @@ describe("sharing model edges", () => {
 
   it("lists grants without payloads, and returns a null payload", async () => {
     const id = await s.grantPermission(a.id, b.id, "program")
-    expect(await s.getPermissions(a.id, "granted", { includePayload: true })).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id, payload: null })]),
+    expect(await s.getPermissions(a.id, "granted")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id, hasPayload: false })]),
     )
     expect(await s.getPermissionPayload(b.id, id)).toEqual({ payload: null })
   })

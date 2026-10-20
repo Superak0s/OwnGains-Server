@@ -47,7 +47,7 @@ describe("workout data loss", () => {
   })
 
   it("removing demo data keeps a height the user set after the fill", async () => {
-    const u = await signup("ddemo")
+    const u = await signup("ddmo")
     const fill = await request(app)
       .post("/api/sessions/demo")
       .set(auth(u.token))

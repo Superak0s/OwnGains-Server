@@ -46,6 +46,15 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const requireSymptoms = (symptoms: unknown): string[] =>
   requireStringList(symptoms, "symptoms", { maxItems: 30, maxLength: 64 })
 
+/**
+ * Records the start of a menstrual cycle.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param cycleStart - Start date of the cycle.
+ * @param symptoms - Optional symptom data, stored as given.
+ * @returns The stored entry.
+ * @throws ValidationError for an invalid date.
+ */
 export async function logMenstrualCycle(
   userId: number,
   cycleStart: string,
@@ -114,6 +123,12 @@ export async function updateMenstrualCycle(
   }
 }
 
+/**
+ * Lists cycles, newest first.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param limit - Maximum cycles to return.
+ */
 export async function getMenstrualHistory(
   userId: number,
   limit = 12,
@@ -206,6 +221,13 @@ export async function getCycleStats(
   }
 }
 
+/**
+ * Deletes one cycle entry.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entryId - Id of the entry.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteMenstrualEntry(
   userId: number,
   entryId: number,

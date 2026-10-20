@@ -21,8 +21,10 @@ const COLUMNS = {
   macroCaloriesGoal: "macro_calories_goal",
 } as const
 
+/** Wire name of a per-user setting. */
 export type SettingKey = keyof typeof COLUMNS
 
+/** Every {@link SettingKey}. */
 export const SETTING_KEYS = Object.keys(COLUMNS) as SettingKey[]
 
 /** Keys whose column is an integer type: MySQL silently rounds 5.7 to 6. */

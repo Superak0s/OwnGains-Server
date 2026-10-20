@@ -45,7 +45,7 @@ describe("owngains CLI", () => {
   })
 
   it("create validates input, creates the user, and refuses duplicates", async () => {
-    const username = uniqueName("mk")
+    const username = uniqueName("mkr")
     const email = `${username}@test.local`
 
     expect((await runCli(["create"])).code).toBe(2)
@@ -63,7 +63,7 @@ describe("owngains CLI", () => {
   })
 
   it("passwd validates input and resets the password", async () => {
-    const username = uniqueName("pw")
+    const username = uniqueName("pwd")
     await createUser(username, `${username}@test.local`, "Passw0rd-123")
 
     expect((await runCli(["passwd"])).code).toBe(2)

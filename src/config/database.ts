@@ -42,6 +42,10 @@ const ssl = sslOptions();
  */
 export const queryTimeoutMs = envInt("DB_QUERY_TIMEOUT_MS", 30_000);
 
+/**
+ * Shared MySQL connection pool. Size, queue limit and query timeout come from
+ * `DB_POOL_SIZE`, `DB_QUEUE_LIMIT` and `DB_QUERY_TIMEOUT_MS`.
+ */
 export const pool: Pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   user: requireEnv("DB_USER"),
@@ -156,6 +160,12 @@ export async function withTransaction<T>(
   }
 }
 
+/**
+ * Formats a timestamp as a UTC `YYYY-MM-DD HH:MM:SS` string for a DATETIME column.
+ *
+ * @param date - A Date or anything `new Date()` accepts.
+ * @throws ValidationError when the value is not a valid date.
+ */
 export function formatDateForMySQL(date: string | Date): string {
   const d = date instanceof Date ? date : new Date(date)
   // toISOString throws RangeError on an invalid date: an unvalidated client
@@ -369,6 +379,10 @@ async function provisionSchema(): Promise<void> {
   }
 }
 
+/**
+ * Creates the database if missing, checks the connection and provisions the
+ * schema and migrations. Called once at boot.
+ */
 export async function testDatabaseConnection(): Promise<void> {
   try {
     await createDatabaseIfNotExists();

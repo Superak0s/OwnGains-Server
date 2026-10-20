@@ -6,8 +6,6 @@ import {
   photoUpload,
   assertImageUpload,
   uploadSlot,
-  tryAcquireDecodeSlot,
-  UploadBusyError,
 } from "@/middleware/imageUpload.js"
 import { ValidationError } from "@/middleware/errorHandler.js"
 import {
@@ -24,7 +22,6 @@ import {
   getPhotoHash,
   getPhotoImage,
   getPhotoThumb,
-  buildMissingThumb,
   deletePhoto,
 } from "./progressPhoto.model.js"
 
@@ -84,7 +81,7 @@ router.post(
 
     const uri = `/api/tracking/photos/muscle/${id}/image`
     const thumbUri = `/api/tracking/photos/muscle/${id}/thumb`
-    res.status(201).json({ success: true, data: { id, uri, thumbUri }, id })
+    res.status(201).json({ success: true, data: { id, uri, thumbUri } })
   },
 )
 
@@ -135,7 +132,7 @@ router.get("/:id/image", async (req: Request, res: Response) => {
   const ifNoneMatch = req.get("If-None-Match")
   if (ifNoneMatch) {
     const hash = await getPhotoHash(userId, photoId)
-    if (hash && matchesIfNoneMatch(ifNoneMatch, `"${hash}"`)) {
+    if (matchesIfNoneMatch(ifNoneMatch, `"${hash}"`)) {
       res.set("ETag", `"${hash}"`)
       res.set("Cache-Control", `private, max-age=${86_400}`)
       res.status(304).end()
@@ -157,23 +154,8 @@ router.get("/:id/image", async (req: Request, res: Response) => {
 
 // Same ownership check and caching as /:id/image, always a JPEG.
 router.get("/:id/thumb", async (req: Request, res: Response) => {
-  const userId = req.user!.id
   const photoId = parseIntParam(String(req.params.id), "photo ID")
-  let thumb = await getPhotoThumb(userId, photoId)
-  if (!thumb) {
-    // Uploaded before thumbnails existed: building one is a full decode, so it
-    // takes a slot like an upload does.
-    const release = tryAcquireDecodeSlot()
-    if (!release) {
-      res.set("Retry-After", "5")
-      throw new UploadBusyError()
-    }
-    try {
-      thumb = await buildMissingThumb(userId, photoId)
-    } finally {
-      release()
-    }
-  }
+  const thumb = await getPhotoThumb(req.user!.id, photoId)
   res.set("Content-Type", "image/jpeg")
   res.set("Content-Disposition", "inline")
   res.set("Cache-Control", `private, max-age=${86_400}`)

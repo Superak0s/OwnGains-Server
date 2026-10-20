@@ -157,7 +157,7 @@ describe("trainer mode", () => {
     expect(add.body.exercise.reps).toBe("8-12")
 
     // Machine settings are the one program edit trainer mode performs. The
-    // granular route allows it, but /upload (a whole-program replace) must not.
+    // granular route allows it.
     const machine = await request(app)
       .patch("/api/program/exercise/machine")
       .set(auth(trainer.token))
@@ -169,13 +169,6 @@ describe("trainer mode", () => {
         patch: { machines: ["Smith"], selectedMachine: "Smith" },
       })
     expect(machine.status).toBe(200)
-
-    const blockedUpload = await request(app)
-      .post("/api/program/upload")
-      .set(auth(trainer.token))
-      .set("X-Trainee-Id", String(trainee.user.id))
-      .send({ originalFilename: "evil.xlsx", weeklyPlan: minimalProgram })
-    expect(blockedUpload.status).toBe(403)
 
     // The whitelist is what keeps the granular route from becoming /upload.
     const smuggled = await request(app)
@@ -195,6 +188,20 @@ describe("trainer mode", () => {
       .set(auth(trainee.token))
     expect(get.body.days[0].split.A.exercises[0].name).toBe("Bench")
     expect(get.body.days[0].split.A.exercises[0].reps).toBe("8-12")
+
+    const trainerUpload = await request(app)
+      .post("/api/program/upload")
+      .set(auth(trainer.token))
+      .set("X-Trainee-Id", String(trainee.user.id))
+      .send({ originalFilename: "edit.xlsx", weeklyPlan: minimalProgram })
+    expect(trainerUpload.status).toBe(200)
+
+    const emptied = await request(app)
+      .post("/api/program/upload")
+      .set(auth(trainer.token))
+      .set("X-Trainee-Id", String(trainee.user.id))
+      .send({ originalFilename: "evil.xlsx", weeklyPlan: { ...minimalProgram, days: [] } })
+    expect(emptied.status).toBe(403)
 
     // Without the header the trainer sees their own (empty) state.
     const trainerProgram = await request(app)

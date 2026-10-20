@@ -32,19 +32,19 @@ describe("supplements routes", () => {
       .set(auth(u.token))
       .send({ name: "Vitamin D", unit: "IU", defaultAmount: 2000, color: "#FF5733" })
     expect(ok.status).toBe(201)
-    supplementId = ok.body.supplement.id
+    supplementId = ok.body.data.id
   })
 
   it("lists and updates supplements", async () => {
     const list = await request(app).get("/api/tracking/supplements").set(auth(u.token))
-    expect(list.body.supplements.length).toBe(1)
+    expect(list.body.data.length).toBe(1)
 
     const update = await request(app)
       .patch(`/api/tracking/supplements/${supplementId}`)
       .set(auth(u.token))
       .send({ name: "Vit D" })
     expect(update.status).toBe(200)
-    expect(update.body.supplement.name).toBe("Vit D")
+    expect(update.body.data.name).toBe("Vit D")
 
     const missing = await request(app).patch("/api/tracking/supplements/999999").set(auth(u.token)).send({})
     expect(missing.status).toBe(404)
@@ -106,15 +106,15 @@ describe("supplements routes", () => {
       .set(auth(u.token))
       .send({ amount: 2000 })
     expect(log.status).toBe(201)
-    const entryId = log.body.id
-    expect(log.body.streak).toBeGreaterThanOrEqual(1)
+    const entryId = log.body.data.id
+    expect(log.body.data.streak).toBeGreaterThanOrEqual(1)
 
     const history = await request(app)
       .get(`/api/tracking/supplements/${supplementId}/log`)
       .set(auth(u.token))
     expect(history.status).toBe(200)
-    expect(history.body.entries.length).toBe(1)
-    expect(history.body.takenToday).toBe(true)
+    expect(history.body.data.entries.length).toBe(1)
+    expect(history.body.data.takenToday).toBe(true)
 
     const delEntry = await request(app)
       .delete(`/api/tracking/supplements/${supplementId}/log/${entryId}`)

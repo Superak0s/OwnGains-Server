@@ -87,12 +87,11 @@ describe("sharing routes", () => {
     // leave payloads out and only say whether there is one.
     const granted = await request(app).get("/api/sharing/permissions/granted").set(auth(a.token))
     expect(granted.body.permissions).toHaveLength(2)
-    for (const p of granted.body.permissions) expect(p.payload).toBeNull()
+    for (const p of granted.body.permissions) expect(p).not.toHaveProperty("payload")
     type Grant = {
       id: number
       permissionType: string
       hasPayload: boolean
-      payload: { programData: string } | null
     }
     const byType = (list: Grant[], t: string) => list.find((p) => p.permissionType === t)!
     expect(byType(granted.body.permissions, "program").hasPayload).toBe(true)
@@ -101,14 +100,7 @@ describe("sharing routes", () => {
     const received = await request(app).get("/api/sharing/permissions/received").set(auth(b.token))
     expect(received.body.permissions).toHaveLength(2)
     const programGrant = byType(received.body.permissions, "program")
-    expect(programGrant.payload).toBeNull()
-
-    // Opt-in inlining, for clients that still read it from the list.
-    const inlined = await request(app)
-      .get("/api/sharing/permissions/received?includePayload=true")
-      .set(auth(b.token))
-    expect(byType(inlined.body.permissions, "program").payload?.programData).toHaveLength(200 * 1024)
-    expect(byType(inlined.body.permissions, "history").payload).toBeNull()
+    expect(programGrant.hasPayload).toBe(true)
 
     // The payload route serves either end of the grant, and nobody else.
     const asGrantee = await request(app)
@@ -186,10 +178,10 @@ describe("sharing routes", () => {
 
   it("enforces watch permissions", async () => {
     const bStatus = await request(app)
-      .get(`/api/sharing/joint-sessions/friend/${b.user.id}/status`)
+      .get(`/api/sharing/joint-sessions/status?friendIds=${b.user.id}`)
       .set(auth(a.token))
     expect(bStatus.status).toBe(200)
-    expect(bStatus.body.hasActiveSession).toBe(false)
+    expect(bStatus.body.statuses[b.user.id].hasActiveSession).toBe(false)
 
     const watchNoPerm = await request(app)
       .get(`/api/sharing/watch/friend/${a.user.id}/active`)

@@ -43,7 +43,7 @@ router.post("/", idempotent, async (req: Request, res: Response) => {
     parseBackdatedTimestamp(measuredAt, "measuredAt"),
     note || null,
   )
-  res.status(201).json({ success: true, data: { id }, id })
+  res.status(201).json({ success: true, data: { id } })
 })
 
 router.get("/", async (req: Request, res: Response) => {

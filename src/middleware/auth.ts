@@ -15,6 +15,16 @@ function extractToken(req: Request): string | null {
   return match?.[1] ?? null
 }
 
+/**
+ * Requires a valid Bearer JWT and attaches the user to `req.user`. Refuses
+ * revoked tokens (`tokenVersion` mismatch), suspended accounts, and non-read
+ * requests from accounts that have not accepted the Terms (outside
+ * `/api/auth/`). A no-op when `req.user` is already set.
+ *
+ * @param req - Request carrying the `Authorization: Bearer <jwt>` header.
+ * @param _res - Unused.
+ * @param next - Called with an {@link UnauthorizedError}, {@link ForbiddenError} or infrastructure error on failure.
+ */
 export async function authenticateToken(
   req: Request,
   _res: Response,

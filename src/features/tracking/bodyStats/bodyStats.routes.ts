@@ -27,10 +27,7 @@ import {
 } from "./bodyStats.model.js"
 import { getUserBodyData } from "@/features/auth/user.model.js"
 
-// Every response here is `{ success, data }`. The older per-feature keys
-// (`entry`, `entries`, `id`, `supplement`, `supplements`) are still emitted
-// beside `data` so an app build released after the server image still works.
-// Drop them once no released app reads them.
+// Every response here is `{ success, data }`.
 const router: Router = Router()
 
 router.use(authenticateToken)
@@ -44,18 +41,18 @@ router.post("/weight", validateWeightEntry, async (req: Request, res: Response) 
     parseBackdatedTimestamp(measuredAt, "measuredAt"),
     note || null,
   )
-  res.status(201).json({ success: true, data: { id }, id })
+  res.status(201).json({ success: true, data: { id } })
 })
 
 router.get("/weight/current", async (req: Request, res: Response) => {
   const entry = await getLatestMetric(req.user!.id, METRICS.weightKg)
-  res.json({ success: true, data: entry, entry })
+  res.json({ success: true, data: entry })
 })
 
 router.get("/weight", async (req: Request, res: Response) => {
   const limit = queryLimit(req, { def: 90, max: 365 })
   const entries = await getMetricHistory(req.user!.id, METRICS.weightKg, limit)
-  res.json({ success: true, data: entries, entries })
+  res.json({ success: true, data: entries })
 })
 
 router.delete("/weight/:id", async (req: Request, res: Response) => {
@@ -158,13 +155,13 @@ router.post("/bodyfat/log", async (req: Request, res: Response) => {
     parseBackdatedTimestamp(measuredAt, "measuredAt") ?? new Date().toISOString(),
   )
 
-  res.status(201).json({ success: true, data: entry, entry })
+  res.status(201).json({ success: true, data: entry })
 })
 
 router.get("/bodyfat/log", async (req: Request, res: Response) => {
   const limit = queryLimit(req, { def: 90, max: 365 })
   const entries = await getBodyFatHistory(req.user!.id, limit)
-  res.json({ success: true, data: entries, entries })
+  res.json({ success: true, data: entries })
 })
 
 router.delete("/bodyfat/log/:id", async (req: Request, res: Response) => {

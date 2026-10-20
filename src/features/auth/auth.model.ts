@@ -4,7 +4,7 @@ import type { SignOptions } from "jsonwebtoken"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import type { AuthUser, ConsentInput } from "./user.types.js"
 import { ConflictError, NotFoundError } from "@/middleware/errorHandler.js"
-import { parseUuidParam } from "@/middleware/validation.js"
+import { parseUuidParam, validateUsername } from "@/middleware/validation.js"
 import { pool, withTransaction } from "@/config/database.js"
 import { envInt } from "@/config/env.js"
 import { hashPassword } from "./password.js"
@@ -58,6 +58,20 @@ function toAuthUser(u: AuthUserRow): AuthUser & { password_hash?: string } {
   }
 }
 
+/**
+ * Creates an account and returns its numeric id. Runs in one transaction with
+ * the consent audit rows and the admin bootstrap rule (`BOOTSTRAP_ADMIN_USERNAME`,
+ * else the first-ever user becomes admin).
+ *
+ * @param username - Unique login name.
+ * @param email - Unique email address.
+ * @param password - Plain password, hashed here. For a Google-only account this is a random throwaway.
+ * @param name - Display name. Defaults to the username.
+ * @param consent - Terms version and health consent given at signup.
+ * @param googleSub - Google account id to link, or null for a password signup. A non-null value marks the account as having no password.
+ * @returns The new `users.id`.
+ * @throws ConflictError `ACCOUNT_UNAVAILABLE` when the username or email is taken.
+ */
 export async function createUser(
   username: string,
   email: string,
@@ -127,6 +141,8 @@ export async function createUser(
   })
 }
 
+const ACCOUNT_CONFLICT_MESSAGE = "That username or email is unavailable"
+
 /**
  * Turn a MySQL duplicate-key error on `users` into a ConflictError. Anything
  * else is rethrown untouched.
@@ -135,16 +151,18 @@ export async function createUser(
  * registered" told anyone which addresses have an account here. Fully closing
  * that needs an emailed verification step, which a box with no mail server
  * can't send.
+ *
+ * @param err - Any thrown value from an INSERT into `users`.
+ * @returns A {@link ConflictError} for errno 1062, otherwise `err` unchanged.
  */
-const ACCOUNT_CONFLICT_MESSAGE = "That username or email is unavailable"
-
 export function asDuplicateUserError(err: unknown): unknown {
   const e = err as { errno?: number; message?: string }
   if (e?.errno !== 1062) return err
   return new ConflictError(ACCOUNT_CONFLICT_MESSAGE, "ACCOUNT_UNAVAILABLE")
 }
 
-type SigninUser = AuthUser & {
+/** A user row with the credential and suspension fields a signin needs. */
+export type SigninUser = AuthUser & {
   password_hash?: string
   disabled: boolean
   disabledReason: string | null
@@ -167,6 +185,13 @@ function toSigninUser(row: AuthUserRow | undefined): SigninUser | null {
     : null
 }
 
+/**
+ * Finds a user by username or email for signin. An exact username match wins
+ * over an email match.
+ *
+ * @param usernameOrEmail - What the user typed into the login field.
+ * @returns The user including suspended ones (check `disabled`), or null.
+ */
 export async function findUserByCredentials(
   usernameOrEmail: string,
 ): Promise<SigninUser | null> {
@@ -183,6 +208,12 @@ export async function findUserByCredentials(
   return toSigninUser(users[0])
 }
 
+/**
+ * Finds the account linked to a Google account id.
+ *
+ * @param sub - The `sub` claim of a verified Google ID token.
+ * @returns The linked user, or null.
+ */
 export async function findUserByGoogleSub(sub: string): Promise<SigninUser | null> {
   const [users] = await pool.execute<AuthUserRow[]>(
     `SELECT ${SIGNIN_COLS} FROM users WHERE google_sub = ?`,
@@ -200,6 +231,12 @@ export async function findUserByEmail(email: string): Promise<SigninUser | null>
   return toSigninUser(users[0])
 }
 
+/**
+ * Returns the Google account id linked to a user.
+ *
+ * @param userId - Numeric `users.id`.
+ * @returns The `sub`, or null when no Google account is linked.
+ */
 export async function getGoogleSub(userId: number): Promise<string | null> {
   const [rows] = await pool.execute<AuthUserRow[]>(
     "SELECT google_sub FROM users WHERE id = ?",
@@ -226,11 +263,11 @@ export async function unlinkGoogleSub(userId: number): Promise<boolean> {
   return r.affectedRows > 0
 }
 
-/** The email's local part as a valid username (3-20 of [A-Za-z0-9_]). */
+/** The email's local part as a valid username (3-20 of [A-Za-z0-9_], at least 3 letters). */
 export function usernameFromEmail(email: string): string {
-  const base = email.split("@")[0].replace(/[^A-Za-z0-9_]/g, "").slice(0, 15)
+  const base = email.split("@")[0].replace(/\W/g, "").slice(0, 15)
   if (usernameError(base)) return "user"
-  return base.length >= 3 ? base : `user${base}`
+  return validateUsername(base) ? base : `user${base}`
 }
 
 /**
@@ -279,6 +316,12 @@ export async function findUserByUsername(
   return users[0] ? toAuthUser(users[0]) : null
 }
 
+/**
+ * Looks a user up by numeric id.
+ *
+ * @param userId - Numeric `users.id`. Internal only, never sent to clients.
+ * @returns The user, or null.
+ */
 export async function findUserById(userId: number): Promise<AuthUser | null> {
   const [users] = await pool.execute<AuthUserRow[]>(
     `SELECT ${USER_COLS} FROM users WHERE id = ?`,
@@ -304,14 +347,14 @@ export async function findTraineeForTrainer(
 ): Promise<AuthUser | null> {
   const [rows] = await pool.execute<AuthUserRow[]>(
     `SELECT ${USER_COLS} FROM users u
-     WHERE u.uuid = ? AND u.disabled_at IS NULL
+     WHERE u.uuid = ? AND (u.disabled_at IS NULL OR u.demo_owner_id = ?)
        AND EXISTS(SELECT 1 FROM friendships f
                    WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?)
                      AND f.status = 'accepted')
        AND EXISTS(SELECT 1 FROM sharing_permissions sp
                    WHERE sp.from_user_id = u.id AND sp.to_user_id = ?
                      AND sp.permission_type = 'trainer')`,
-    [traineeUuid, trainerId, trainerId, trainerId],
+    [traineeUuid, trainerId, trainerId, trainerId, trainerId],
   )
   return rows[0] ? toAuthUser(rows[0]) : null
 }
@@ -440,6 +483,13 @@ export async function getPasswordHash(userId: number): Promise<string | null> {
   return rows[0]?.password_hash ?? null
 }
 
+/**
+ * Signs a short-lived access token (HS256, `JWT_EXPIRES_IN`, default 15m).
+ *
+ * @param userUuid - Public `users.uuid`, stored as `userId` in the payload.
+ * @param tokenVersion - Current `users.token_version`. A bump revokes the token.
+ * @returns The signed JWT.
+ */
 export function generateToken(userUuid: string, tokenVersion: number): string {
   return jwt.sign({ userId: userUuid, tokenVersion }, process.env.JWT_SECRET!, {
     expiresIn: (process.env.JWT_EXPIRES_IN || "15m") as SignOptions["expiresIn"],
@@ -520,6 +570,13 @@ export async function purgeDeletedAccounts(
   return r.affectedRows
 }
 
+/**
+ * Sets a new password and revokes every existing access and refresh token.
+ *
+ * @param userId - Numeric `users.id`.
+ * @param newPassword - Plain password, hashed here.
+ * @returns Always true.
+ */
 export async function changePassword(
   userId: number,
   newPassword: string,
@@ -704,6 +761,13 @@ export async function revokeRefreshTokens(
   }
 }
 
+/**
+ * Grants or removes admin rights.
+ *
+ * @param userId - Numeric `users.id`.
+ * @param isAdmin - The new value.
+ * @returns False when the user does not exist.
+ */
 export async function setUserAdmin(userId: number, isAdmin: boolean): Promise<boolean> {
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE users SET is_admin = ? WHERE id = ?`,
@@ -725,6 +789,7 @@ export async function listUsers(): Promise<(AuthUser & { disabled: boolean })[]>
   return rows.map((r) => ({ ...toAuthUser(r), disabled: !!r.disabled }))
 }
 
+/** Every admin account, oldest first. */
 export async function listAdmins(): Promise<AuthUser[]> {
   const [rows] = await pool.execute<AuthUserRow[]>(
     `SELECT ${USER_COLS} FROM users WHERE is_admin = 1 ORDER BY id ASC`,

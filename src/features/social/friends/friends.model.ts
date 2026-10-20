@@ -120,6 +120,14 @@ export async function sendFriendRequest(
   )
 }
 
+/**
+ * Accepts a pending request addressed to the caller and clears any request
+ * cooldown between the pair.
+ *
+ * @param userId - Numeric id of the recipient.
+ * @param friendshipId - `friendships.id` of the request.
+ * @returns True when accepted, or when it was already accepted (a retry). False when no such request exists for the caller.
+ */
 export async function acceptFriendRequest(
   userId: number,
   friendshipId: number,
@@ -232,6 +240,12 @@ async function severPair(conn: PoolConnection, a: number, b: number): Promise<vo
     `DELETE FROM joint_session_invites WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)`,
     [a, b, b, a],
   )
+  // A pending trainer request would turn the pair straight back into friends
+  // with a trainer grant on accept, so it goes with the rest.
+  await conn.execute(
+    `DELETE FROM trainer_requests WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)`,
+    [a, b, b, a],
+  )
   // A joint session is stateful, unlike live spectating, which re-runs the
   // friendship join on every broadcast, so severing the relationship has to
   // end it explicitly. Without this the pair kept streaming each other's
@@ -251,6 +265,12 @@ async function severPair(conn: PoolConnection, a: number, b: number): Promise<vo
   )
 }
 
+/**
+ * Lists accepted friends, newest first.
+ *
+ * @param userId - Numeric id of the caller.
+ * @returns Up to 500 friends with their uuid, username, display name and photo hash.
+ */
 export async function getFriends(userId: number): Promise<Friend[]> {
   const [rows] = await pool.execute<(Friend & RowDataPacket)[]>(
     // The pair is ordered, so "the other one" is one IF and one join rather
@@ -267,6 +287,12 @@ export async function getFriends(userId: number): Promise<Friend[]> {
   return rows
 }
 
+/**
+ * Lists friend requests other people sent to the caller.
+ *
+ * @param userId - Numeric id of the caller.
+ * @returns Incoming requests, newest first, with the requester's uuid.
+ */
 export async function getPendingRequests(
   userId: number,
 ): Promise<FriendRequest[]> {
@@ -283,6 +309,12 @@ export async function getPendingRequests(
   return rows
 }
 
+/**
+ * Lists friend requests the caller sent that are still pending.
+ *
+ * @param userId - Numeric id of the caller.
+ * @returns Outgoing requests, newest first, with the recipient's uuid.
+ */
 export async function getSentRequests(
   userId: number,
 ): Promise<FriendRequest[]> {
@@ -307,9 +339,8 @@ const SEARCH_MIN_LENGTH = 3
  * It used to be `username LIKE '%x%' OR name LIKE '%x%'` from two characters,
  * which a few hundred queries turned into the instance's whole member list
  * (real names included), and which no index could serve. A left-anchored
- * `LIKE 'abc%'` is a range scan on uq_users_username, and a stranger's real
- * name is neither searched nor returned: `name` carries the username unless
- * the two are already friends (kept a string so older clients still render).
+ * `LIKE 'abc%'` is a range scan on uq_users_username, and nobody's real name
+ * is searched or returned.
  */
 export async function searchUsers(
   searchTerm: string,
@@ -330,7 +361,6 @@ export async function searchUsers(
 
   const [rows] = await pool.execute<(UserSearchResult & RowDataPacket)[]>(
     `SELECT u.uuid AS id, u.username,
-       IF(f.status = 'accepted', u.name, u.username) AS name,
        CASE
          WHEN f.status = 'accepted' THEN 'friend'
          WHEN f.status = 'pending' AND f.requested_by = ? THEN 'request_sent'
@@ -397,6 +427,13 @@ export async function blockUser(
   })
 }
 
+/**
+ * Removes a block.
+ *
+ * @param blockerId - Numeric id of the user who blocked.
+ * @param blockedId - Numeric id of the blocked user.
+ * @returns False when there was no such block.
+ */
 export async function unblockUser(
   blockerId: number,
   blockedId: number,
@@ -408,6 +445,12 @@ export async function unblockUser(
   return result.affectedRows > 0
 }
 
+/**
+ * Lists the users the caller has blocked, newest first.
+ *
+ * @param userId - Numeric id of the caller.
+ * @returns Up to 500 entries. Only usernames are shown, never display names.
+ */
 export async function getBlockedUsers(userId: number): Promise<BlockedUser[]> {
   const [rows] = await pool.execute<(BlockedUser & RowDataPacket)[]>(
     // Display names are for friends only, as in search.
@@ -419,6 +462,7 @@ export async function getBlockedUsers(userId: number): Promise<BlockedUser[]> {
   return rows
 }
 
+/** The reasons a user can give when reporting someone. */
 export const REPORT_REASONS = [
   "harassment",
   "spam",
@@ -427,8 +471,20 @@ export const REPORT_REASONS = [
   "other",
 ] as const
 
+/** One of {@link REPORT_REASONS}. */
 export type ReportReason = (typeof REPORT_REASONS)[number]
 
+/**
+ * Files a report about another user for the operator to read.
+ *
+ * @param reporterId - Numeric id of the reporting user.
+ * @param reportedId - Numeric id of the reported user.
+ * @param reason - Why, from {@link REPORT_REASONS}.
+ * @param details - Optional free text from the reporter.
+ * @returns The new `user_reports.id`.
+ * @throws ValidationError when reporting oneself.
+ * @throws ConflictError `REPORT_ALREADY_FILED` for a second report of the same user within a day.
+ */
 export async function reportUser(
   reporterId: number,
   reportedId: number,
@@ -525,6 +581,12 @@ export async function purgeOldReports(
   return r.affectedRows
 }
 
+/**
+ * Deletes friend request cooldowns whose cancel or decline window has passed.
+ *
+ * @param batch - Maximum rows to delete per call.
+ * @returns Number of rows deleted.
+ */
 export async function purgeExpiredCooldowns(batch = 5000): Promise<number> {
   const [r] = await pool.execute<ResultSetHeader>(
     `DELETE FROM friend_request_cooldowns

@@ -166,14 +166,9 @@ describe("GET /api/sharing/joint-sessions/status", () => {
       startedAt: null,
     })
 
-    // Same object the single-friend route returns.
-    const single = await request(app)
-      .get(`/api/sharing/joint-sessions/friend/${active.user.id}/status`)
-      .set(auth(me.token))
-    const { success: _, ...singleStatus } = single.body
-    expect(res.body.statuses[active.user.id]).toEqual(singleStatus)
-    expect(singleStatus).toMatchObject({ hasActiveSession: true, sessionId: activeSessionId })
-    expect(new Date(singleStatus.startedAt).toISOString()).toBe(singleStatus.startedAt)
+    const activeStatus = res.body.statuses[active.user.id]
+    expect(activeStatus).toMatchObject({ hasActiveSession: true, sessionId: activeSessionId })
+    expect(new Date(activeStatus.startedAt).toISOString()).toBe(activeStatus.startedAt)
   })
 
   it("hides an active workout from friends without a live grant", async () => {

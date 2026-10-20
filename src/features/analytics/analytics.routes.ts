@@ -12,7 +12,7 @@ const router: Router = Router()
 
 router.get("/", authenticateToken, applyTrainerContext, async (req: Request, res: Response) => {
   const userId = req.user!.id
-  const { dayNumber } = req.query
+  const dayNumber = queryString(req, "dayNumber")
   // queryString, not a cast: ?split=a&split=b arrives as an array, which the
   // driver binds as the JSON text "[\"a\",\"b\"]" and matches no split at all,
   // so the dashboard came back all zeros instead of 400ing.
@@ -21,11 +21,9 @@ router.get("/", authenticateToken, applyTrainerContext, async (req: Request, res
   const parsedDayNumber =
     dayNumber === undefined
       ? null
-      : parseIntParam(String(dayNumber), "dayNumber")
+      : parseIntParam(dayNumber, "dayNumber")
 
-  // The client picks its own lookback window. Without one this used to scan
-  // the user's entire history on every dashboard open. 365 covers the default
-  // dashboard and older app builds that send no ?days=. Ceiling is 10 years,
+  // The client picks its own lookback window, 365 days by default. Ceiling is 10 years,
   // which is "all time" for any real user. The volume sum reads
   // idx_ws_workout_volume (workout_id, weight, reps) as a covering index, but a
   // wider window is still more rows summed per dashboard open.

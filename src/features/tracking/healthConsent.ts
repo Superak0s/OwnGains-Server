@@ -8,6 +8,14 @@ import { ForbiddenError } from "@/middleware/errorHandler.js"
 // for owners who gave explicit consent, recorded on the account
 // (users.health_consent_at). On by default. An operator whose users still run
 // app builds that never send the consent can set REQUIRE_HEALTH_CONSENT=false.
+/**
+ * Blocks writes to health data until the owner has recorded health consent.
+ * Reads and deletes always pass. Switched off with `REQUIRE_HEALTH_CONSENT=false`.
+ *
+ * @param req - Authenticated request.
+ * @param _res - Unused.
+ * @param next - Called with a 403 error when consent is missing.
+ */
 export const healthConsentGuard = (
   req: Request,
   _res: Response,
@@ -48,6 +56,7 @@ const HEALTH_TABLES = {
   workouts: ["workouts", "idempotency_keys"],
 } as const
 
+/** A group of health tables that can be purged together. */
 export type HealthFeature = keyof typeof HEALTH_TABLES
 
 /**

@@ -39,6 +39,7 @@ import {
   unlinkGoogleSub,
   createGoogleUser,
   getGoogleSub,
+  type SigninUser,
 } from "./auth.model.js"
 import { verifyGoogleIdToken } from "./google.js"
 import {
@@ -210,6 +211,36 @@ function suspendedError(reason: string | null): ForbiddenError {
 const googleEnabled = (_req: Request, _res: Response, next: NextFunction) =>
   process.env.GOOGLE_WEB_CLIENT_ID ? next() : next("router")
 
+// Signup never verifies an email, so whoever created this account may not
+// own the Google account. Linking needs proof of both.
+async function linkWithPassword(
+  res: Response,
+  user: SigninUser,
+  password: unknown,
+  googleSub: string,
+): Promise<void> {
+  const mismatch = () =>
+    new ConflictError(
+      "This email belongs to an account linked to another Google account",
+      "GOOGLE_ACCOUNT_MISMATCH",
+    )
+  if (user.googleSub) throw mismatch()
+  if (typeof password !== "string" || !password)
+    throw new ConflictError(
+      "An OwnGains account already uses this email. Enter its password to link your Google account.",
+      "GOOGLE_LINK_NEEDS_PASSWORD",
+      { username: user.username },
+    )
+  await throttleGuard(res, "signin", user.username)
+  if (!user.hasPassword || !(await verifyPassword(password, user.password_hash ?? DUMMY_PASSWORD_HASH))) {
+    await recordFailure("signin", user.username)
+    throw new UnauthorizedError("Incorrect password", "GOOGLE_LINK_PASSWORD_INVALID")
+  }
+  await clearFailures("signin", user.username)
+  if (user.disabled) throw suspendedError(user.disabledReason)
+  if (!(await linkGoogleSub(user.id, googleSub))) throw mismatch()
+}
+
 /**
  * POST /api/auth/google
  *
@@ -230,31 +261,7 @@ router.post("/google", googleEnabled, async (req: Request, res: Response) => {
   if (!user) {
     user = await findUserByEmail(google.email)
     if (user) {
-      if (user.googleSub)
-        throw new ConflictError(
-          "This email belongs to an account linked to another Google account",
-          "GOOGLE_ACCOUNT_MISMATCH",
-        )
-      // Signup never verifies an email, so whoever created this account may not
-      // own the Google account. Linking needs proof of both.
-      if (typeof password !== "string" || !password)
-        throw new ConflictError(
-          "An OwnGains account already uses this email. Enter its password to link your Google account.",
-          "GOOGLE_LINK_NEEDS_PASSWORD",
-          { username: user.username },
-        )
-      await throttleGuard(res, "signin", user.username)
-      if (!user.hasPassword || !(await verifyPassword(password, user.password_hash ?? DUMMY_PASSWORD_HASH))) {
-        await recordFailure("signin", user.username)
-        throw new UnauthorizedError("Incorrect password", "GOOGLE_LINK_PASSWORD_INVALID")
-      }
-      await clearFailures("signin", user.username)
-      if (user.disabled) throw suspendedError(user.disabledReason)
-      if (!(await linkGoogleSub(user.id, google.sub)))
-        throw new ConflictError(
-          "This email belongs to an account linked to another Google account",
-          "GOOGLE_ACCOUNT_MISMATCH",
-        )
+      await linkWithPassword(res, user, password, google.sub)
       user = await findUserByGoogleSub(google.sub)
     } else {
       await createGoogleUser(google.email, google.name, google.sub, {

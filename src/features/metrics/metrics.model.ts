@@ -225,12 +225,18 @@ export function poolStats() {
 // Persistence for the collector's history and event lists. pool.query, not
 // execute: the VALUES ? bulk insert and the LIMIT need client-side expansion.
 
+/** One stored history bucket. `spanMin` is the bucket width (1 or 60 minutes), `atMs` its end in epoch ms and `data` the serialised counters. */
 export interface HistoryRow {
   spanMin: number
   atMs: number
   data: string
 }
 
+/**
+ * Stores history buckets. Rows that already exist are ignored.
+ *
+ * @param rows - Buckets to insert.
+ */
 export async function saveHistoryRows(rows: HistoryRow[]): Promise<void> {
   if (!rows.length) return
   await pool.query("INSERT IGNORE INTO metrics_history (span_min, at_ms, data) VALUES ?", [
@@ -238,6 +244,11 @@ export async function saveHistoryRows(rows: HistoryRow[]): Promise<void> {
   ])
 }
 
+/**
+ * Loads history buckets newer than a point in time, oldest first.
+ *
+ * @param sinceMs - Epoch ms. Only buckets ending after it are returned.
+ */
 export async function loadHistoryRows(sinceMs: number): Promise<HistoryRow[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     "SELECT span_min, at_ms, data FROM metrics_history WHERE at_ms > ? ORDER BY at_ms",
@@ -254,12 +265,18 @@ export async function pruneHistory(minutesUpToMs: number, hoursUpToMs: number): 
   )
 }
 
+/** One stored event (an error or slow request). `kind` tells the list apart, `data` is serialised. */
 export interface EventRow {
   kind: number
   atMs: number
   data: string
 }
 
+/**
+ * Stores events.
+ *
+ * @param rows - Events to insert.
+ */
 export async function saveEvents(rows: EventRow[]): Promise<void> {
   if (!rows.length) return
   await pool.query("INSERT INTO metrics_events (kind, at_ms, data) VALUES ?", [
@@ -284,6 +301,7 @@ export async function pruneEvents(beforeMs: number, keep: number): Promise<void>
   if (top > keep) await pool.query("DELETE FROM metrics_events WHERE id <= ?", [top - keep])
 }
 
+/** Deletes every stored event. */
 export async function deleteEvents(): Promise<void> {
   await pool.query("DELETE FROM metrics_events")
 }

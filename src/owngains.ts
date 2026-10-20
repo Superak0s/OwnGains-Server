@@ -40,6 +40,7 @@ import {
   restoreBackup,
   verifyBackup,
 } from "./utils/backup.js"
+import { usernameError } from "./features/auth/nameFilter.js"
 import { logger } from "./utils/logger.js"
 
 /** Reads one line from stdin. Not hidden: a TTY echo-off needs raw mode and a
@@ -110,7 +111,12 @@ async function createCmd(args: string[]): Promise<number> {
     return 2
   }
   if (!validateUsername(username)) {
-    console.error("Username must be 3-20 characters (letters, numbers, underscores)")
+    console.error("Username must be 3-20 characters (letters, numbers, underscores), at least 3 of them letters")
+    return 2
+  }
+  const nameErr = usernameError(username)
+  if (nameErr) {
+    console.error(nameErr)
     return 2
   }
   if (!validateEmail(email)) {
@@ -350,6 +356,11 @@ const COMMANDS: Record<string, Command> = {
   backup: backupCmd,
 }
 
+/**
+ * Runs the admin CLI.
+ *
+ * @returns The process exit code.
+ */
 export async function main(): Promise<number> {
   const args = process.argv.slice(2)
   const cmd = args[0]

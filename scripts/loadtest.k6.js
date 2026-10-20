@@ -368,7 +368,7 @@ export async function lifter(users) {
   get("/api/analytics?split=push&dayNumber=1&days=365")
   get("/api/friends")
   get("/api/friends/requests/pending")
-  get("/api/sharing/permissions/received?includePayload=true")
+  get("/api/sharing/permissions/received")
   if (me.friend) get(`/api/sharing/joint-sessions/status?friendIds=${me.friend}`)
 
   // The app holds one socket for as long as it is in the foreground.

@@ -166,7 +166,7 @@ describe("soreness", () => {
 
   it("rejects a bad status and an oversized batch, and does nothing for an empty or unowned one", async () => {
     const { id } = await so.logSoreness(userId, "IT band", 3)
-    await expect(so.addFollowUp(userId, id, 2, "gone" as never)).rejects.toThrow("Invalid status")
+    await expect(so.batchFollowUp(userId, [{ sorenessId: id, intensity: 2, status: "gone" as never }])).rejects.toThrow("Invalid status")
     const item = { sorenessId: id, intensity: 1, status: "better" as const }
     await expect(so.batchFollowUp(userId, Array(51).fill(item))).rejects.toThrow("Too many updates")
     expect(await so.batchFollowUp(userId, [])).toEqual({ entries: [], skipped: [] })

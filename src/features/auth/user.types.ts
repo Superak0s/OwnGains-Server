@@ -48,6 +48,7 @@ export interface ConsentInput {
   healthConsent?: boolean
 }
 
+/** Body settings read by {@link getUserBodyData}. */
 export interface UserBodyData {
   heightCm: number | null
   bfFormulaSex: "male" | "female"

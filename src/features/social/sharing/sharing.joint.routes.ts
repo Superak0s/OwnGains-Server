@@ -26,8 +26,7 @@ const MAX_STATUS_FRIEND_IDS = 100
 /**
  * GET /joint-sessions/status?friendIds=<uuid>,<uuid>,…
  *
- * The single-friend status route below, for up to 100 friends in one request.
- * An id that isn't an accepted friend (or isn't a uuid at all) is left out
+ * Active-workout status for up to 100 friends in one request. An id that isn't an accepted friend (or isn't a uuid at all) is left out
  * of `statuses` rather than failing the batch.
  */
 router.get("/joint-sessions/status", async (req: Request, res: Response) => {
@@ -45,19 +44,6 @@ router.get("/joint-sessions/status", async (req: Request, res: Response) => {
     ids.filter(isUuid),
   )
   res.json({ success: true, statuses })
-})
-
-router.get("/joint-sessions/friend/:friendId/status", async (req: Request, res: Response) => {
-  const { uuid, friends } = await resolveFriendAccess(
-    req.user!.id,
-    req.params.friendId,
-    "friendId",
-    null,
-  )
-  if (!friends) throw new ForbiddenError("Not friends")
-
-  const statuses = await getFriendsActiveSessionStatuses(req.user!.id, [uuid])
-  res.json({ success: true, ...statuses[uuid] })
 })
 
 router.post("/joint-sessions/invite", async (req: Request, res: Response) => {

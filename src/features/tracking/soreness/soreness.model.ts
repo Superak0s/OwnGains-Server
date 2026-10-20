@@ -13,7 +13,7 @@ import { requireOptionalNote } from "@/middleware/validation.js"
 
 /** Follow-ups returned per episode: the most recent ones, oldest first. */
 const FOLLOW_UPS_PER_EPISODE = 20
-/** Ceiling on GET /active: open episodes, not a history. */
+/** Ceiling on the ?status=active list: open episodes, not a history. */
 export const MAX_ACTIVE_EPISODES = 100
 
 type FollowUpStatus = "still_sore" | "better" | "recovered"
@@ -139,6 +139,16 @@ function sorenessStatusFor(status: FollowUpStatus): SorenessStatus {
   return status === "better" ? "recovering" : "active"
 }
 
+/**
+ * Starts a soreness episode for a muscle group.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param muscleGroup - Muscle group that is sore.
+ * @param intensity - Soreness level at the start.
+ * @param loggedAt - When it began. Defaults to now.
+ * @param note - Optional free text.
+ * @returns The new episode.
+ */
 export async function logSoreness(
   userId: number,
   muscleGroup: string,
@@ -172,6 +182,7 @@ async function getSorenessById(
   return entry
 }
 
+/** Narrowing options for {@link listSorenessEntries}. */
 export interface SorenessFilter {
   muscle?: string
   /** Only episodes still active or recovering. */
@@ -180,7 +191,7 @@ export interface SorenessFilter {
 
 /**
  * The soreness list, optionally narrowed by muscle and/or to open episodes.
- * GET /, /active and /muscle/:muscle all come through here. The active list
+ * GET / comes through here. The active list
  * keeps its own order (most recently updated first) and cap, since it's the
  * "what hurts right now" view rather than a history.
  */
@@ -204,26 +215,9 @@ export async function listSorenessEntries(
   )
 }
 
-export async function addFollowUp(
-  userId: number,
-  sorenessId: number,
-  intensity: number,
-  status: FollowUpStatus,
-  note?: string | null,
-): Promise<SorenessEntry> {
-  // Ownership guard: throws NotFoundError unless the episode is the caller's.
-  await getSorenessById(userId, sorenessId)
-  const [entry] = await applyFollowUps(userId, [
-    { sorenessId, intensity, status, note },
-  ])
-  return entry
-}
-
 /**
- * Apply many follow-ups in one go. Deliberately not a loop over addFollowUp:
- * that opened a connection, a transaction and two ownership reads per item, so
- * a 50-item batch cost ~450 round trips across 50 transactions. Here it is one
- * ownership check, one transaction, one INSERT, and one read back.
+ * Apply many follow-ups in one go: one ownership check, one transaction, one
+ * INSERT, and one read back.
  *
  * Ids the caller doesn't own are skipped and reported back in `skipped`. A real
  * DB failure rolls the whole batch back rather than leaving it half-applied.
@@ -327,6 +321,13 @@ async function applyFollowUps(
   )
 }
 
+/**
+ * Deletes a soreness episode with its follow-ups.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param entryId - `soreness.id`.
+ * @returns False when nothing was deleted.
+ */
 export async function deleteSorenessEntry(
   userId: number,
   entryId: number,
@@ -339,6 +340,12 @@ export async function deleteSorenessEntry(
   return result.affectedRows > 0
 }
 
+/**
+ * Summarises soreness: all-time figures plus a heatmap and trend for a recent window.
+ *
+ * @param userId - Numeric id of the owner.
+ * @param days - Length of the recent window in days.
+ */
 export async function getSorenessStats(
   userId: number,
   days = 30,

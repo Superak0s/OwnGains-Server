@@ -90,6 +90,7 @@ export const WINDOWS = {
   "30d": 43_200,
   all: null,
 } as const
+/** Name of a preset time window for the metrics views. */
 export type WindowKey = keyof typeof WINDOWS
 /** A preset, or a custom range in epoch ms. */
 export type Window = WindowKey | { fromMs: number; toMs: number }
@@ -518,7 +519,7 @@ function mergePoints(c: HistoryPoint[]): HistoryPoint {
   }
   const requests = sum((p) => p.requests)
   return {
-    at: c[c.length - 1].at,
+    at: c.at(-1)!.at,
     requests,
     clientErrors: sum((p) => p.clientErrors),
     serverErrors: sum((p) => p.serverErrors),
@@ -738,13 +739,12 @@ function groupErrors(events: ErrorEvent[]) {
   for (const ev of events) {
     const key = `${ev.status}|${ev.code ?? ev.name ?? ""}|${ev.message}`
     const g = groups.get(key)
-    if (!g) groups.set(key, { first: ev, last: ev, count: 1, routes: new Map([[ev.route, 1]]) })
-    else {
+    if (g) {
       g.count++
       if (ev.at < g.first.at) g.first = ev
       if (ev.at >= g.last.at) g.last = ev
       bump(g.routes, ev.route)
-    }
+    } else groups.set(key, { first: ev, last: ev, count: 1, routes: new Map([[ev.route, 1]]) })
   }
   return [...groups.values()]
     .map(({ first, last, count, routes: r }) => ({

@@ -92,14 +92,14 @@ router.put("/current-day", async (req: Request, res: Response) => {
  * shape and persists it. There is no file handling on the server anymore. Size is
  * capped by the 2 MB express.json parser mounted on this path in server.ts.
  */
-// denyTrainer: upsertProgram replaces the caller's whole program rather than
-// merging into it, so without this a trainer could post an empty weeklyPlan
-// with X-Trainee-Id and erase the trainee's program outright. There is no
-// versioning to recover it from.
+// A trainer may replace the trainee's program (the Plan editor saves this
+// way), but not with an empty one: there is no versioning to recover it from.
 // validateProgramUpload caps days, splits, exercises and names and checks every
 // field's type before upsertProgram opens its transaction.
-router.post("/upload", denyTrainer, validateProgramUpload, async (req: Request, res: Response) => {
+router.post("/upload", validateProgramUpload, async (req: Request, res: Response) => {
   const { weeklyPlan, originalFilename } = req.body
+  if (req.trainer && weeklyPlan.days.length === 0)
+    throw new ForbiddenError("Trainers cannot empty a trainee's program")
 
   await upsertProgram(req.user!.id, weeklyPlan, originalFilename)
 

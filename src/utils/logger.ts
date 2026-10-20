@@ -5,6 +5,11 @@
 type ErrorSink = (args: unknown[]) => void
 let errorSink: ErrorSink | null = null
 
+/**
+ * Registers a receiver for every `logger.error` call.
+ *
+ * @param sink - The receiver, or null to remove it.
+ */
 export function setErrorLogSink(sink: ErrorSink | null): void {
   errorSink = sink
 }
@@ -20,6 +25,7 @@ const stamp =
       } catch {}
   }
 
+/** Timestamped console logger with `info`, `warn` and `error` levels. */
 export const logger = {
   info: stamp("info"),
   warn: stamp("warn"),

@@ -6,6 +6,13 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-22
+
+### Internal
+
+- CI pulls the MariaDB service image from Docker Hub again, which doesn't rate limit public pulls from GitHub-hosted runners, since the ECR Public mirror started refusing anonymous pulls with `Data limit exceeded`.
+- CLAUDE.md documents the trainer, messages, push, schedule and profile photo features, the health consent guard, test layout and the protect-files hook, drops stale trainer, idempotency and migration notes, and trims long paragraphs down to the rules README doesn't already cover.
+
 ## [1.0.0] - 2026-10-20
 
 ### Added
@@ -294,7 +301,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.0
 [0.5.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.2
 [0.5.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.1

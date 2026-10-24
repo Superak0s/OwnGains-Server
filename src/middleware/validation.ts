@@ -123,10 +123,11 @@ const validateISODate = (v: string) => !Number.isNaN(new Date(v).getTime())
  * Read an optional client-supplied timestamp for an entry the user is
  * backdating to an earlier day, returning null when none was sent.
  *
- * Clients send a timezone-less local stamp (a calendar day-tap defaults to
- * 09:00 that day), so an entry logged early in the morning (or from a phone
- * ahead of a UTC-running box) can read as slightly future here. So a day
- * of slack instead of a strict `> now`: it still catches a typo'd year.
+ * Current apps send a UTC ISO stamp. Older apps sent a zone-less local stamp,
+ * which formatDateForMySQL reads as the server's own local time (UTC in Docker),
+ * so those entries are off by the client's offset. They are still accepted so
+ * old builds keep working, and they are why the future check allows a day of
+ * slack instead of a strict `> now`. That still catches a typo'd year.
  */
 export function parseBackdatedTimestamp(
   value: unknown,

@@ -13,10 +13,13 @@
 -- Conventions, all deliberate:
 --   * DATETIME everywhere, never TIMESTAMP. Connections are pinned to UTC
 --     (SET time_zone = '+00:00') and the driver runs with dateStrings: true, so
---     a DATETIME round-trips as the exact UTC string the app sent.
+--     a DATETIME comes back as a zone-less UTC "YYYY-MM-DD HH:MM:SS", without
+--     the T, the zone or the milliseconds. Read it with parseMySQLDate.
 --   * `measured_at` / `logged_at` / `taken_at` / `start_time` are the only
 --     "when did this happen" names. `created_at` always means "when was this row
---     written" and always defaults to CURRENT_TIMESTAMP — never hand-write NOW().
+--     written" and defaults to CURRENT_TIMESTAMP, so don't hand-write NOW().
+--     The one exception is the friend_request_cooldowns upsert, which resets
+--     created_at with NOW() because a repeat refusal restarts the cooldown.
 --   * `note` (singular) is the user's free text on a row. There is no `notes`.
 --   * No explicit COLLATE, so MySQL 8 applies utf8mb4_0900_ai_ci. That is
 --     case-INSENSITIVE, which is intended: it makes uq_users_username treat

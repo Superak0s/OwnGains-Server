@@ -183,6 +183,7 @@ describe.skipIf(!canCreate)(`database provisioning (needs CREATE on ${scratch})`
   it("logs, rather than throws, when a session setting fails, on MySQL or MariaDB", async () => {
     const db = await load()
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const onConnection = db.pool.listeners("connection")[0] as (c: unknown) => void
     const sent: string[] = []
     const query = (sql: string, cb: (e: Error) => void) => {
@@ -194,7 +195,9 @@ describe.skipIf(!canCreate)(`database provisioning (needs CREATE on ${scratch})`
     onConnection({ query, connection: { _isMariaDB: true } })
     expect(sent).toContain("SET SESSION max_execution_time = 30000")
     expect(sent).toContain("SET SESSION max_statement_time = 30")
-    expect(warn).toHaveBeenCalledTimes(6)
+    expect(warn).toHaveBeenCalledTimes(4)
+    // A connection left off UTC shifts every DATETIME it writes, so it is an error.
+    expect(error).toHaveBeenCalledTimes(2)
   })
 
   it("parseMySQLDate passes a Date through", async () => {

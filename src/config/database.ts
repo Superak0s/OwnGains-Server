@@ -111,7 +111,7 @@ pool.on("connection", (conn) => {
   const connection = conn as unknown as CoreConnection
   connection.query("SET time_zone = '+00:00'", (err) => {
     if (err)
-      logger.warn(
+      logger.error(
         "Could not pin connection time_zone to UTC:",
         (err as Error).message,
       );

@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Changed
+
+- A database connection that cannot be set to UTC is logged as an error.
+
 ### Fixed
 
 - The trainer client list counts this week's sessions from the trainer's local Monday when the app sends it.
@@ -23,6 +27,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - Tests that need two friends call one shared `befriend` in `src/tests/helpers.ts`.
 - Rows are grouped by key with the built-in `Map.groupBy` in the program, soreness, supplement and workout models, in place of five hand-written loops.
 - The program upload's exercise shape is one `CatalogEntry` type in `programs.model.ts`, in place of three inline copies.
+- Corrected the schema and back-dated timestamp comments.
 
 ## [1.0.1] - 2026-10-22
 

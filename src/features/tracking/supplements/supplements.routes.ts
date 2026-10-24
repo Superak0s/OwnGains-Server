@@ -24,6 +24,7 @@ import {
   deleteLogEntry,
 } from "./supplements.model.js"
 import { idempotent } from "@/middleware/idempotency.js"
+import { requestTimeZone } from "@/utils/timeZone.js"
 
 const router: Router = Router()
 router.use(authenticateToken)
@@ -96,7 +97,7 @@ async function requireSupplement(userId: number, supplementId: number) {
 }
 
 router.get("/", async (req: Request, res: Response) => {
-  const summaries = await listSupplementSummaries(req.user!.id)
+  const summaries = await listSupplementSummaries(req.user!.id, undefined, requestTimeZone(req))
   res.json({ success: true, data: summaries })
 })
 
@@ -129,7 +130,7 @@ router.post("/", async (req: Request, res: Response) => {
     dosesPerDay,
     doseIntervalMinutes,
   })
-  const [summary] = await listSupplementSummaries(req.user!.id, supplementId)
+  const [summary] = await listSupplementSummaries(req.user!.id, supplementId, requestTimeZone(req))
 
   res.status(201).json({ success: true, data: summary })
 })
@@ -166,7 +167,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     color,
     icon,
   })
-  const [updated] = await listSupplementSummaries(req.user!.id, supplementId)
+  const [updated] = await listSupplementSummaries(req.user!.id, supplementId, requestTimeZone(req))
 
   res.json({ success: true, data: updated })
 })
@@ -199,7 +200,7 @@ router.post("/:id/log", idempotent, async (req: Request, res: Response) => {
     parseBackdatedTimestamp(takenAt, "takenAt"),
     requireOptionalNote(note) ?? null,
   )
-  const streak = await getStreak(req.user!.id, supplementId)
+  const streak = await getStreak(req.user!.id, supplementId, requestTimeZone(req))
 
   res
     .status(201)
@@ -213,8 +214,8 @@ router.get("/:id/log", async (req: Request, res: Response) => {
   const limit = queryLimit(req, { def: 30, max: 365 })
   // Sequential: three small reads shouldn't take three pool connections at once.
   const entries = await getHistory(req.user!.id, supplementId, limit)
-  const streak = await getStreak(req.user!.id, supplementId)
-  const todayEntry = await hasTakenTodayServer(req.user!.id, supplementId)
+  const streak = await getStreak(req.user!.id, supplementId, requestTimeZone(req))
+  const todayEntry = await hasTakenTodayServer(req.user!.id, supplementId, requestTimeZone(req))
 
   res.json({ success: true, data: { entries, streak, takenToday: !!todayEntry, todayEntry } })
 })

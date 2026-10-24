@@ -3,6 +3,7 @@
 import { pool, formatDateForMySQL, parseMySQLDate } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { ValidationError } from "@/middleware/errorHandler.js"
+import { DAY_MS, localDay } from "@/utils/timeZone.js"
 
 /**
  * Per-user ceiling. Every summary read joins every supplement against a year of
@@ -171,6 +172,7 @@ export async function getSupplementById(
 export async function listSupplementSummaries(
   userId: number,
   supplementId?: number,
+  timeZone = "UTC",
 ): Promise<SupplementSummary[]> {
   const [supplements] = await pool.execute<Supplement[]>(
     `SELECT ${SUPPLEMENT_COLS} FROM supplements WHERE user_id = ?
@@ -199,63 +201,68 @@ export async function listSupplementSummaries(
     ]),
   )
 
-  const [rows] = await pool.execute<
-    (RowDataPacket & { supplementId: number; day: string; doses: number })[]
-  >(
-    // A streak breaks at the first missing day, so anything older than the
-    // longest streak this can report is dead weight, so cap the scan at a year
-    // instead of reading every intake row the user has ever written.
-    `SELECT supplement_id AS supplementId, DATE(taken_at) AS day, COUNT(*) AS doses
-     FROM supplement_intake
-     WHERE user_id = ? AND taken_at >= DATE_SUB(CURDATE(), INTERVAL 366 DAY)
-       ${supplementId ? "AND supplement_id = ?" : ""}
-     GROUP BY supplement_id, DATE(taken_at)
-     ORDER BY supplement_id, day DESC`,
-    supplementId ? [userId, supplementId] : [userId],
+  const rowsBySupplement = Map.groupBy(
+    await recentIntake(userId, supplementId),
+    (row) => row.supplementId,
   )
-
-  const daysBySupplement = Map.groupBy(rows, (row) => row.supplementId)
-
-  const today = utcDay(new Date())
+  const today = localDay(new Date(), timeZone)
   return supplements.map((s) => {
-    const days = daysBySupplement.get(s.id) ?? []
-    const takenToday = days[0]?.day === today
+    const doses = dosesByDay(rowsBySupplement.get(s.id) ?? [], timeZone)
+    const dosesToday = doses.get(today) ?? 0
     return {
       ...withBooleans(s),
-      takenToday,
-      dosesToday: takenToday ? days[0].doses : 0,
+      takenToday: dosesToday > 0,
+      dosesToday,
       lastTakenAt: lastBySupplement.get(s.id) ?? null,
-      streak: streakFromDays(days.map((d) => d.day)),
+      streak: streakFromDays([...doses.keys()], today),
     }
   })
 }
 
 /**
- * YYYY-MM-DD in UTC, the form MySQL hands back for DATE(...). The pool runs
- * with `dateStrings: true`, so these columns arrive as strings and must not be
- * parsed into a Date and read with local getters.
+ * Doses from the last 367 days. A streak breaks at the first missing day, so
+ * older rows are dead weight. The day past a year covers zones ahead of UTC.
  */
-function utcDay(d: Date): string {
-  return d.toISOString().slice(0, 10)
+async function recentIntake(userId: number, supplementId?: number) {
+  const since = formatDateForMySQL(new Date(Date.now() - 367 * DAY_MS))
+  const [rows] = await pool.execute<
+    (RowDataPacket & { supplementId: number; takenAt: string })[]
+  >(
+    `SELECT supplement_id AS supplementId, taken_at AS takenAt
+     FROM supplement_intake WHERE user_id = ? AND taken_at >= ?
+       ${supplementId ? "AND supplement_id = ?" : ""}`,
+    supplementId ? [userId, since, supplementId] : [userId, since],
+  )
+  return rows
 }
 
-/** Shared by getStreak and listSupplementSummaries. Days must be sorted DESC. */
-function streakFromDays(days: string[]): number {
-  if (!days.length) return 0
+/** Dose count per local day, newest day first. */
+function dosesByDay(
+  rows: { takenAt: string }[],
+  timeZone: string,
+): Map<string, number> {
+  const days = rows
+    .map((r) => localDay(parseMySQLDate(r.takenAt), timeZone))
+    .sort()
+    .reverse()
+  const doses = new Map<string, number>()
+  for (const day of days) doses.set(day, (doses.get(day) ?? 0) + 1)
+  return doses
+}
 
+const previousDay = (day: string) =>
+  new Date(Date.parse(day) - DAY_MS).toISOString().slice(0, 10)
+
+/** Shared by getStreak and listSupplementSummaries. Days must be sorted DESC. */
+function streakFromDays(days: string[], today: string): number {
   // A streak may run up to today or up to yesterday. Today being unlogged
   // doesn't break it yet.
-  const cursor = new Date()
-  if (days[0] !== utcDay(cursor)) {
-    cursor.setUTCDate(cursor.getUTCDate() - 1)
-    if (days[0] !== utcDay(cursor)) return 0
-  }
-
+  let cursor = days[0] === today ? today : previousDay(today)
   let streak = 0
   for (const day of days) {
-    if (day !== utcDay(cursor)) break
+    if (day !== cursor) break
     streak++
-    cursor.setUTCDate(cursor.getUTCDate() - 1)
+    cursor = previousDay(cursor)
   }
   return streak
 }
@@ -377,15 +384,21 @@ export async function logSupplement(
 export async function hasTakenTodayServer(
   userId: number,
   supplementId: number,
+  timeZone = "UTC",
 ): Promise<SupplementEntry | null> {
+  const now = new Date()
   const [rows] = await pool.execute<SupplementEntry[]>(
     `SELECT ${INTAKE_COLS} FROM supplement_intake
-     WHERE user_id = ? AND supplement_id = ?
-       AND taken_at >= CURDATE() AND taken_at < CURDATE() + INTERVAL 1 DAY
-     ORDER BY taken_at DESC LIMIT 1`,
-    [userId, supplementId],
+     WHERE user_id = ? AND supplement_id = ? AND taken_at >= ?
+     ORDER BY taken_at DESC`,
+    [userId, supplementId, formatDateForMySQL(new Date(now.getTime() - 2 * DAY_MS))],
   )
-  return rows[0] ?? null
+  const today = localDay(now, timeZone)
+  return (
+    rows.find(
+      (r) => localDay(parseMySQLDate(String(r.takenAt)), timeZone) === today,
+    ) ?? null
+  )
 }
 
 /**
@@ -419,18 +432,10 @@ export async function getHistory(
 export async function getStreak(
   userId: number,
   supplementId: number,
+  timeZone = "UTC",
 ): Promise<number> {
-  const [rows] = await pool.execute<(RowDataPacket & { day: string })[]>(
-    // Same 366-day cap as listSupplementSummaries: a streak longer than that
-    // reports as 366.
-    `SELECT DATE(taken_at) AS day FROM supplement_intake
-     WHERE user_id = ? AND supplement_id = ?
-       AND taken_at >= DATE_SUB(CURDATE(), INTERVAL 366 DAY)
-     GROUP BY DATE(taken_at)
-     ORDER BY day DESC`,
-    [userId, supplementId],
-  )
-  return streakFromDays(rows.map((r) => r.day))
+  const doses = dosesByDay(await recentIntake(userId, supplementId), timeZone)
+  return streakFromDays([...doses.keys()], localDay(new Date(), timeZone))
 }
 
 /**

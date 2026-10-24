@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest"
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest"
 import request from "supertest"
 import { pool } from "@/config/database.js"
 import { app, signup, auth, internalId } from "../../../../tests/helpers.js"
@@ -146,5 +146,31 @@ describe("supplements routes", () => {
       .set(auth(c.token))
       .send({ note: "x".repeat(1001) })
     expect(longNote.status).toBe(400)
+  })
+})
+
+describe("supplement days follow the client's timezone", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("counts a dose after local midnight as taken today", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-10-23T09:00:00Z"))
+    const user = await signup("supptz")
+    const created = await request(app).post("/api/tracking/supplements").set(auth(user.token)).send({ name: "Zinc" })
+    const id = created.body.data.id
+    // 01:30 on the 23rd in Athens, still the 22nd in UTC.
+    await request(app)
+      .post(`/api/tracking/supplements/${id}/log`)
+      .set(auth(user.token))
+      .send({ takenAt: "2026-10-22T22:30:00.000Z" })
+
+    const athens = { ...auth(user.token), "X-Time-Zone": "Europe/Athens" }
+    const list = await request(app).get("/api/tracking/supplements").set(athens)
+    expect(list.body.data[0]).toMatchObject({ takenToday: true, streak: 1 })
+    const today = await request(app).get(`/api/tracking/supplements/${id}/log`).set(athens)
+    expect(today.body.data).toMatchObject({ takenToday: true, streak: 1 })
+
+    const utc = await request(app).get("/api/tracking/supplements").set(auth(user.token))
+    expect(utc.body.data[0].takenToday).toBe(false)
   })
 })

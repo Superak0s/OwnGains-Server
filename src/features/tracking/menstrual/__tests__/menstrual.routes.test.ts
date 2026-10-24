@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest"
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest"
 import request from "supertest"
 import { app, signup, auth } from "../../../../tests/helpers.js"
 
@@ -90,5 +90,26 @@ describe("menstrual routes", () => {
     expect((await post(Array(31).fill("cramps"))).status).toBe(400)
     expect((await post(["x".repeat(65)])).status).toBe(400)
     expect((await post(Array(30).fill("x".repeat(64)))).status).toBe(201)
+  })
+})
+
+describe("cycle day follows the client's timezone", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("counts days from local midnight", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    // 08:30 in Athens, three local days after a period that began at 09:00.
+    vi.setSystemTime(new Date("2026-10-23T05:30:00Z"))
+    const u = await signup("menstz")
+    await request(app)
+      .post("/api/tracking/menstrual")
+      .set(auth(u.token))
+      .send({ cycleStart: "2026-10-20T06:00:00.000Z" })
+      .expect(201)
+
+    const stats = await request(app)
+      .get("/api/tracking/menstrual/stats")
+      .set({ ...auth(u.token), "X-Time-Zone": "Europe/Athens" })
+    expect(stats.body.data.currentPhase).toMatchObject({ phase: "menstruation", daysInPhase: 3 })
   })
 })

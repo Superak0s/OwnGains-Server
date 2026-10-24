@@ -13,6 +13,7 @@ import {
 } from "@/middleware/errorHandler.js"
 import { requireStringList } from "@/middleware/validation.js"
 import { getUserSettings } from "@/features/settings/settings.model.js"
+import { DAY_MS, localDay } from "@/utils/timeZone.js"
 
 interface MenstrualEntry extends RowDataPacket {
   id: number
@@ -39,8 +40,6 @@ interface CycleStats {
 
 const CYCLE_COLS = `id, cycle_start AS cycleStart, cycle_end AS cycleEnd,
        symptoms, created_at AS createdAt, updated_at AS updatedAt`
-
-const DAY_MS = 24 * 60 * 60 * 1000
 
 // Bounded so the JSON column can't be a megabyte of "symptoms".
 const requireSymptoms = (symptoms: unknown): string[] =>
@@ -151,6 +150,7 @@ export async function getMenstrualHistory(
 export async function getCycleStats(
   userId: number,
   overrides: { periodDays?: number; cycleLengthDays?: number } = {},
+  timeZone = "UTC",
 ): Promise<CycleStats> {
   // One after another, not Promise.all: three small reads don't need three
   // pool connections at once, and a pool of a handful is shared by everyone.
@@ -190,7 +190,8 @@ export async function getCycleStats(
   // `new Date(...)` would read it as local time and shift the phase by the
   // box's offset.
   const start = parseMySQLDate(last.cycleStart)
-  const day = Math.floor((Date.now() - start.getTime()) / DAY_MS)
+  const day =
+    (Date.parse(localDay(new Date(), timeZone)) - Date.parse(localDay(start, timeZone))) / DAY_MS
   const endOf = (n: number) => new Date(start.getTime() + n * DAY_MS)
   const nextPeriodEstimate = endOf(Math.ceil(cycleLength))
 

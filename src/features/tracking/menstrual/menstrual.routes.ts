@@ -15,6 +15,7 @@ import {
   deleteMenstrualEntry,
 } from "./menstrual.model.js"
 import { idempotent } from "@/middleware/idempotency.js"
+import { requestTimeZone } from "@/utils/timeZone.js"
 
 const router: Router = Router()
 
@@ -60,7 +61,7 @@ router.get("/stats", async (req: Request, res: Response) => {
   const data = await getCycleStats(req.user!.id, {
     periodDays: optionalDays(req.query.periodDays, "periodDays"),
     cycleLengthDays: optionalDays(req.query.cycleLengthDays, "cycleLengthDays"),
-  })
+  }, requestTimeZone(req))
   res.json({ success: true, data })
 })
 

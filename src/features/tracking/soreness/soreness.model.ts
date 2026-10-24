@@ -6,7 +6,8 @@
 // follow-ups), which disagreed about the intensity range (1-10 vs 0-10) and
 // about the note column's name. One table, one range (0-10), one `note`.
 
-import { pool, formatDateForMySQL, withTransaction } from "@/config/database.js"
+import { pool, formatDateForMySQL, parseMySQLDate, withTransaction } from "@/config/database.js"
+import { localDay } from "@/utils/timeZone.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
 import { requireOptionalNote } from "@/middleware/validation.js"
@@ -337,11 +338,12 @@ export async function deleteSorenessEntry(
 export async function getSorenessStats(
   userId: number,
   days = 30,
+  timeZone = "UTC",
 ): Promise<SorenessStats> {
   // Two queries, one after the other. This used to be six in parallel, which
   // took six pool connections per call. The all-time figures are conditional
   // aggregates in one pass over the user's rows. The windowed heatmap and trend
-  // both come out of one (day, muscle) grouping, split in JS.
+  // both come from one read of the window, grouped by local day in JS.
   const [[totals]] = await pool.execute<
     (RowDataPacket & {
       active: number | null
@@ -363,25 +365,24 @@ export async function getSorenessStats(
 
   // Leans on idx_sor_user_logged.
   const [windowRows] = await pool.execute<
-    (RowDataPacket & { date: string; muscleGroup: string; n: number; total: number })[]
+    (RowDataPacket & { loggedAt: string; muscleGroup: string; intensity: number })[]
   >(
-    `SELECT DATE(logged_at) AS date, muscle_group AS muscleGroup,
-            COUNT(*) AS n, SUM(intensity) AS total
+    `SELECT logged_at AS loggedAt, muscle_group AS muscleGroup, intensity
      FROM soreness
      WHERE user_id = ? AND logged_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-     GROUP BY DATE(logged_at), muscle_group
-     ORDER BY date ASC`,
+     ORDER BY logged_at ASC`,
     [userId, days],
   )
 
   const heatmapData: Record<string, number> = {}
   const byDay = new Map<string, { n: number; total: number }>()
   for (const r of windowRows) {
-    heatmapData[r.muscleGroup] = (heatmapData[r.muscleGroup] ?? 0) + Number(r.n)
-    const day = byDay.get(r.date) ?? { n: 0, total: 0 }
-    day.n += Number(r.n)
-    day.total += Number(r.total)
-    byDay.set(r.date, day)
+    heatmapData[r.muscleGroup] = (heatmapData[r.muscleGroup] ?? 0) + 1
+    const date = localDay(parseMySQLDate(r.loggedAt), timeZone)
+    const day = byDay.get(date) ?? { n: 0, total: 0 }
+    day.n += 1
+    day.total += Number(r.intensity)
+    byDay.set(date, day)
   }
 
   return {

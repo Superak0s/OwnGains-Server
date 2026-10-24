@@ -14,6 +14,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - The trainer client list counts this week's sessions from the trainer's local Monday when the app sends it.
 - Supplement "taken today" and streaks follow the timezone the app sends.
+- Soreness trend days follow the timezone the app sends.
 
 ### Internal
 

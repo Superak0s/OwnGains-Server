@@ -103,6 +103,25 @@ describe("soreness routes", () => {
     })
   })
 
+  it("buckets the trend by the client's local day", async () => {
+    const s = await signup("soretz")
+    const at = new Date(Date.now() - 86_400_000)
+    // 22:30 UTC is already the next day in Athens.
+    at.setUTCHours(22, 30, 0, 0)
+    await request(app)
+      .post("/api/tracking/soreness")
+      .set(auth(s.token))
+      .send({ muscleGroup: "chest", intensity: 5, loggedAt: at.toISOString() })
+      .expect(201)
+
+    const res = await request(app)
+      .get("/api/tracking/soreness/stats")
+      .set({ ...auth(s.token), "X-Time-Zone": "Europe/Athens" })
+    expect(res.body.data.severityTrend[0].date).toBe(
+      new Date(at.getTime() + 86_400_000).toISOString().slice(0, 10),
+    )
+  })
+
   it("returns the latest 20 follow-ups per episode and batches in one UPDATE", async () => {
     const f = await signup("sorefu")
     const ep = await request(app)

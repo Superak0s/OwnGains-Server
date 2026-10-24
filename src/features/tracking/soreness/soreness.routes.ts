@@ -21,6 +21,7 @@ import {
   deleteSorenessEntry,
 } from "./soreness.model.js"
 import { idempotent } from "@/middleware/idempotency.js"
+import { requestTimeZone } from "@/utils/timeZone.js"
 
 const router: Router = Router()
 
@@ -51,7 +52,7 @@ router.get("/", async (req: Request, res: Response) => {
 
 router.get("/stats", async (req: Request, res: Response) => {
   const days = queryLimit(req, { def: 30, max: 365, key: "days" })
-  res.json({ success: true, data: await getSorenessStats(req.user!.id, days) })
+  res.json({ success: true, data: await getSorenessStats(req.user!.id, days, requestTimeZone(req)) })
 })
 
 /** Check in on many episodes at once: the "how is everything today" screen. */

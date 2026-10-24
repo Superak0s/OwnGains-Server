@@ -6,6 +6,7 @@ import { authenticateToken } from "@/middleware/auth.js"
 import { healthConsentGuard } from "@/features/tracking/healthConsent.js"
 import { ValidationError } from "@/middleware/errorHandler.js"
 import { parseIntParam, parseUuidParam, queryString } from "@/middleware/validation.js"
+import { formatDateForMySQL } from "@/config/database.js"
 import {
   acceptTrainerRequest,
   cancelTrainerRequest,
@@ -35,7 +36,11 @@ function requireIncludeTracking(body: Record<string, unknown>): boolean {
 router.get("/clients", async (req: Request, res: Response) => {
   const weekStart = queryString(req, "weekStart")
   if (!isDate(weekStart)) throw new ValidationError("weekStart must be YYYY-MM-DD")
-  const clients = await getClients(req.user!.id, weekStart)
+  // weekStartAt is the trainer's local Monday as an instant. weekStart alone is
+  // read as UTC midnight, which is all older apps send.
+  const at = queryString(req, "weekStartAt")
+  const since = at && !Number.isNaN(Date.parse(at)) ? formatDateForMySQL(at) : weekStart
+  const clients = await getClients(req.user!.id, since)
   res.json({ success: true, data: { clients } })
 })
 

@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Fixed
+
+- The trainer client list counts this week's sessions from the trainer's local Monday when the app sends it.
+
 ### Internal
 
 - The per-account rate limiters on message sends and profile and progress photo uploads are built by one `userRateLimit` helper.

@@ -7,6 +7,27 @@ const send = (token: string, body: object) =>
   request(app).post("/api/trainer/requests").set(auth(token)).send(body)
 
 describe("trainer routes", () => {
+  it("counts a session from the trainer's local Monday when weekStartAt is sent", async () => {
+    const coach = await signup("coach")
+    const client = await signup("client")
+    const sent = await send(coach.token, { toUserId: client.user.id, includeTracking: false })
+    await request(app)
+      .post(`/api/trainer/requests/${sent.body.data.request.id}/accept`)
+      .set(auth(client.token))
+      .send({ includeTracking: false })
+    // Monday 01:00 in Athens.
+    await pool.query(
+      `INSERT INTO workouts (user_id, day_number, start_time, end_time) VALUES (?, 1, '2026-10-25 23:00:00', '2026-10-26 00:00:00')`,
+      [await internalId(client.user.id)],
+    )
+
+    const roster = async (query: string) =>
+      (await request(app).get(`/api/trainer/clients?${query}`).set(auth(coach.token))).body.data.clients[0]
+        .sessionsThisWeek
+    expect(await roster("weekStart=2026-10-26&weekStartAt=2026-10-25T22:00:00.000Z")).toBe(1)
+    expect(await roster("weekStart=2026-10-26")).toBe(0)
+  })
+
   it("request, accept, act as, list clients, and tag the session", async () => {
     const coach = await signup("coach")
     const maria = await signup("maria")

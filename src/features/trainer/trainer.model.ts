@@ -275,7 +275,7 @@ export async function removeClient(trainerId: number, clientUuid: string): Promi
  * friends count even though demo accounts are stored disabled.
  *
  * @param trainerId - Numeric id of the caller.
- * @param weekStart - `YYYY-MM-DD`. Completed workouts that started on or after it count as this week.
+ * @param weekStart - `YYYY-MM-DD` or a UTC `YYYY-MM-DD HH:MM:SS`. Completed workouts that started on or after it count as this week.
  */
 export async function getClients(trainerId: number, weekStart: string): Promise<TrainerClient[]> {
   // GROUP BY p.id makes the program subquery NULL, not 0, when there's no program.

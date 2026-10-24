@@ -10,6 +10,7 @@ import { pool, formatDateForMySQL, withTransaction } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
 import { requireOptionalNote } from "@/middleware/validation.js"
+import { listFilterWhere, type ListFilter } from "../listFilter.js"
 
 /** Follow-ups returned per episode: the most recent ones, oldest first. */
 const FOLLOW_UPS_PER_EPISODE = 20
@@ -182,13 +183,6 @@ async function getSorenessById(
   return entry
 }
 
-/** Narrowing options for {@link listSorenessEntries}. */
-export interface SorenessFilter {
-  muscle?: string
-  /** Only episodes still active or recovering. */
-  activeOnly?: boolean
-}
-
 /**
  * The soreness list, optionally narrowed by muscle and/or to open episodes.
  * GET / comes through here. The active list
@@ -197,18 +191,12 @@ export interface SorenessFilter {
  */
 export async function listSorenessEntries(
   userId: number,
-  filter: SorenessFilter = {},
+  filter: ListFilter = {},
   limit = 100,
 ): Promise<SorenessEntry[]> {
-  const where = ["user_id = ?"]
-  const params: (string | number)[] = [userId]
-  if (filter.muscle !== undefined) {
-    where.push("muscle_group = ?")
-    params.push(filter.muscle)
-  }
-  if (filter.activeOnly) where.push("status IN ('active', 'recovering')")
+  const { where, params } = listFilterWhere(userId, filter)
   return listSoreness(
-    where.join(" AND "),
+    where,
     params,
     filter.activeOnly ? "updated_at DESC" : "logged_at DESC",
     filter.activeOnly ? Math.min(limit, MAX_ACTIVE_EPISODES) : limit,
@@ -441,11 +429,6 @@ async function listSoreness(
      ORDER BY created_at ASC, id ASC`,
     [rows.map((r) => r.id), FOLLOW_UPS_PER_EPISODE],
   )
-  const bySoreness = new Map<number, SorenessFollowUp[]>()
-  for (const f of followUps) {
-    const list = bySoreness.get(f.sorenessId)
-    if (list) list.push(f)
-    else bySoreness.set(f.sorenessId, [f])
-  }
+  const bySoreness = Map.groupBy(followUps, (f) => f.sorenessId)
   return rows.map((r) => ({ ...r, followUps: bySoreness.get(r.id) ?? [] }))
 }

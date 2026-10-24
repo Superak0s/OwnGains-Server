@@ -151,12 +151,7 @@ function toProgramData(
   days: DayRow[],
   slots: SlotRow[],
 ): ProgramData {
-  const byDay = new Map<number, SlotRow[]>()
-  for (const slot of slots) {
-    const list = byDay.get(slot.programDayId)
-    if (list) list.push(slot)
-    else byDay.set(slot.programDayId, [slot])
-  }
+  const byDay = Map.groupBy(slots, (slot) => slot.programDayId)
 
   // Slots come back ordered by split_name so the per-day grouping is stable,
   // which alphabetised every day's split keys. The program's own split_order is
@@ -226,6 +221,9 @@ function toProgramData(
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
+/** One exercise of an upload, with the muscle groups the payload gives it. */
+type CatalogEntry = { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
+
 /**
  * Catalog ids for every name in one round trip, creating the rows that don't
  * exist yet.
@@ -241,10 +239,7 @@ function toProgramData(
  * to user_exercise_muscles.
  */
 async function catalogIds(
-  exercises: Map<
-    string,
-    { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
-  >,
+  exercises: Map<string, CatalogEntry>,
 ): Promise<Map<string, number>> {
   const names = [...exercises.keys()].sort()
   if (!names.length) return new Map()
@@ -275,10 +270,7 @@ async function catalogIds(
 async function saveUploadMuscles(
   connection: PoolConnection,
   userId: number,
-  exercises: Map<
-    string,
-    { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
-  >,
+  exercises: Map<string, CatalogEntry>,
   ids: Map<string, number>,
 ): Promise<void> {
   // The uploader's labels become their own (user_exercise_muscles), whatever
@@ -334,10 +326,7 @@ export async function upsertProgram(
   // Every exercise named anywhere in the upload, with the best muscle groups
   // the payload offers for it. Keyed case-insensitively to match the catalog's
   // collation, so "Bench Press" and "bench press" in one upload are one entry.
-  const catalog = new Map<
-    string,
-    { name: string; primaryMuscles: string[]; secondaryMuscles: string[] }
-  >()
+  const catalog = new Map<string, CatalogEntry>()
   for (const ex of uploadExercises(days)) {
     const name = ex.name?.trim()
     if (!name) throw new ValidationError("Every exercise needs a name")

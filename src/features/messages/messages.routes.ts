@@ -1,9 +1,9 @@
 import { Router, Request, Response } from "express"
-import rateLimit from "express-rate-limit"
 import { authenticateToken } from "@/middleware/auth.js"
+import { userRateLimit } from "@/middleware/userRateLimit.js"
 import { idempotent } from "@/middleware/idempotency.js"
 import { ForbiddenError, ValidationError } from "@/middleware/errorHandler.js"
-import { parseIntParam, parseUuidParam, queryLimit, queryString } from "@/middleware/validation.js"
+import { parseIntParam, queryLimit, queryString } from "@/middleware/validation.js"
 import {
   deleteMessage,
   editMessage,
@@ -33,22 +33,14 @@ const router: Router = Router()
 // Never behind applyTrainerContext: a message is always sent as its author.
 router.use(authenticateToken)
 
-const sendLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => `messages:${req.user!.id}`,
-  skip: () => !!process.env.VITEST,
-  message: { success: false, error: "Too many messages, please slow down" },
-})
+const sendLimiter = userRateLimit("messages", 60 * 1000, 30, "Too many messages, please slow down")
 
 router.get("/", async (req: Request, res: Response) => {
   res.json({ success: true, conversations: await listConversations(req.user!.id) })
 })
 
 router.get("/:userUuid", async (req: Request, res: Response) => {
-  const peer = await resolvePeer(req.user!.id, parseUuidParam(req.params.userUuid, "user id"))
+  const peer = await resolvePeer(req.user!.id, req.params.userUuid)
   const beforeRaw = queryString(req, "before")
   const before = beforeRaw === undefined ? undefined : parseIntParam(beforeRaw, "before")
   const limit = queryLimit(req, { def: 50, max: 100 })
@@ -60,7 +52,7 @@ router.get("/:userUuid", async (req: Request, res: Response) => {
 })
 
 router.post("/:userUuid", sendLimiter, idempotent, async (req: Request, res: Response) => {
-  const peer = await resolvePeer(req.user!.id, parseUuidParam(req.params.userUuid, "user id"))
+  const peer = await resolvePeer(req.user!.id, req.params.userUuid)
   const body = messageBody(req)
   if (!peer.allowed)
     throw new ForbiddenError("You can only message friends and your trainer or clients", "NOT_ALLOWED")
@@ -84,7 +76,7 @@ router.post("/:userUuid", sendLimiter, idempotent, async (req: Request, res: Res
 })
 
 router.post("/:userUuid/read", async (req: Request, res: Response) => {
-  const peer = await resolvePeer(req.user!.id, parseUuidParam(req.params.userUuid, "user id"))
+  const peer = await resolvePeer(req.user!.id, req.params.userUuid)
   if ((await markRead(req.user!.id, peer.id)) > 0) {
     const { sendToUser } = await import("@/ws/wsServer.js")
     sendToUser(peer.uuid, "message_read", { byUuid: req.user!.uuid, readAt: new Date().toISOString() })
@@ -93,7 +85,7 @@ router.post("/:userUuid/read", async (req: Request, res: Response) => {
 })
 
 router.patch("/:userUuid/:messageId", async (req: Request, res: Response) => {
-  const peer = await resolvePeer(req.user!.id, parseUuidParam(req.params.userUuid, "user id"))
+  const peer = await resolvePeer(req.user!.id, req.params.userUuid)
   const messageId = parseIntParam(String(req.params.messageId), "message ID")
   const message = await editMessage(req.user!.id, peer.id, messageId, messageBody(req))
   const { sendToUser } = await import("@/ws/wsServer.js")
@@ -102,7 +94,7 @@ router.patch("/:userUuid/:messageId", async (req: Request, res: Response) => {
 })
 
 router.delete("/:userUuid/:messageId", async (req: Request, res: Response) => {
-  const peer = await resolvePeer(req.user!.id, parseUuidParam(req.params.userUuid, "user id"))
+  const peer = await resolvePeer(req.user!.id, req.params.userUuid)
   const messageId = parseIntParam(String(req.params.messageId), "message ID")
   await deleteMessage(req.user!.id, peer.id, messageId)
   const { sendToUser } = await import("@/ws/wsServer.js")

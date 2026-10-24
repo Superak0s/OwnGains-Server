@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express"
-import rateLimit from "express-rate-limit"
 import { authenticateToken } from "@/middleware/auth.js"
+import { userRateLimit } from "@/middleware/userRateLimit.js"
 import { healthConsentGuard } from "../healthConsent.js"
 import {
   photoUpload,
@@ -33,15 +33,12 @@ router.use(healthConsentGuard)
 // Per account rather than per IP: the global /api limiter can't tell a photo
 // upload (10 MB of body and a bounded but real decode) from a GET. Sixty in
 // fifteen minutes is a whole gym-mirror session with retries to spare.
-const uploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => `photo-upload:${req.user!.id}`,
-  skip: () => !!process.env.VITEST,
-  message: { success: false, error: "Too many photo uploads, please try again later" },
-})
+const uploadLimiter = userRateLimit(
+  "photo-upload",
+  15 * 60 * 1000,
+  60,
+  "Too many photo uploads, please try again later",
+)
 
 // Order matters: the rate limit and the decode slot are both claimed before
 // multer buffers the body, so a refused upload costs nothing.

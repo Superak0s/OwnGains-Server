@@ -24,6 +24,20 @@ const PENDING_REQUESTS_LIMIT = 500
 /** Outgoing requests one user may have waiting at once. */
 export const MAX_PENDING_SENT = 50
 
+// The pair is stored canonically (user_id = LEAST, friend_id = GREATEST), so
+// checking a live friendship is one equality per column.
+
+/** True when user `u` is an accepted friend of the id bound to both `?`. */
+export const ARE_FRIENDS = `EXISTS(SELECT 1 FROM friendships f
+       WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?)
+         AND f.status = 'accepted')`
+
+/** Joins the accepted friendship between the two users of grant `sp`. */
+export const ACCEPTED_FRIENDSHIP_JOIN = `JOIN friendships f
+       ON f.status = 'accepted'
+      AND f.user_id = LEAST(sp.from_user_id, sp.to_user_id)
+      AND f.friend_id = GREATEST(sp.from_user_id, sp.to_user_id)`
+
 /**
  * How long a sender must wait before asking the same person again. A decline
  * deletes the row, so without this the sender could re-send (and re-push a

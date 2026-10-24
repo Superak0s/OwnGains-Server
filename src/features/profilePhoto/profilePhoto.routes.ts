@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express"
-import rateLimit from "express-rate-limit"
 import { authenticateToken } from "@/middleware/auth.js"
+import { userRateLimit } from "@/middleware/userRateLimit.js"
 import { parseUuidParam } from "@/middleware/validation.js"
 import { photoUpload, assertImageUpload, uploadSlot } from "@/middleware/imageUpload.js"
 import {
@@ -14,15 +14,12 @@ const router: Router = Router()
 
 router.use(authenticateToken)
 
-const uploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => `profile-photo:${req.user!.id}`,
-  skip: () => !!process.env.VITEST,
-  message: { success: false, error: "Too many profile photo uploads, please try again later" },
-})
+const uploadLimiter = userRateLimit(
+  "profile-photo",
+  15 * 60 * 1000,
+  20,
+  "Too many profile photo uploads, please try again later",
+)
 
 router.put(
   "/",

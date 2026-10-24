@@ -94,16 +94,19 @@ router.delete("/permissions/:permissionId", async (req: Request, res: Response) 
   res.json({ success: true, message: "Permission revoked" })
 })
 
+/** The :friendId's numeric id, once they are a friend who granted history. */
+async function requireHistoryAccess(req: Request): Promise<number> {
+  const { id, friends, granted } =
+    await resolveFriendAccess(req.user!.id, req.params.friendId, "friendId", "history")
+  if (!friends) throw new ForbiddenError("Can only view sessions of friends")
+  if (!granted)
+    throw new ForbiddenError("Friend hasn't granted you history access")
+  return id
+}
+
 router.get("/sessions/friend/:friendId", async (req: Request, res: Response) => {
   const limit = queryLimit(req, { def: 60, max: 200 })
-  const {
-    id: friendId,
-    friends,
-    granted: allowed,
-  } = await resolveFriendAccess(req.user!.id, req.params.friendId, "friendId", "history")
-  if (!friends) throw new ForbiddenError("Can only view sessions of friends")
-  if (!allowed)
-    throw new ForbiddenError("Friend hasn't granted you history access")
+  const friendId = await requireHistoryAccess(req)
 
   const rawBefore = typeof req.query.before === "string" ? req.query.before : ""
   const before = rawBefore ? parseHistoryCursor(rawBefore) : null
@@ -131,14 +134,7 @@ router.get("/sessions/friend/:friendId", async (req: Request, res: Response) => 
 
 router.get("/sessions/friend/:friendId/:sessionId", async (req: Request, res: Response) => {
   const sessionId = parseIntParam(String(req.params.sessionId), "sessionId")
-  const {
-    id: friendId,
-    friends,
-    granted: allowed,
-  } = await resolveFriendAccess(req.user!.id, req.params.friendId, "friendId", "history")
-  if (!friends) throw new ForbiddenError("Can only view sessions of friends")
-  if (!allowed)
-    throw new ForbiddenError("Friend hasn't granted you history access")
+  const friendId = await requireHistoryAccess(req)
 
   const session = await getFriendSessionDetails(friendId, sessionId)
   if (!session) throw new NotFoundError("Session")

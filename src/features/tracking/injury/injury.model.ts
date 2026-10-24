@@ -8,6 +8,7 @@ import {
   throwCheckViolation,
 } from "@/middleware/errorHandler.js"
 import { requireOptionalNote } from "@/middleware/validation.js"
+import { listFilterWhere, type ListFilter } from "../listFilter.js"
 
 type InjuryType =
   | "strain"
@@ -35,6 +36,12 @@ const VALID_INJURY_TYPES: InjuryType[] = [
 ]
 
 const VALID_STATUSES: InjuryStatus[] = ["active", "recovering", "recovered"]
+
+function requirePainLevel(painLevel: number): number {
+  if (!Number.isInteger(painLevel) || painLevel < 0 || painLevel > 10)
+    throw new ValidationError("Pain level must be an integer from 0-10")
+  return painLevel
+}
 
 // Aliased to camelCase in SQL, so the query result is already the wire shape.
 interface InjuryRecord extends RowDataPacket {
@@ -80,9 +87,7 @@ export async function logInjury(
       `Invalid injury type. Must be one of: ${VALID_INJURY_TYPES.join(", ")}`,
     )
   }
-  if (!Number.isInteger(painLevel) || painLevel < 0 || painLevel > 10) {
-    throw new ValidationError("Pain level must be an integer from 0-10")
-  }
+  requirePainLevel(painLevel)
 
   const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO injuries (user_id, muscle_group, injury_type, pain_level, start_date, note)
@@ -112,14 +117,6 @@ async function getInjuryById(
   return rows[0]
 }
 
-/** Narrowing options for listing injuries. */
-export interface InjuryFilter {
-  /** Only this muscle group. */
-  muscle?: string
-  /** Only injuries still active or recovering. */
-  activeOnly?: boolean
-}
-
 /**
  * The injury list, optionally narrowed by muscle and/or to unhealed ones.
  * GET / takes the filters as ?muscle= and ?status=active. Four fixed
@@ -127,18 +124,12 @@ export interface InjuryFilter {
  */
 export async function listInjuries(
   userId: number,
-  filter: InjuryFilter = {},
+  filter: ListFilter = {},
   limit = 100,
 ): Promise<InjuryRecord[]> {
-  const where = ["user_id = ?"]
-  const params: (string | number)[] = [userId]
-  if (filter.muscle !== undefined) {
-    where.push("muscle_group = ?")
-    params.push(filter.muscle)
-  }
-  if (filter.activeOnly) where.push("status IN ('active', 'recovering')")
+  const { where, params } = listFilterWhere(userId, filter)
   const [rows] = await pool.execute<InjuryRecord[]>(
-    `SELECT ${INJURY_COLS} FROM injuries WHERE ${where.join(" AND ")}
+    `SELECT ${INJURY_COLS} FROM injuries WHERE ${where}
      ORDER BY created_at DESC LIMIT ?`,
     [...params, limit],
   )
@@ -164,14 +155,8 @@ export async function updateInjury(
   const values: (string | number | null)[] = []
 
   if (updates.painLevel !== undefined) {
-    if (
-      !Number.isInteger(updates.painLevel) ||
-      updates.painLevel < 0 ||
-      updates.painLevel > 10
-    )
-      throw new ValidationError("Pain level must be an integer from 0-10")
     fields.push("pain_level = ?")
-    values.push(updates.painLevel)
+    values.push(requirePainLevel(updates.painLevel))
   }
   if (updates.status !== undefined) {
     if (!VALID_STATUSES.includes(updates.status))

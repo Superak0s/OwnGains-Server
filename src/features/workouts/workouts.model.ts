@@ -159,6 +159,15 @@ export function parseMuscleGroups(raw: unknown): string[] {
     : []
 }
 
+/** The row with both muscle-group columns run through {@link parseMuscleGroups}. */
+export const withMuscles = <T extends { primaryMuscles?: unknown; secondaryMuscles?: unknown }>(
+  row: T,
+) => ({
+  ...row,
+  primaryMuscles: parseMuscleGroups(row.primaryMuscles),
+  secondaryMuscles: parseMuscleGroups(row.secondaryMuscles),
+})
+
 /**
  * Catalog id for a name, creating the row on first sighting. The only copy of
  * this helper: the set paths and the program edits share it.
@@ -741,11 +750,7 @@ export async function endSession(
   // one, so ownership is decided by the read, not by affectedRows.
   if (!row) throw new ForbiddenError("Session not found or unauthorized", "SESSION_NOT_FOUND")
   return {
-    session: {
-      ...row,
-      primaryMuscles: parseMuscleGroups(row.primaryMuscles),
-      secondaryMuscles: parseMuscleGroups(row.secondaryMuscles),
-    } as unknown as Session,
+    session: withMuscles(row) as unknown as Session,
     alreadyEnded: updated.affectedRows === 0,
   }
 }
@@ -804,9 +809,7 @@ export async function getSessionDetails(
     [sessionId],
   )
   return {
-    ...workouts[0],
-    primaryMuscles: parseMuscleGroups(workouts[0].primaryMuscles),
-    secondaryMuscles: parseMuscleGroups(workouts[0].secondaryMuscles),
+    ...withMuscles(workouts[0]),
     setTimings: sets,
   } as unknown as Session
 }
@@ -881,9 +884,7 @@ export async function getSessionHistory(
   if (!rows.length) return []
 
   const sessions: Session[] = rows.map((r) => ({
-    ...(r as unknown as Session),
-    primaryMuscles: parseMuscleGroups(r.primaryMuscles),
-    secondaryMuscles: parseMuscleGroups(r.secondaryMuscles),
+    ...(withMuscles(r) as unknown as Session),
     setTimings: [],
   }))
 
@@ -898,13 +899,9 @@ export async function getSessionHistory(
        ORDER BY ws.workout_id ASC, ws.created_at ASC, ws.id ASC`,
       ids,
     )
-    const bySession: Record<number, SetTiming[]> = {}
-    for (const t of sets) {
-      if (!bySession[t.sessionId]) bySession[t.sessionId] = []
-      bySession[t.sessionId].push(t)
-    }
+    const bySession = Map.groupBy(sets, (t) => t.sessionId)
     sessions.forEach((s) => {
-      s.setTimings = bySession[s.id] || []
+      s.setTimings = bySession.get(s.id) || []
     })
   }
   return sessions
@@ -1047,16 +1044,12 @@ export async function getRecordSessions(userId: number): Promise<Session[]> {
     return String(b.startTime).localeCompare(String(a.startTime))
   })
 
-  const bySession = new Map<number, SetTiming[]>()
-  for (const t of await fetchKeptSets(keptBySession)) {
-    const list = bySession.get(t.sessionId)
-    if (list) list.push(t)
-    else bySession.set(t.sessionId, [t])
-  }
+  const bySession = Map.groupBy(
+    await fetchKeptSets(keptBySession),
+    (t) => t.sessionId,
+  )
   return rows.map((r) => ({
-    ...(r as unknown as Session),
-    primaryMuscles: parseMuscleGroups(r.primaryMuscles),
-    secondaryMuscles: parseMuscleGroups(r.secondaryMuscles),
+    ...(withMuscles(r) as unknown as Session),
     // Every row here was fetched because it has kept sets.
     setTimings: bySession.get(r.id)!,
   }))

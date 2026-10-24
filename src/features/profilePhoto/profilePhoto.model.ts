@@ -2,6 +2,7 @@ import { pool, withTransaction } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { NotFoundError } from "@/middleware/errorHandler.js"
 import { encodeAvatar, sha256 } from "@/features/tracking/progressPhoto/progressPhoto.model.js"
+import { ARE_FRIENDS } from "@/features/social/friends/friends.model.js"
 
 /** Replaces the user's profile photo. Returns the stored JPEG's hash. */
 export async function setProfilePhoto(userId: number, upload: Buffer): Promise<string> {
@@ -45,9 +46,7 @@ export const getProfilePhoto = (userId: number) => firstPhoto("u.id = ?", [userI
 /** Only the owner and accepted friends can see a photo. Anyone else gets the same 404 as no photo. */
 export const getVisibleProfilePhoto = (viewerId: number, userUuid: string) =>
   firstPhoto(
-    `u.uuid = ? AND u.disabled_at IS NULL AND (u.id = ? OR EXISTS(
-       SELECT 1 FROM friendships f
-       WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?) AND f.status = 'accepted'))`,
+    `u.uuid = ? AND u.disabled_at IS NULL AND (u.id = ? OR ${ARE_FRIENDS})`,
     [userUuid, viewerId, viewerId, viewerId],
   )
 

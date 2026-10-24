@@ -7,12 +7,13 @@ import {
   ValidationError,
 } from "@/middleware/errorHandler.js"
 import {
-  parseMuscleGroups,
+  withMuscles,
   EXERCISE_MUSCLE_COLS,
   SET_FROM,
   type HistoryCursor,
 } from "@/features/workouts/workouts.model.js"
 import { parseUuidParam } from "@/middleware/validation.js"
+import { ACCEPTED_FRIENDSHIP_JOIN, ARE_FRIENDS } from "../friends/friends.model.js"
 import type {
   Permission,
   PermissionType,
@@ -109,13 +110,6 @@ function parsePayload(v: unknown): Record<string, unknown> | null {
   }
   return v as Record<string, unknown>
 }
-
-// The pair is stored canonically (user_id = LEAST, friend_id = GREATEST), so
-// checking a live friendship against a grant is one equality per column.
-const ACCEPTED_FRIENDSHIP_JOIN = `JOIN friendships f
-       ON f.status = 'accepted'
-      AND f.user_id = LEAST(sp.from_user_id, sp.to_user_id)
-      AND f.friend_id = GREATEST(sp.from_user_id, sp.to_user_id)`
 
 /**
  * Grants a permission to another user, or replaces the payload of an
@@ -349,9 +343,7 @@ export async function resolveFriendAccess(
     (RowDataPacket & { id: number; friends: number; granted: number })[]
   >(
     `SELECT u.id,
-       EXISTS(SELECT 1 FROM friendships f
-               WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?)
-                 AND f.status = 'accepted') AS friends,
+       ${ARE_FRIENDS} AS friends,
        EXISTS(SELECT 1 FROM sharing_permissions sp
                WHERE sp.from_user_id = u.id AND sp.to_user_id = ?
                  AND sp.permission_type = ?) AS granted
@@ -377,12 +369,6 @@ const FRIEND_WORKOUT_COLS = `w.id, w.day_number AS dayNumber, w.day_title AS day
        pd.secondary_muscles AS secondaryMuscles
      FROM workouts w LEFT JOIN program_days pd ON pd.id = w.program_day_id
      LEFT JOIN users t ON t.id = w.logged_by_trainer_id`
-
-const withMuscles = (w: FriendWorkoutRow) => ({
-  ...w,
-  primaryMuscles: parseMuscleGroups(w.primaryMuscles),
-  secondaryMuscles: parseMuscleGroups(w.secondaryMuscles),
-})
 
 // The fields a friend sees for one set, shared by the detail route and the
 // list's includeTimings, so the two can't drift apart.

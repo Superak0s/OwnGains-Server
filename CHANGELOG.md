@@ -6,6 +6,20 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Internal
+
+- The per-account rate limiters on message sends and profile and progress photo uploads are built by one `userRateLimit` helper.
+- The injury and soreness lists read their `?muscle=` and `?status=active` filters and build the matching WHERE clause through one shared `tracking/listFilter.ts`.
+- The accepted-friendship SQL check and join used by auth, messages, profile photos, sharing and trainer are two constants in `friends.model.ts`.
+- Workout rows from the sessions and friend-sharing queries parse their muscle groups through one `withMuscles` helper in `workouts.model.ts`.
+- The two friend-history routes share one friendship and history-grant check.
+- Injury create and update share one pain-level check.
+- The tracking relay's resend request writes the INSERT and its existence check from one SQL target.
+- `resolvePeer` parses the `:userUuid` param itself, so the five message routes no longer repeat the parse.
+- Tests that need two friends call one shared `befriend` in `src/tests/helpers.ts`.
+- Rows are grouped by key with the built-in `Map.groupBy` in the program, soreness, supplement and workout models, in place of five hand-written loops.
+- The program upload's exercise shape is one `CatalogEntry` type in `programs.model.ts`, in place of three inline copies.
+
 ## [1.0.1] - 2026-10-22
 
 ### Internal

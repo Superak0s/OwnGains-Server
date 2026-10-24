@@ -10,6 +10,7 @@ import { envInt } from "@/config/env.js"
 import { hashPassword } from "./password.js"
 import { displayNameError, usernameError } from "./nameFilter.js"
 import { logger } from "@/utils/logger.js"
+import { ARE_FRIENDS } from "@/features/social/friends/friends.model.js"
 
 export { verifyPassword, DUMMY_PASSWORD_HASH } from "./password.js"
 
@@ -348,9 +349,7 @@ export async function findTraineeForTrainer(
   const [rows] = await pool.execute<AuthUserRow[]>(
     `SELECT ${USER_COLS} FROM users u
      WHERE u.uuid = ? AND (u.disabled_at IS NULL OR u.demo_owner_id = ?)
-       AND EXISTS(SELECT 1 FROM friendships f
-                   WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?)
-                     AND f.status = 'accepted')
+       AND ${ARE_FRIENDS}
        AND EXISTS(SELECT 1 FROM sharing_permissions sp
                    WHERE sp.from_user_id = u.id AND sp.to_user_id = ?
                      AND sp.permission_type = 'trainer')`,

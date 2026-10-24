@@ -28,6 +28,21 @@ export function auth(token: string) {
   return { Authorization: `Bearer ${token}` }
 }
 
+// Sends a friend request from `a` to `b` and accepts it as `b`.
+export async function befriend(a: { token: string }, b: { token: string; username: string }) {
+  const req = await request(app)
+    .post("/api/friends/request")
+    .set(auth(a.token))
+    .send({ username: b.username })
+  if (req.status !== 201)
+    throw new Error(`friend request failed: ${req.status} ${req.text}`)
+  const accept = await request(app)
+    .post(`/api/friends/request/${req.body.friendshipId}/accept`)
+    .set(auth(b.token))
+  if (accept.status !== 200)
+    throw new Error(`friend accept failed: ${accept.status} ${accept.text}`)
+}
+
 // API responses contain the public uuid. Tests that query tables directly need
 // the internal users.id the foreign keys point at.
 export async function internalId(uuid: string): Promise<number> {

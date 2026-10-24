@@ -6,18 +6,16 @@
 import { Router, Request, Response } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import { healthConsentGuard } from "../healthConsent.js"
+import { listFilter } from "../listFilter.js"
 import {
   queryLimit,
   parseIntParam,
   parseBackdatedTimestamp,
-  listMuscleFilter,
-  listActiveFilter,
 } from "@/middleware/validation.js"
 import { NotFoundError, ValidationError } from "@/middleware/errorHandler.js"
 import {
   logSoreness,
   listSorenessEntries,
-  type SorenessFilter,
   getSorenessStats,
   batchFollowUp,
   deleteSorenessEntry,
@@ -41,16 +39,11 @@ router.post("/", idempotent, async (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: entry })
 })
 
-/** ?muscle= and ?status=active on the list route. */
-function sorenessFilter(req: Request): SorenessFilter {
-  return { muscle: listMuscleFilter(req), activeOnly: listActiveFilter(req) }
-}
-
 /** GET /?muscle=<group>&status=active: both filters optional. */
 router.get("/", async (req: Request, res: Response) => {
   const history = await listSorenessEntries(
     req.user!.id,
-    sorenessFilter(req),
+    listFilter(req),
     queryLimit(req, { def: 100, max: 365 }),
   )
   res.json({ success: true, data: history })

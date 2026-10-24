@@ -2,19 +2,7 @@
 // by uuid, including columns with no foreign key to declare them.
 import { describe, it, expect } from "vitest"
 import request from "supertest"
-import { app, signup, auth, internalId } from "../../../tests/helpers.js"
-
-async function befriend(a: { token: string }, b: { token: string; username: string }) {
-  const req = await request(app)
-    .post("/api/friends/request")
-    .set(auth(a.token))
-    .send({ username: b.username })
-  expect(req.status).toBe(201)
-  const accept = await request(app)
-    .post(`/api/friends/request/${req.body.friendshipId}/accept`)
-    .set(auth(b.token))
-  expect(accept.status).toBe(200)
-}
+import { app, signup, auth, internalId, befriend } from "../../../tests/helpers.js"
 
 describe("account export isolation", () => {
   // idempotency_keys.actor_id has no FK to users, so idsToUuids never

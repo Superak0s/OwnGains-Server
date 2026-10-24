@@ -208,23 +208,20 @@ export async function ackMessages(trainerId: number, deviceId: string, ids: numb
  * @throws NotFoundError when the device isn't registered or the client hasn't granted Tracking Access.
  */
 export async function requestResend(trainerId: number, deviceId: string, clientUuid: string): Promise<void> {
-  const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT IGNORE INTO tracking_resend_requests (permission_id, device_key_id)
-     SELECT sp.id, k.id FROM trainer_device_keys k
+  // The caller's device and the client's tracking grant, bound to the params below.
+  const target = `FROM trainer_device_keys k
      JOIN sharing_permissions sp ON sp.to_user_id = k.user_id AND sp.permission_type = 'tracking'
      JOIN users u ON u.id = sp.from_user_id AND u.uuid = ?
-     WHERE k.user_id = ? AND k.device_id = ?`,
-    [clientUuid, trainerId, deviceId],
+     WHERE k.user_id = ? AND k.device_id = ?`
+  const params = [clientUuid, trainerId, deviceId]
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT IGNORE INTO tracking_resend_requests (permission_id, device_key_id)
+     SELECT sp.id, k.id ${target}`,
+    params,
   )
   if (result.affectedRows === 0) {
     // INSERT IGNORE also reports 0 for a request that is already pending.
-    const [exists] = await pool.execute<RowDataPacket[]>(
-      `SELECT 1 FROM trainer_device_keys k
-       JOIN sharing_permissions sp ON sp.to_user_id = k.user_id AND sp.permission_type = 'tracking'
-       JOIN users u ON u.id = sp.from_user_id AND u.uuid = ?
-       WHERE k.user_id = ? AND k.device_id = ?`,
-      [clientUuid, trainerId, deviceId],
-    )
+    const [exists] = await pool.execute<RowDataPacket[]>(`SELECT 1 ${target}`, params)
     if (!exists.length) throw new NotFoundError("Tracking Access")
   }
 }

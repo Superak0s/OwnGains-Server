@@ -1,20 +1,18 @@
 import { Router, Request, Response } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import { healthConsentGuard } from "../healthConsent.js"
+import { listFilter } from "../listFilter.js"
 import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
 import {
   queryLimit,
   parseIntParam,
   parseBackdatedTimestamp,
-  listMuscleFilter,
-  listActiveFilter,
 } from "@/middleware/validation.js"
 import {
   logInjury,
   listInjuries,
   updateInjury,
   deleteInjury,
-  type InjuryFilter,
 } from "./injury.model.js"
 import { idempotent } from "@/middleware/idempotency.js"
 
@@ -25,14 +23,6 @@ const LIST_LIMIT = (req: Request) => queryLimit(req, { def: 100, max: 500 })
 
 router.use(authenticateToken)
 router.use(healthConsentGuard)
-
-/** ?muscle= and ?status=active on the list route. */
-function injuryFilter(req: Request): InjuryFilter {
-  return {
-    muscle: listMuscleFilter(req),
-    activeOnly: listActiveFilter(req),
-  }
-}
 
 router.post("/", idempotent, async (req: Request, res: Response) => {
   const { muscleGroup, injuryType, painLevel, startDate, note } = req.body
@@ -55,7 +45,7 @@ router.post("/", idempotent, async (req: Request, res: Response) => {
 
 /** GET /?muscle=<group>&status=active: both filters optional. */
 router.get("/", async (req: Request, res: Response) => {
-  const injuries = await listInjuries(req.user!.id, injuryFilter(req), LIST_LIMIT(req))
+  const injuries = await listInjuries(req.user!.id, listFilter(req), LIST_LIMIT(req))
   res.json({ success: true, data: injuries })
 })
 

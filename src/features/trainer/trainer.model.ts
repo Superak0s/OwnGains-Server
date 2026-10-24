@@ -8,7 +8,10 @@ import {
   NotFoundError,
   ValidationError,
 } from "@/middleware/errorHandler.js"
-import { MAX_PENDING_SENT } from "@/features/social/friends/friends.model.js"
+import {
+  ACCEPTED_FRIENDSHIP_JOIN,
+  MAX_PENDING_SENT,
+} from "@/features/social/friends/friends.model.js"
 
 /** A pending trainer request as the API returns it. */
 export interface TrainerRequest {
@@ -292,9 +295,7 @@ export async function getClients(trainerId: number, weekStart: string): Promise<
      FROM sharing_permissions sp
      JOIN users u ON u.id = sp.from_user_id
       AND (u.disabled_at IS NULL OR u.demo_owner_id = sp.to_user_id)
-     JOIN friendships f ON f.status = 'accepted'
-      AND f.user_id = LEAST(sp.from_user_id, sp.to_user_id)
-      AND f.friend_id = GREATEST(sp.from_user_id, sp.to_user_id)
+     ${ACCEPTED_FRIENDSHIP_JOIN}
      WHERE sp.to_user_id = ? AND sp.permission_type = 'trainer'
      ORDER BY u.username LIMIT 500`,
     [weekStart, trainerId],

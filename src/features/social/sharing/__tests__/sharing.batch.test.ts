@@ -1,21 +1,9 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { randomUUID } from "node:crypto"
 import request from "supertest"
-import { app, signup, auth } from "../../../../tests/helpers.js"
+import { app, signup, auth, befriend } from "../../../../tests/helpers.js"
 
 type User = Awaited<ReturnType<typeof signup>>
-
-async function befriend(a: User, b: User) {
-  const req = await request(app)
-    .post("/api/friends/request")
-    .set(auth(a.token))
-    .send({ username: b.username })
-  expect(req.status).toBe(201)
-  await request(app)
-    .post(`/api/friends/request/${req.body.friendshipId}/accept`)
-    .set(auth(b.token))
-    .expect(200)
-}
 
 async function startSession(u: User, startTime?: string): Promise<number> {
   const res = await request(app)

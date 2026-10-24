@@ -1,6 +1,8 @@
 import { pool, parseMySQLDate } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { ForbiddenError, NotFoundError } from "@/middleware/errorHandler.js"
+import { ARE_FRIENDS } from "@/features/social/friends/friends.model.js"
+import { parseUuidParam } from "@/middleware/validation.js"
 
 /** A message as the API returns it, seen from the reader's side. */
 export interface Message {
@@ -62,18 +64,18 @@ const TRAINER_EITHER_WAY = `EXISTS(SELECT 1 FROM sharing_permissions sp
          OR (sp.from_user_id = ? AND sp.to_user_id = u.id)))`
 
 /**
- * Resolves the other user of a thread.
+ * Resolves the other user of a thread from the raw `:userUuid` param.
  *
+ * @throws ValidationError for a malformed uuid.
  * @throws NotFoundError for an unknown, suspended (unless it is the viewer's demo friend) or own uuid, so a probe can't tell them apart.
  */
-export async function resolvePeer(viewerId: number, uuid: string): Promise<Peer> {
+export async function resolvePeer(viewerId: number, value: unknown): Promise<Peer> {
+  const uuid = parseUuidParam(value, "user id")
   const [rows] = await pool.execute<
     (RowDataPacket & { id: number; username: string; friends: number; trainer: number })[]
   >(
     `SELECT u.id, u.username,
-       EXISTS(SELECT 1 FROM friendships f
-               WHERE f.user_id = LEAST(u.id, ?) AND f.friend_id = GREATEST(u.id, ?)
-                 AND f.status = 'accepted') AS friends,
+       ${ARE_FRIENDS} AS friends,
        ${TRAINER_EITHER_WAY} AS trainer
      FROM users u WHERE u.uuid = ? AND (u.disabled_at IS NULL OR u.demo_owner_id = ?) AND u.id <> ?`,
     [viewerId, viewerId, viewerId, viewerId, uuid, viewerId, viewerId],

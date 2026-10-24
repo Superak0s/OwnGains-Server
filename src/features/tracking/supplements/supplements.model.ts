@@ -214,12 +214,7 @@ export async function listSupplementSummaries(
     supplementId ? [userId, supplementId] : [userId],
   )
 
-  const daysBySupplement = new Map<number, typeof rows>()
-  for (const row of rows) {
-    const list = daysBySupplement.get(row.supplementId)
-    if (list) list.push(row)
-    else daysBySupplement.set(row.supplementId, [row])
-  }
+  const daysBySupplement = Map.groupBy(rows, (row) => row.supplementId)
 
   const today = utcDay(new Date())
   return supplements.map((s) => {

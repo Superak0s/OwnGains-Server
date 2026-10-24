@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import request from "supertest"
-import { app, signup, auth, internalId } from "../../../tests/helpers.js"
+import { app, signup, auth, internalId, befriend } from "../../../tests/helpers.js"
 import { pool } from "@/config/database.js"
 
 const send = (token: string, to: string, body: unknown) =>
@@ -9,11 +9,6 @@ const thread = (token: string, other: string, query = "") =>
   request(app).get(`/api/messages/${other}${query}`).set(auth(token))
 const inbox = async (token: string) =>
   (await request(app).get("/api/messages").set(auth(token))).body.conversations
-
-async function befriend(a: Awaited<ReturnType<typeof signup>>, b: Awaited<ReturnType<typeof signup>>) {
-  const req = await request(app).post("/api/friends/request").set(auth(a.token)).send({ username: b.username })
-  await request(app).post(`/api/friends/request/${req.body.friendshipId}/accept`).set(auth(b.token))
-}
 
 describe("messages routes", () => {
   it("lets friends talk, pages, counts unread and marks read", async () => {

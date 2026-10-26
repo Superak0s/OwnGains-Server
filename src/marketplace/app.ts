@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit"
 import { version } from "../config/version.js"
 import { errorHandler } from "../middleware/errorHandler.js"
 import { marketplaceConfig } from "./env.js"
+import { meRouter } from "./me.routes.js"
 import { skinsRouter } from "./skins.routes.js"
 
 /** The marketplace Express app, exported for tests. */
@@ -35,6 +36,7 @@ app.get("/healthz", (_req, res) => {
 })
 
 app.use("/api/skins", skinsRouter)
+app.use("/api/me", meRouter)
 
 app.use((_req, res) => {
   res.status(404).json({ success: false, error: "Not found" })

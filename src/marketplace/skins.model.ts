@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto"
 import type { RowDataPacket, ResultSetHeader } from "mysql2/promise"
-import { pool, parseMySQLDate } from "../config/database.js"
+import { pool, parseMySQLDate, withTransaction } from "../config/database.js"
 import { marketplaceConfig } from "./env.js"
 import { swatchOf, type SkinDocument, type SkinUpload } from "./skinFormat.js"
 
@@ -136,4 +137,54 @@ export async function deleteSkin(id: number): Promise<void> {
 
 export async function takeDownSkin(id: number): Promise<void> {
   await pool.execute("UPDATE skins SET taken_down_at = UTC_TIMESTAMP() WHERE id = ?", [id])
+}
+
+/** Counts a download, and a unique one the first time this install fetches this skin. Null when the skin is not visible. */
+export async function recordDownload(
+  id: number,
+  installId: string | null,
+): Promise<{ downloads: number; uniqueDownloads: number } | null> {
+  return withTransaction(async (conn) => {
+    const [res] = await conn.execute<ResultSetHeader>(
+      "UPDATE skins SET downloads = downloads + 1 WHERE id = ? AND taken_down_at IS NULL",
+      [id],
+    )
+    if (!res.affectedRows) return null
+    if (installId) {
+      const hash = createHmac("sha256", marketplaceConfig.downloadSalt).update(`${id}:${installId}`).digest()
+      const [ins] = await conn.execute<ResultSetHeader>("INSERT IGNORE INTO skin_downloads (skin_id, hash) VALUES (?, ?)", [id, hash])
+      if (ins.affectedRows === 1) await conn.execute("UPDATE skins SET unique_downloads = unique_downloads + 1 WHERE id = ?", [id])
+    }
+    const [rows] = await conn.execute<RowDataPacket[]>("SELECT downloads, unique_downloads FROM skins WHERE id = ?", [id])
+    return { downloads: rows[0].downloads, uniqueDownloads: rows[0].unique_downloads }
+  })
+}
+
+export async function rateSkin(id: number, uuid: string, stars: number): Promise<{ average: number | null; count: number; myRating: number }> {
+  return withTransaction(async (conn) => {
+    await conn.execute(
+      "INSERT INTO skin_ratings (skin_id, rater_uuid, stars) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE stars = VALUES(stars)",
+      [id, uuid, stars],
+    )
+    await conn.execute(
+      `UPDATE skins s JOIN (SELECT COALESCE(SUM(stars), 0) AS total, COUNT(*) AS n FROM skin_ratings WHERE skin_id = ?) r
+        SET s.rating_sum = r.total, s.rating_count = r.n WHERE s.id = ?`,
+      [id, id],
+    )
+    const [rows] = await conn.execute<RowDataPacket[]>("SELECT rating_sum, rating_count FROM skins WHERE id = ?", [id])
+    return { average: averageOf(rows[0].rating_sum, rows[0].rating_count), count: rows[0].rating_count, myRating: stars }
+  })
+}
+
+export async function addReport(id: number, uuid: string, reason: string): Promise<void> {
+  await pool.execute("INSERT INTO skin_reports (skin_id, reporter_uuid, reason) VALUES (?, ?, ?)", [id, uuid, reason])
+}
+
+/** Removes a user's identity from every marketplace row. Their skins, stars and reports stay, unattributed. */
+export async function anonymizeUser(uuid: string): Promise<void> {
+  await withTransaction(async (conn) => {
+    await conn.execute("UPDATE skins SET author_uuid = NULL, author_name = NULL WHERE author_uuid = ?", [uuid])
+    await conn.execute("UPDATE skin_ratings SET rater_uuid = NULL WHERE rater_uuid = ?", [uuid])
+    await conn.execute("UPDATE skin_reports SET reporter_uuid = NULL WHERE reporter_uuid = ?", [uuid])
+  })
 }

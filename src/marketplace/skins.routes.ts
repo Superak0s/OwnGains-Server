@@ -1,7 +1,7 @@
 import { Router } from "express"
 import rateLimit from "express-rate-limit"
 import { ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from "../middleware/errorHandler.js"
-import { parseIntParam, queryString } from "../middleware/validation.js"
+import { isUuid, parseIntParam, queryString } from "../middleware/validation.js"
 import { currentUser, optionalUser, requireUser } from "./auth.js"
 import { validateSkinUpload } from "./skinFormat.js"
 import * as skins from "./skins.model.js"
@@ -16,6 +16,15 @@ const publishLimiter = rateLimit({
   keyGenerator: (_req, res) => `user:${currentUser(res)!.uuid}`,
   skip: () => !!process.env.VITEST,
   message: { success: false, error: "You can publish 10 skins an hour. Try again later." },
+})
+
+const downloadLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !!process.env.VITEST,
+  message: { success: false, error: "Too many downloads, please try again later" },
 })
 
 const SORTS = new Set<skins.SkinSort>(["popular", "rating", "new"])
@@ -53,24 +62,48 @@ skinsRouter.post("/", requireUser, publishLimiter, async (req, res) => {
 })
 
 /** The visible skin behind `:id`, or 404. */
-async function ownedOr404(id: string) {
+async function visibleOr404(id: string) {
   const found = await skins.findSkin(parseIntParam(id, "skin id"))
   if (!found) throw new NotFoundError("Skin not found")
   return found
 }
 
 skinsRouter.put("/:id", requireUser, async (req, res) => {
-  const found = await ownedOr404(req.params.id as string)
+  const found = await visibleOr404(req.params.id as string)
   if (found.authorUuid !== currentUser(res)!.uuid) throw new ForbiddenError("Only the author can update this skin")
   const version = await skins.updateSkin(found.id, validateSkinUpload(req.body))
   res.json({ id: found.id, url: skins.skinUrl(found.id), version })
 })
 
 skinsRouter.delete("/:id", requireUser, async (req, res) => {
-  const found = await ownedOr404(req.params.id as string)
+  const found = await visibleOr404(req.params.id as string)
   const user = currentUser(res)!
   if (found.authorUuid === user.uuid) await skins.deleteSkin(found.id)
   else if (user.isAdmin) await skins.takeDownSkin(found.id)
   else throw new ForbiddenError("Only the author can delete this skin")
   res.status(204).end()
+})
+
+skinsRouter.post("/:id/download", downloadLimiter, async (req, res) => {
+  const installId = req.get("x-install-id")
+  const counts = await skins.recordDownload(parseIntParam(req.params.id as string, "skin id"), isUuid(installId) ? installId : null)
+  if (!counts) throw new NotFoundError("Skin not found")
+  res.json(counts)
+})
+
+skinsRouter.put("/:id/rating", requireUser, async (req, res) => {
+  const found = await visibleOr404(req.params.id as string)
+  const stars = (req.body as { stars?: unknown })?.stars
+  if (!Number.isInteger(stars) || (stars as number) < 1 || (stars as number) > 5)
+    throw new ValidationError("stars must be a whole number from 1 to 5")
+  res.json(await skins.rateSkin(found.id, currentUser(res)!.uuid, stars as number))
+})
+
+skinsRouter.post("/:id/report", requireUser, async (req, res) => {
+  const found = await visibleOr404(req.params.id as string)
+  const reason = (req.body as { reason?: unknown })?.reason
+  const trimmed = typeof reason === "string" ? reason.trim() : ""
+  if (!trimmed || trimmed.length > 500) throw new ValidationError("reason must be 1 to 500 characters")
+  await skins.addReport(found.id, currentUser(res)!.uuid, trimmed)
+  res.status(201).json({ success: true })
 })

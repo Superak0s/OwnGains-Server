@@ -49,10 +49,13 @@ const bearerToken = (req: Request): string | null => {
   return header?.startsWith("Bearer ") ? header.slice(7).trim() || null : null
 }
 
-/** Sets `res.locals.marketUser` when a valid token is sent. A rejected token is treated as anonymous. */
+/**
+ * Sets `res.locals.marketUser` when a valid token is sent. A rejected token, or an account server
+ * that can't be reached, is treated as anonymous so browsing keeps working.
+ */
 export async function optionalUser(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = bearerToken(req)
-  res.locals.marketUser = token ? ((await resolveUser(token)) ?? undefined) : undefined
+  res.locals.marketUser = token ? ((await resolveUser(token).catch(() => null)) ?? undefined) : undefined
   next()
 }
 

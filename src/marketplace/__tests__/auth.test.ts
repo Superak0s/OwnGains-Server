@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import express from "express"
 import request from "supertest"
 import { app } from "../app.js"
-import { requireUser } from "../auth.js"
+import { optionalUser, requireUser } from "../auth.js"
 import { errorHandler } from "../../middleware/errorHandler.js"
 import { marketplaceConfig } from "../env.js"
 import { stubAuthServer, fakeUser, bearer } from "./authStub.js"
@@ -10,6 +10,9 @@ import { stubAuthServer, fakeUser, bearer } from "./authStub.js"
 const probe = express()
 probe.get("/probe", requireUser, (_req, res) => {
   res.json({ user: res.locals.marketUser })
+})
+probe.get("/optional", optionalUser, (_req, res) => {
+  res.json({ user: res.locals.marketUser ?? null })
 })
 probe.use(errorHandler)
 
@@ -52,5 +55,16 @@ describe("requireUser", () => {
     expect(first.body.user).toEqual({ uuid: user.uuid, username: "mara", isAdmin: true })
     await request(probe).get("/probe").set(bearer(user))
     expect(calls.count).toBe(1)
+  })
+})
+
+describe("optionalUser", () => {
+  it("serves an anonymous read when the auth server is unreachable", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("fetch failed")
+    })
+    const res = await request(probe).get("/optional").set(bearer(fakeUser("offline")))
+    expect(res.status).toBe(200)
+    expect(res.body.user).toBeNull()
   })
 })

@@ -37,6 +37,8 @@ export default async function setup() {
   // testDatabaseConnection() recreates the DB, all tables, and applies migrations.
   const { testDatabaseConnection, pool } = await import("@/config/database.js")
   await testDatabaseConnection()
+  const { ensureMarketplaceSchema } = await import("@/marketplace/db.js")
+  await ensureMarketplaceSchema()
 
   // Vitest uses globalSetup's return value as the teardown hook. This pool is created in
   // the main vitest process, where server.ts's shutdown() never runs to close it. Without

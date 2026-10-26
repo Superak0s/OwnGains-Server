@@ -188,7 +188,7 @@ export function parseMySQLDate(value: string | Date): Date {
     : new Date(value)
 }
 
-async function createDatabaseIfNotExists(): Promise<void> {
+export async function createDatabaseIfNotExists(): Promise<void> {
   const dbName = requireEnv("DB_NAME");
   // Temporary connection for CREATE DATABASE. Never log this config object.
   const connection = await mysql.createConnection({
@@ -217,7 +217,7 @@ async function createDatabaseIfNotExists(): Promise<void> {
 // file with a real parser, or don't write them.
 // ponytail: naive splitter, swap for a real tokenizer only if a migration ever
 // needs a semicolon inside a literal.
-function parseSQLStatements(sql: string): string[] {
+export function parseSQLStatements(sql: string): string[] {
   return sql
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/--[^\n]*/g, "")

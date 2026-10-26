@@ -50,6 +50,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - `scripts/release.sh` refuses to run off `main`, with `gh` logged out, or to reuse a version already on origin or Docker Hub, takes `--bump=` and `--message=` to skip its prompts, lists what the release commit will include, builds with `--pull`, reuses the local act runner image, pushes `:x.y.z` before `:latest`, creates the GitHub release after the image push (printing a retry command if it fails), and shows step timings.
 
 - The README explains how the server stores time and buckets days by the client's timezone.
+- The skin marketplace schema and skin validator (`src/marketplace/`), provisioned into the test database too.
+
 ## [1.0.1] - 2026-10-22
 
 ### Internal

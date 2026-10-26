@@ -40,6 +40,12 @@ describe("requireUser", () => {
     expect((await request(probe).get("/probe").set(bearer(fakeUser("ghost")))).status).toBe(401)
   })
 
+  it("rejects a token that isn't JWT-shaped without asking the auth server", async () => {
+    const calls = stubAuthServer([])
+    expect((await request(probe).get("/probe").set("Authorization", "Bearer garbage")).status).toBe(401)
+    expect(calls.count).toBe(0)
+  })
+
   it("answers 503 when the auth server is unreachable", async () => {
     vi.stubGlobal("fetch", async () => {
       throw new TypeError("fetch failed")
@@ -66,5 +72,16 @@ describe("optionalUser", () => {
     const res = await request(probe).get("/optional").set(bearer(fakeUser("offline")))
     expect(res.status).toBe(200)
     expect(res.body.user).toBeNull()
+  })
+})
+
+// Last, because it spends this client's lookups for the rest of the file.
+describe("lookup cap", () => {
+  it("caps auth server lookups per client", async () => {
+    const calls = stubAuthServer([])
+    const statuses: number[] = []
+    for (let i = 0; i < 31; i++) statuses.push((await request(probe).get("/probe").set(bearer(fakeUser(`spray${i}`)))).status)
+    expect(statuses).toContain(429)
+    expect(calls.count).toBeLessThan(31)
   })
 })

@@ -44,7 +44,7 @@ skinsRouter.get("/", optionalUser, async (req, res) => {
 
 skinsRouter.get("/:id", optionalUser, async (req, res) => {
   const found = await skins.findSkin(parseIntParam(req.params.id as string, "skin id"))
-  if (!found) throw new NotFoundError("Skin not found")
+  if (!found) throw new NotFoundError("Skin")
   const user = currentUser(res)
   const { authorUuid, ...detail } = found
   res.json({
@@ -64,7 +64,7 @@ skinsRouter.post("/", requireUser, publishLimiter, async (req, res) => {
 /** The visible skin behind `:id`, or 404. */
 async function visibleOr404(id: string) {
   const found = await skins.findSkin(parseIntParam(id, "skin id"))
-  if (!found) throw new NotFoundError("Skin not found")
+  if (!found) throw new NotFoundError("Skin")
   return found
 }
 
@@ -87,7 +87,7 @@ skinsRouter.delete("/:id", requireUser, async (req, res) => {
 skinsRouter.post("/:id/download", downloadLimiter, async (req, res) => {
   const installId = req.get("x-install-id")
   const counts = await skins.recordDownload(parseIntParam(req.params.id as string, "skin id"), isUuid(installId) ? installId : null)
-  if (!counts) throw new NotFoundError("Skin not found")
+  if (!counts) throw new NotFoundError("Skin")
   res.json(counts)
 })
 

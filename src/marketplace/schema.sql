@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS skins (
   rating_count     INT UNSIGNED NOT NULL DEFAULT 0,
   taken_down_at    DATETIME     DEFAULT NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_skins_author (author_uuid),
   KEY idx_skins_unique_downloads (unique_downloads),
@@ -30,12 +30,11 @@ CREATE TABLE IF NOT EXISTS skins (
 CREATE TABLE IF NOT EXISTS skin_ratings (
   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
   skin_id    INT UNSIGNED NOT NULL,
-  -- NULL once the rater is anonymized. The stars still count in the average.
-  rater_uuid CHAR(36) CHARACTER SET ascii DEFAULT NULL,
+  -- HMAC of the rater's account id, so one account keeps one rating even after it is anonymized.
+  rater_key  BINARY(32)   NOT NULL,
   stars      TINYINT UNSIGNED NOT NULL,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_skin_ratings (skin_id, rater_uuid),
-  KEY idx_skin_ratings_rater (rater_uuid),
+  UNIQUE KEY uq_skin_ratings (skin_id, rater_key),
   CONSTRAINT fk_skin_ratings_skin FOREIGN KEY (skin_id) REFERENCES skins (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -50,10 +49,11 @@ CREATE TABLE IF NOT EXISTS skin_downloads (
 CREATE TABLE IF NOT EXISTS skin_reports (
   id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
   skin_id       INT UNSIGNED NOT NULL,
-  reporter_uuid CHAR(36) CHARACTER SET ascii DEFAULT NULL,
+  -- Same HMAC as skin_ratings.rater_key: one report per account and skin.
+  reporter_key  BINARY(32)   NOT NULL,
   reason        VARCHAR(500) NOT NULL,
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY idx_skin_reports_reporter (reporter_uuid),
+  UNIQUE KEY uq_skin_reports (skin_id, reporter_key),
   CONSTRAINT fk_skin_reports_skin FOREIGN KEY (skin_id) REFERENCES skins (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

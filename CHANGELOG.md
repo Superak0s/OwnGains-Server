@@ -10,7 +10,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - Trainees can undo a trainer's program change for 7 days (`GET /api/program/snapshots`, `POST /api/program/snapshots/:id/restore`, `DELETE /api/program/snapshots/:id`), and get a `program_replaced` WebSocket event and push notification when a trainer changes their plan. The trainer gets `program_restored` when the trainee undoes it.
 - `LOG_LEVEL` (`info`, `warn` or `error`, default `info`) sets the lowest log level printed. `warn` hides the per-request lines.
-- Optional skin marketplace service (its own Docker image, `superak0s/owngains-marketplace`, and compose profile): publish, browse, rate and share themes and widget layouts, with download and unique-download counts, a share page and an operator CLI.
+- Optional skin marketplace service (its own Docker image, `superak0s/owngains-marketplace`, and compose profile): publish, browse, rate and share themes and widget layouts, with download and unique-download counts, a share page and an operator CLI. Each account keeps one rating and one report per skin, also after it is anonymized. `scripts/release.sh` builds and pushes its image with the server's.
 
 ### Changed
 
@@ -26,7 +26,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - The cycle day changes at the user's local midnight when the app sends its timezone. A date-only cycle start counts from that calendar day west of UTC too.
 
 ### Security
-
+
+- The marketplace rejects bearer tokens that are not JWT-shaped without asking the account server, and caps account-server checks at 30 per client IP per minute (429 `AUTH_RATE_LIMITED`), so one caller can no longer use up the shared limit for every signed-in user.
 - Sign-in lockout now applies to every spelling of a username or email that the database treats as the same (accents, case, full-width letters), so it can't be bypassed by varying the spelling. Existing lockouts and failure counts reset once on upgrade.
 - A trainer can no longer change the program day of a trainee's finished workouts, only of the one in progress (403 `TRAINER_WORKOUT_ENDED`).
 - `BOOTSTRAP_ADMIN_USERNAME` now only grants admin while the instance has no admin, so the name can't be re-registered for admin rights after that account is deleted.

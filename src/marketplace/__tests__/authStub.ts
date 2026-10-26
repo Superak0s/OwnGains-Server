@@ -26,7 +26,7 @@ export function stubAuthServer(users: StubUser[]) {
 }
 
 export function fakeUser(username: string, isAdmin = false): StubUser {
-  return { token: `tok-${randomUUID()}`, uuid: randomUUID(), username, isAdmin }
+  return { token: `tok.${randomUUID()}.sig`, uuid: randomUUID(), username, isAdmin }
 }
 
 export const bearer = (u: StubUser) => ({ Authorization: `Bearer ${u.token}` })

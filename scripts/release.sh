@@ -7,6 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_IMAGE="superak0s/owngains-server"
+MARKETPLACE_IMAGE="superak0s/owngains-marketplace"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     B=$'\e[1m' DIM=$'\e[2m' RED=$'\e[31m' GRN=$'\e[32m' YEL=$'\e[33m' CYN=$'\e[36m' R=$'\e[0m'
@@ -219,7 +220,8 @@ step 3/5 "Building Docker image v$NEW_VERSION"
 # --pull because the base image is a floating tag, so a cached copy could lack
 # Alpine security fixes.
 docker build --pull -t "$DOCKER_IMAGE:latest" -t "$DOCKER_IMAGE:$NEW_VERSION" .
-ok "Built $DOCKER_IMAGE:latest and :$NEW_VERSION"
+docker build --pull -f Dockerfile.marketplace -t "$MARKETPLACE_IMAGE:latest" -t "$MARKETPLACE_IMAGE:$NEW_VERSION" .
+ok "Built $DOCKER_IMAGE and $MARKETPLACE_IMAGE, :latest and :$NEW_VERSION"
 
 # Past this point a commit or push may exist, so nothing is reverted any more.
 rm -rf "$BACKUP_DIR"
@@ -266,6 +268,8 @@ else
     # image that has no version tag.
     docker push "$DOCKER_IMAGE:$NEW_VERSION"
     docker push "$DOCKER_IMAGE:latest"
+    docker push "$MARKETPLACE_IMAGE:$NEW_VERSION"
+    docker push "$MARKETPLACE_IMAGE:latest"
 fi
 
 # Created after the image push, so a release is never announced for an image

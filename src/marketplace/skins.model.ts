@@ -96,10 +96,13 @@ export async function findSkin(id: number): Promise<(SkinSummary & { skin: SkinD
   return { ...toSummary(rows[0]), skin: JSON.parse(rows[0].body), authorUuid: rows[0].author_uuid }
 }
 
+/** The account's id under the server's secret. It stays unique per account but names nobody once the account is gone. */
+const accountKey = (uuid: string) => createHmac("sha256", marketplaceConfig.downloadSalt).update(`account:${uuid}`).digest()
+
 export async function findRating(skinId: number, uuid: string): Promise<number | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    "SELECT stars FROM skin_ratings WHERE skin_id = ? AND rater_uuid = ?",
-    [skinId, uuid],
+    "SELECT stars FROM skin_ratings WHERE skin_id = ? AND rater_key = ?",
+    [skinId, accountKey(uuid)],
   )
   return rows[0]?.stars ?? null
 }
@@ -124,7 +127,7 @@ export async function createSkin(upload: SkinUpload, author: { uuid: string; use
 /** Replaces a skin's content and bumps its version. Counts and ratings stay. */
 export async function updateSkin(id: number, upload: SkinUpload): Promise<number> {
   await pool.execute(
-    "UPDATE skins SET name = ?, description = ?, body = ?, has_theme = ?, has_boards = ?, swatch = ?, version = version + 1 WHERE id = ?",
+    "UPDATE skins SET name = ?, description = ?, body = ?, has_theme = ?, has_boards = ?, swatch = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     [...contentColumns(upload), id],
   )
   const [rows] = await pool.execute<RowDataPacket[]>("SELECT version FROM skins WHERE id = ?", [id])
@@ -163,8 +166,8 @@ export async function recordDownload(
 export async function rateSkin(id: number, uuid: string, stars: number): Promise<{ average: number | null; count: number; myRating: number }> {
   return withTransaction(async (conn) => {
     await conn.execute(
-      "INSERT INTO skin_ratings (skin_id, rater_uuid, stars) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE stars = VALUES(stars)",
-      [id, uuid, stars],
+      "INSERT INTO skin_ratings (skin_id, rater_key, stars) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE stars = VALUES(stars)",
+      [id, accountKey(uuid), stars],
     )
     await conn.execute(
       `UPDATE skins s JOIN (SELECT COALESCE(SUM(stars), 0) AS total, COUNT(*) AS n FROM skin_ratings WHERE skin_id = ?) r
@@ -177,14 +180,13 @@ export async function rateSkin(id: number, uuid: string, stars: number): Promise
 }
 
 export async function addReport(id: number, uuid: string, reason: string): Promise<void> {
-  await pool.execute("INSERT INTO skin_reports (skin_id, reporter_uuid, reason) VALUES (?, ?, ?)", [id, uuid, reason])
+  await pool.execute(
+    "INSERT INTO skin_reports (skin_id, reporter_key, reason) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE reason = VALUES(reason)",
+    [id, accountKey(uuid), reason],
+  )
 }
 
-/** Removes a user's identity from every marketplace row. Their skins, stars and reports stay, unattributed. */
+/** Removes a user's name and id from their skins, which stay published. Ratings and reports only ever hold the account key. */
 export async function anonymizeUser(uuid: string): Promise<void> {
-  await withTransaction(async (conn) => {
-    await conn.execute("UPDATE skins SET author_uuid = NULL, author_name = NULL WHERE author_uuid = ?", [uuid])
-    await conn.execute("UPDATE skin_ratings SET rater_uuid = NULL WHERE rater_uuid = ?", [uuid])
-    await conn.execute("UPDATE skin_reports SET reporter_uuid = NULL WHERE reporter_uuid = ?", [uuid])
-  })
+  await pool.execute("UPDATE skins SET author_uuid = NULL, author_name = NULL WHERE author_uuid = ?", [uuid])
 }

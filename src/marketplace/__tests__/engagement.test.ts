@@ -43,7 +43,18 @@ describe("downloads", () => {
   })
 
   it("404s for an unknown skin", async () => {
-    expect((await download(999_999_999)).status).toBe(404)
+    const res = await download(999_999_999)
+    expect(res.status).toBe(404)
+    expect(JSON.stringify(res.body)).not.toContain("not found not found")
+  })
+
+  it("leaves updated_at alone", async () => {
+    const id = await publish()
+    await pool.execute("UPDATE skins SET updated_at = '2020-06-01 00:00:00' WHERE id = ?", [id])
+    await download(id, randomUUID())
+    await rate(id, b, 4)
+    const [rows] = await pool.execute<RowDataPacket[]>("SELECT updated_at FROM skins WHERE id = ?", [id])
+    expect(new Date(rows[0].updated_at).getUTCFullYear()).toBe(2020)
   })
 })
 
@@ -59,6 +70,13 @@ describe("ratings", () => {
     await rate(id, b, 4)
     expect((await rate(id, b, 2)).body).toEqual({ average: 2, count: 1, myRating: 2 })
   })
+
+  it("keeps one rating per account after the account forgets itself", async () => {
+    const id = await publish()
+    await rate(id, b, 5)
+    await request(app).delete("/api/me").set(bearer(b))
+    expect((await rate(id, b, 1)).body).toEqual({ average: 1, count: 1, myRating: 1 })
+  })
 })
 
 describe("reports", () => {
@@ -68,6 +86,16 @@ describe("reports", () => {
     expect((await request(app).post(`/api/skins/${id}/report`).set(bearer(b)).send({ reason: " stolen " })).status).toBe(201)
     const [rows] = await pool.execute<RowDataPacket[]>("SELECT reason FROM skin_reports WHERE skin_id = ?", [id])
     expect(rows[0].reason).toBe("stolen")
+  })
+
+  it("keeps one report per account and skin", async () => {
+    const id = await publish()
+    const report = () => request(app).post(`/api/skins/${id}/report`).set(bearer(b)).send({ reason: "spam" })
+    await report()
+    await request(app).delete("/api/me").set(bearer(b))
+    expect((await report()).status).toBe(201)
+    const [rows] = await pool.execute<RowDataPacket[]>("SELECT COUNT(*) AS n FROM skin_reports WHERE skin_id = ?", [id])
+    expect(Number(rows[0].n)).toBe(1)
   })
 })
 
@@ -84,11 +112,7 @@ describe("DELETE /api/me", () => {
     const skin = await request(app).get(`/api/skins/${theirs}`)
     expect(skin.body.rating).toEqual({ average: 4, count: 2 })
     expect((await request(app).get(`/api/skins/${mine}`)).body.author).toBeNull()
-    const [[counts]] = await pool.execute<RowDataPacket[]>(
-      `SELECT (SELECT COUNT(*) FROM skins WHERE author_uuid = ?) + (SELECT COUNT(*) FROM skin_ratings WHERE rater_uuid = ?)
-        + (SELECT COUNT(*) FROM skin_reports WHERE reporter_uuid = ?) AS n`,
-      [a.uuid, a.uuid, a.uuid],
-    )
+    const [[counts]] = await pool.execute<RowDataPacket[]>("SELECT COUNT(*) AS n FROM skins WHERE author_uuid = ?", [a.uuid])
     expect(Number(counts.n)).toBe(0)
   })
 })

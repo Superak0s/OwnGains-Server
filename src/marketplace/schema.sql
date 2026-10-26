@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS skins (
   body             MEDIUMTEXT   NOT NULL,
   has_theme        BOOLEAN      NOT NULL,
   has_boards       BOOLEAN      NOT NULL,
-  swatch           VARCHAR(64)  NOT NULL DEFAULT '',
+  -- JSON array of up to four colors. rgba() values contain commas.
+  swatch           VARCHAR(255) NOT NULL DEFAULT '[]',
   version          INT UNSIGNED NOT NULL DEFAULT 1,
   downloads        INT UNSIGNED NOT NULL DEFAULT 0,
   unique_downloads INT UNSIGNED NOT NULL DEFAULT 0,

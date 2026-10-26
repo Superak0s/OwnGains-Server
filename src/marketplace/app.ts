@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit"
 import { version } from "../config/version.js"
 import { errorHandler } from "../middleware/errorHandler.js"
 import { marketplaceConfig } from "./env.js"
+import { skinsRouter } from "./skins.routes.js"
 
 /** The marketplace Express app, exported for tests. */
 export const app = express()
@@ -32,6 +33,8 @@ app.use(express.json({ limit: "80kb" }))
 app.get("/healthz", (_req, res) => {
   res.json({ status: "ok", version, authServer: new URL(marketplaceConfig.authServerUrl).origin })
 })
+
+app.use("/api/skins", skinsRouter)
 
 app.use((_req, res) => {
   res.status(404).json({ success: false, error: "Not found" })

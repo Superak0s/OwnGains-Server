@@ -52,6 +52,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - The README explains how the server stores time and buckets days by the client's timezone.
 - The skin marketplace schema and skin validator (`src/marketplace/`), provisioned into the test database too.
 - The marketplace entry point (`src/marketplace/server.ts`) with `/healthz` and token checks against the trusted server's `GET /api/auth/me`.
+- Marketplace: publish, browse, update and delete skins at `/api/skins`.
 
 ## [1.0.1] - 2026-10-22
 

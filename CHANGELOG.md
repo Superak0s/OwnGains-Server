@@ -54,6 +54,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - The marketplace entry point (`src/marketplace/server.ts`) with `/healthz` and token checks against the trusted server's `GET /api/auth/me`.
 - Marketplace: publish, browse, update and delete skins at `/api/skins`.
 - Marketplace: download and unique-download counts, ratings, reports and `DELETE /api/me` account anonymizing.
+- Marketplace: shareable skin web page at `/skins/:id` with an Open in OwnGains link.
 
 ## [1.0.1] - 2026-10-22
 

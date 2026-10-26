@@ -588,6 +588,29 @@ refresh token. Serve it over HTTPS (your reverse proxy) on anything but a
 trusted LAN, since the password is sent to it. Error entries include usernames
 (and client IPs while in memory), which is why the whole thing is admin-only.
 
+## Skin marketplace (optional)
+
+Skins are shareable themes and widget layouts. The marketplace is a separate service in the same repo (`src/marketplace/`), with its own Docker image (`superak0s/owngains-marketplace`) and its own database. Every app uses the official marketplace at `https://owngains.superak0s.com/marketplace` by default, so a self-hosted OwnGains server does not need one. Run your own only to host a private catalog.
+
+Anyone can browse and download. Publishing and rating need an account on the server named by `AUTH_SERVER_URL`: the marketplace forwards the caller's token to that server's `GET /api/auth/me` and caches the answer for a minute. `/healthz` reports that server's origin, and the app only sends its token when it matches the server the app is signed in to.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DOWNLOAD_SALT` | none, required | At least 32 random characters. Keys the hashes behind unique-download counts. Install ids are never stored. |
+| `AUTH_SERVER_URL` | `https://owngains.superak0s.com` | OwnGains server whose accounts may publish and rate |
+| `PUBLIC_URL` (`MARKETPLACE_PUBLIC_URL` in compose) | `http://localhost:5100` | Public address used in share links |
+| `PORT` | `5100` | Listen port |
+| `TRUST_PROXY_HOPS` | `0` | Same rule as the server |
+| `DB_*` | | Its own database, `owngains_marketplace` in compose |
+
+Start it with `docker compose --profile marketplace up -d`, or `bun run marketplace:dev` from source. Behind a reverse proxy at `/marketplace`, strip the prefix before forwarding (nginx: `location /marketplace/ { proxy_pass http://127.0.0.1:5100/; }`) and set `PUBLIC_URL` to the prefixed address. Share links are `PUBLIC_URL/skins/<id>`, a small page with an Open in OwnGains button.
+
+Operator CLI (`docker exec <container> marketplace ...` or `bun run marketplace ...`):
+
+- `reports [limit]`: newest open reports
+- `remove <skin id>`: take a skin down (an admin of the auth server can also do this from the app)
+- `forget <uuid>`: anonymize an account. The app calls `DELETE /api/me` when a user deletes their account. Use this for a deletion request that arrives by email. Skins stay published without an author name, and ratings still count without a rater.
+
 ---
 
 ## Connecting the app

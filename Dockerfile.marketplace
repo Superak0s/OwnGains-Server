@@ -1,0 +1,27 @@
+# Skin marketplace: a separate service from the OwnGains server, with its own database.
+FROM oven/bun:1-alpine AS builder
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY . .
+RUN bun run build
+RUN bun install --frozen-lockfile --production
+
+FROM oven/bun:1-alpine AS production
+LABEL org.opencontainers.image.title="OwnGains Marketplace" \
+      org.opencontainers.image.description="Skin marketplace for the OwnGains fitness app: publish, browse, rate and share themes and widget layouts." \
+      org.opencontainers.image.source="https://github.com/Superak0s/OwnGains-Server" \
+      org.opencontainers.image.licenses="MIT"
+RUN apk add --no-cache tini
+WORKDIR /app
+COPY package.json LICENSE THIRD_PARTY_NOTICES ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+RUN printf '#!/bin/sh\nexec bun /app/dist/marketplace/cli.js "$@"\n' > /usr/local/bin/marketplace && chmod +x /usr/local/bin/marketplace
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+EXPOSE 5100
+ENV NODE_ENV=production
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s CMD bun -e "fetch('http://localhost:' + (process.env.PORT || 5100) + '/healthz').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["bun", "dist/marketplace/server.js"]

@@ -10,6 +10,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - Trainees can undo a trainer's program change for 7 days (`GET /api/program/snapshots`, `POST /api/program/snapshots/:id/restore`, `DELETE /api/program/snapshots/:id`), and get a `program_replaced` WebSocket event and push notification when a trainer changes their plan. The trainer gets `program_restored` when the trainee undoes it.
 - `LOG_LEVEL` (`info`, `warn` or `error`, default `info`) sets the lowest log level printed. `warn` hides the per-request lines.
+- Optional skin marketplace service (its own Docker image, `superak0s/owngains-marketplace`, and compose profile): publish, browse, rate and share themes and widget layouts, with download and unique-download counts, a share page and an operator CLI.
 
 ### Changed
 

@@ -43,6 +43,53 @@ services:
         max-size: 10m
         max-file: "5"
 
+  # Optional skin marketplace (`docker compose --profile marketplace up -d`).
+  # Most self-hosters skip it: every app uses the official marketplace by default.
+  marketplace-db:
+    image: mariadb:11.4
+    profiles: ["marketplace"]
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: owngains_marketplace
+      MARIADB_USER: ${DB_USER:?set DB_USER in .env}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - marketplace-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  marketplace:
+    image: superak0s/owngains-marketplace:latest
+    # build: { context: ., dockerfile: Dockerfile.marketplace }
+    profiles: ["marketplace"]
+    restart: unless-stopped
+    depends_on:
+      marketplace-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: marketplace-db
+      DB_PORT: 3306
+      DB_NAME: owngains_marketplace
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      PORT: 5100
+      DOWNLOAD_SALT: ${DOWNLOAD_SALT:-}
+      AUTH_SERVER_URL: ${AUTH_SERVER_URL:-https://owngains.superak0s.com}
+      PUBLIC_URL: ${MARKETPLACE_PUBLIC_URL:-http://localhost:5100}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+    ports:
+      - "${MARKETPLACE_PORT:-5100}:5100"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
 volumes:
   db-data:
   backups:
+  marketplace-db-data:

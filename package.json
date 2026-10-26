@@ -8,6 +8,8 @@
     "dev": "bun --watch src/server.ts",
     "start": "bun dist/server.js",
     "owngains": "bun src/owngains.ts",
+    "marketplace:dev": "bun --watch src/marketplace/server.ts",
+    "marketplace": "bun src/marketplace/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "bun scripts/smoke.mjs",

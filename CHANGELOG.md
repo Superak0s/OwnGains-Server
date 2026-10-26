@@ -20,9 +20,9 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 ### Fixed
 
 - The trainer client list counts this week's sessions from the trainer's local Monday when the app sends it.
-- Supplement "taken today" and streaks follow the timezone the app sends.
-- Soreness trend days follow the timezone the app sends.
-- The cycle day changes at the user's local midnight when the app sends its timezone.
+- Supplement "taken today" and streaks follow the timezone the app sends. A dose logged from a zone ahead of the reader no longer resets the streak to 0.
+- Soreness trend days follow the timezone the app sends and stay in date order.
+- The cycle day changes at the user's local midnight when the app sends its timezone. A date-only cycle start counts from that calendar day west of UTC too.
 
 ### Security
 

@@ -122,6 +122,25 @@ describe("soreness routes", () => {
     )
   })
 
+  it("keeps the trend in date order when zones disagree", async () => {
+    const s = await signup("soreorder")
+    const log = (timeZone: string, at: Date) =>
+      request(app)
+        .post("/api/tracking/soreness")
+        .set({ ...auth(s.token), "X-Time-Zone": timeZone })
+        .send({ muscleGroup: "chest", intensity: 5, loggedAt: at.toISOString() })
+        .expect(201)
+    const athens = new Date(Date.now() - 86_400_000)
+    athens.setUTCHours(22, 30, 0, 0)
+    await log("Europe/Athens", athens)
+    await log("America/Los_Angeles", new Date(athens.getTime() + 30 * 60_000))
+
+    const res = await request(app).get("/api/tracking/soreness/stats").set(auth(s.token))
+    const dates = res.body.data.severityTrend.map((d: { date: string }) => d.date)
+    expect(dates).toEqual([...dates].sort())
+    expect(dates).toHaveLength(2)
+  })
+
   it("returns the latest 20 follow-ups per episode and batches in one UPDATE", async () => {
     const f = await signup("sorefu")
     const ep = await request(app)

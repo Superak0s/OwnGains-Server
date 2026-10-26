@@ -373,7 +373,7 @@ export async function getSorenessStats(
     `SELECT local_date AS localDate, muscle_group AS muscleGroup, intensity
      FROM soreness
      WHERE user_id = ? AND logged_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-     ORDER BY logged_at ASC`,
+     ORDER BY local_date, logged_at`,
     [userId, days],
   )
 

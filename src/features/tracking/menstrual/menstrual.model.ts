@@ -190,8 +190,12 @@ export async function getCycleStats(
   // `new Date(...)` would read it as local time and shift the phase by the
   // box's offset.
   const start = parseMySQLDate(last.cycleStart)
-  const day =
-    (Date.parse(localDay(new Date(), timeZone)) - Date.parse(localDay(start, timeZone))) / DAY_MS
+  // A date-only start ("2026-10-20") is stored at UTC midnight, which is the
+  // previous local day west of UTC, so it is read back as that calendar date.
+  // ponytail: a real start logged at exactly 00:00:00.000 UTC reads the same way.
+  const startDay =
+    start.getTime() % DAY_MS === 0 ? start.toISOString().slice(0, 10) : localDay(start, timeZone)
+  const day = (Date.parse(localDay(new Date(), timeZone)) - Date.parse(startDay)) / DAY_MS
   const endOf = (n: number) => new Date(start.getTime() + n * DAY_MS)
   const nextPeriodEstimate = endOf(Math.ceil(cycleLength))
 

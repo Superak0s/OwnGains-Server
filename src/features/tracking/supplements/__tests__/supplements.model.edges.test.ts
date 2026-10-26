@@ -29,4 +29,11 @@ describe("supplements model edges", () => {
     await s.logSupplement(userId, id, 1, daysAgo(1))
     expect(await s.getStreak(userId, id)).toBe(1)
   })
+
+  it("counts the streak when a dose is stored on a day later than the reader's today", async () => {
+    const id = await s.createSupplement(userId, { name: "Magnesium" })
+    await s.logSupplement(userId, id, 1, daysAgo(0))
+    await s.logSupplement(userId, id, 1, daysAgo(-1))
+    expect(await s.getStreak(userId, id)).toBe(1)
+  })
 })

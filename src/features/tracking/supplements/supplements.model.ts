@@ -249,11 +249,13 @@ const previousDay = (day: string) =>
 
 /** Shared by getStreak and listSupplementSummaries. Days must be sorted DESC. */
 function streakFromDays(days: string[], today: string): number {
+  // A dose logged from a zone ahead of the reader's is stored on a day after their today.
+  const past = days.filter((day) => day <= today)
   // A streak may run up to today or up to yesterday. Today being unlogged
   // doesn't break it yet.
-  let cursor = days[0] === today ? today : previousDay(today)
+  let cursor = past[0] === today ? today : previousDay(today)
   let streak = 0
-  for (const day of days) {
+  for (const day of past) {
     if (day !== cursor) break
     streak++
     cursor = previousDay(cursor)

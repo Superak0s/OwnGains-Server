@@ -112,4 +112,20 @@ describe("cycle day follows the client's timezone", () => {
       .set({ ...auth(u.token), "X-Time-Zone": "Europe/Athens" })
     expect(stats.body.data.currentPhase).toMatchObject({ phase: "menstruation", daysInPhase: 3 })
   })
+
+  it("reads a date-only start as that calendar day west of UTC", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-10-23T18:00:00Z"))
+    const u = await signup("menstwest")
+    await request(app)
+      .post("/api/tracking/menstrual")
+      .set(auth(u.token))
+      .send({ cycleStart: "2026-10-20" })
+      .expect(201)
+
+    const stats = await request(app)
+      .get("/api/tracking/menstrual/stats")
+      .set({ ...auth(u.token), "X-Time-Zone": "America/Los_Angeles" })
+    expect(stats.body.data.currentPhase).toMatchObject({ phase: "menstruation", daysInPhase: 3 })
+  })
 })

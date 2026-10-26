@@ -17,6 +17,7 @@ import {
 } from "../features/auth/auth.model.js"
 import { purgeUnconsentedAccounts } from "../features/auth/user.model.js"
 import { purgeStaleThrottles } from "../features/auth/throttle.model.js"
+import { purgeExpiredProgramSnapshots } from "../features/programs/programs.model.js"
 import { purgeJointSessions } from "../features/social/sharing/sharing.model.js"
 import {
   purgeExpiredCooldowns,
@@ -99,6 +100,7 @@ export async function runStaleSessionCleanup(): Promise<void> {
     ["Friend-request cooldown", () => purgeExpiredCooldowns()],
     ["User-report", () => purgeOldReports()],
     ["Sign-in throttle", () => purgeStaleThrottles()],
+    ["Program-snapshot", () => purgeExpiredProgramSnapshots()],
     ["Unconsented-account", () => purgeUnconsentedAccounts()],
     // Also runs on boot, so accounts a backup restore brought back are gone
     // within moments of the server starting on the restored database.

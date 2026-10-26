@@ -118,12 +118,18 @@ export async function createUser(
 
     // With BOOTSTRAP_ADMIN_USERNAME set, that username (and only it) becomes
     // admin on signup, so a public box can't be claimed by whoever registers
-    // first after deploy. Unset (the self-hosted default), the first-ever user
-    // becomes admin as before.
+    // first after deploy. It only promotes while no admin exists, so the name
+    // can't be re-registered for admin rights after that account is deleted.
+    // Unset (the self-hosted default), the first-ever user becomes admin as before.
     const bootstrapAdmin = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim()
     if (bootstrapAdmin) {
       if (username.toLowerCase() === bootstrapAdmin.toLowerCase())
-        await conn.execute(`UPDATE users SET is_admin = 1 WHERE id = ?`, [insertId])
+        await conn.execute(
+          `UPDATE users SET is_admin = 1
+           WHERE id = ?
+             AND NOT EXISTS (SELECT 1 FROM (SELECT id FROM users WHERE is_admin = 1) AS a)`,
+          [insertId],
+        )
       return insertId
     }
 

@@ -207,7 +207,7 @@ export async function listSupplementSummaries(
   )
   const today = localDay(new Date(), timeZone)
   return supplements.map((s) => {
-    const doses = dosesByDay(rowsBySupplement.get(s.id) ?? [], timeZone)
+    const doses = dosesByDay(rowsBySupplement.get(s.id) ?? [])
     const dosesToday = doses.get(today) ?? 0
     return {
       ...withBooleans(s),
@@ -226,9 +226,9 @@ export async function listSupplementSummaries(
 async function recentIntake(userId: number, supplementId?: number) {
   const since = formatDateForMySQL(new Date(Date.now() - 367 * DAY_MS))
   const [rows] = await pool.execute<
-    (RowDataPacket & { supplementId: number; takenAt: string })[]
+    (RowDataPacket & { supplementId: number; localDate: string })[]
   >(
-    `SELECT supplement_id AS supplementId, taken_at AS takenAt
+    `SELECT supplement_id AS supplementId, local_date AS localDate
      FROM supplement_intake WHERE user_id = ? AND taken_at >= ?
        ${supplementId ? "AND supplement_id = ?" : ""}`,
     supplementId ? [userId, since, supplementId] : [userId, since],
@@ -236,15 +236,9 @@ async function recentIntake(userId: number, supplementId?: number) {
   return rows
 }
 
-/** Dose count per local day, newest day first. */
-function dosesByDay(
-  rows: { takenAt: string }[],
-  timeZone: string,
-): Map<string, number> {
-  const days = rows
-    .map((r) => localDay(parseMySQLDate(r.takenAt), timeZone))
-    .sort()
-    .reverse()
+/** Dose count per stored local day, newest day first. */
+function dosesByDay(rows: { localDate: string }[]): Map<string, number> {
+  const days = rows.map((r) => r.localDate).sort().reverse()
   const doses = new Map<string, number>()
   for (const day of days) doses.set(day, (doses.get(day) ?? 0) + 1)
   return doses
@@ -351,6 +345,7 @@ export async function deleteSupplement(
  * @param amount - Amount taken, in the supplement's unit.
  * @param takenAt - When it was taken. Defaults to now.
  * @param note - Optional free text.
+ * @param timeZone - The client's zone, which fixes the day the dose belongs to.
  * @returns The new `supplement_intake.id`.
  */
 export async function logSupplement(
@@ -359,15 +354,18 @@ export async function logSupplement(
   amount: number,
   takenAt?: string | null,
   note?: string | null,
+  timeZone = "UTC",
 ): Promise<number> {
+  const when = takenAt ? new Date(takenAt) : new Date()
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at, note)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at, local_date, note)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [
       userId,
       supplementId,
       amount,
-      formatDateForMySQL(takenAt || new Date()),
+      formatDateForMySQL(when),
+      localDay(when, timeZone),
       note ?? null,
     ],
   )
@@ -386,19 +384,13 @@ export async function hasTakenTodayServer(
   supplementId: number,
   timeZone = "UTC",
 ): Promise<SupplementEntry | null> {
-  const now = new Date()
   const [rows] = await pool.execute<SupplementEntry[]>(
     `SELECT ${INTAKE_COLS} FROM supplement_intake
-     WHERE user_id = ? AND supplement_id = ? AND taken_at >= ?
-     ORDER BY taken_at DESC`,
-    [userId, supplementId, formatDateForMySQL(new Date(now.getTime() - 2 * DAY_MS))],
+     WHERE user_id = ? AND supplement_id = ? AND local_date = ?
+     ORDER BY taken_at DESC LIMIT 1`,
+    [userId, supplementId, localDay(new Date(), timeZone)],
   )
-  const today = localDay(now, timeZone)
-  return (
-    rows.find(
-      (r) => localDay(parseMySQLDate(String(r.takenAt)), timeZone) === today,
-    ) ?? null
-  )
+  return rows[0] ?? null
 }
 
 /**
@@ -434,7 +426,7 @@ export async function getStreak(
   supplementId: number,
   timeZone = "UTC",
 ): Promise<number> {
-  const doses = dosesByDay(await recentIntake(userId, supplementId), timeZone)
+  const doses = dosesByDay(await recentIntake(userId, supplementId))
   return streakFromDays([...doses.keys()], localDay(new Date(), timeZone))
 }
 

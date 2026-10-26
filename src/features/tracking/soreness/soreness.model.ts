@@ -6,7 +6,7 @@
 // follow-ups), which disagreed about the intensity range (1-10 vs 0-10) and
 // about the note column's name. One table, one range (0-10), one `note`.
 
-import { pool, formatDateForMySQL, parseMySQLDate, withTransaction } from "@/config/database.js"
+import { pool, formatDateForMySQL, withTransaction } from "@/config/database.js"
 import { localDay } from "@/utils/timeZone.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
 import { ValidationError, NotFoundError } from "@/middleware/errorHandler.js"
@@ -149,6 +149,7 @@ function sorenessStatusFor(status: FollowUpStatus): SorenessStatus {
  * @param intensity - Soreness level at the start.
  * @param loggedAt - When it began. Defaults to now.
  * @param note - Optional free text.
+ * @param timeZone - The client's zone, which fixes the day the episode belongs to.
  * @returns The new episode.
  */
 export async function logSoreness(
@@ -157,16 +158,19 @@ export async function logSoreness(
   intensity: number,
   loggedAt?: string | null,
   note?: string | null,
+  timeZone = "UTC",
 ): Promise<SorenessEntry> {
+  const when = loggedAt ? new Date(loggedAt) : new Date()
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO soreness (user_id, muscle_group, intensity, note, logged_at)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO soreness (user_id, muscle_group, intensity, note, logged_at, local_date)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [
       userId,
       requireMuscleGroup(muscleGroup),
       requireIntensity(intensity),
       requireOptionalNote(note) ?? null,
-      formatDateForMySQL(loggedAt || new Date()),
+      formatDateForMySQL(when),
+      localDay(when, timeZone),
     ],
   )
   return getSorenessById(userId, result.insertId)
@@ -338,12 +342,11 @@ export async function deleteSorenessEntry(
 export async function getSorenessStats(
   userId: number,
   days = 30,
-  timeZone = "UTC",
 ): Promise<SorenessStats> {
   // Two queries, one after the other. This used to be six in parallel, which
   // took six pool connections per call. The all-time figures are conditional
   // aggregates in one pass over the user's rows. The windowed heatmap and trend
-  // both come from one read of the window, grouped by local day in JS.
+  // both come from one read of the window, grouped by the stored local day.
   const [[totals]] = await pool.execute<
     (RowDataPacket & {
       active: number | null
@@ -365,9 +368,9 @@ export async function getSorenessStats(
 
   // Leans on idx_sor_user_logged.
   const [windowRows] = await pool.execute<
-    (RowDataPacket & { loggedAt: string; muscleGroup: string; intensity: number })[]
+    (RowDataPacket & { localDate: string; muscleGroup: string; intensity: number })[]
   >(
-    `SELECT logged_at AS loggedAt, muscle_group AS muscleGroup, intensity
+    `SELECT local_date AS localDate, muscle_group AS muscleGroup, intensity
      FROM soreness
      WHERE user_id = ? AND logged_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
      ORDER BY logged_at ASC`,
@@ -378,7 +381,7 @@ export async function getSorenessStats(
   const byDay = new Map<string, { n: number; total: number }>()
   for (const r of windowRows) {
     heatmapData[r.muscleGroup] = (heatmapData[r.muscleGroup] ?? 0) + 1
-    const date = localDay(parseMySQLDate(r.loggedAt), timeZone)
+    const date = r.localDate
     const day = byDay.get(date) ?? { n: 0, total: 0 }
     day.n += 1
     day.total += Number(r.intensity)

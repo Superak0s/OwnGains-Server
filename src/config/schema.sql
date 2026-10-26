@@ -234,6 +234,28 @@ CREATE TABLE IF NOT EXISTS program_exercises (
   CONSTRAINT ck_pe_position CHECK (position >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- The trainee's program as it was before a trainer replaced it, so the trainee
+-- can undo the change for 7 days (POST /api/program/snapshots/:id/restore).
+-- At most 10 per trainee. unlinked_workouts lists the workouts whose day the
+-- upload removed, so a restore can link them to the re-created day.
+CREATE TABLE IF NOT EXISTS program_snapshots (
+  id                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id           INT UNSIGNED NOT NULL,
+  trainer_id        INT UNSIGNED          DEFAULT NULL,
+  -- {weeklyPlan, originalFilename, currentDay}
+  program           JSON         NOT NULL,
+  days_removed      JSON         NOT NULL DEFAULT (JSON_ARRAY()),
+  unlinked_workouts JSON         NOT NULL DEFAULT (JSON_ARRAY()),
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at        DATETIME     NOT NULL,
+  restored_at       DATETIME              DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_ps_user (user_id, created_at),
+  KEY idx_ps_expires (expires_at),
+  CONSTRAINT fk_ps_user    FOREIGN KEY (user_id)    REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_ps_trainer FOREIGN KEY (trainer_id) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Workouts
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -448,6 +470,7 @@ CREATE TABLE IF NOT EXISTS supplement_intake (
   supplement_id INT UNSIGNED NOT NULL,
   amount        DECIMAL(8,2) NOT NULL,
   taken_at      DATETIME     NOT NULL,
+  local_date    DATE         NOT NULL,
   note          TEXT                  DEFAULT NULL,
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -478,6 +501,7 @@ CREATE TABLE IF NOT EXISTS soreness (
   intensity    TINYINT      NOT NULL,
   note         TEXT                  DEFAULT NULL,
   logged_at    DATETIME     NOT NULL,
+  local_date   DATE         NOT NULL,
   status       ENUM('active','recovering','recovered') NOT NULL DEFAULT 'active',
   recovered_at DATETIME              DEFAULT NULL,
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,

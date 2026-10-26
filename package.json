@@ -27,16 +27,16 @@
     "bonjour-service": "^1.4.4",
     "compression": "^1.8.2",
     "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.7.0",
-    "google-auth-library": "^11.2.0",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "google-auth-library": "^11.3.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.4.0",
-    "mysql2": "^3.24.4",
-    "sharp": "^0.35.4",
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6",
+    "sharp": "^0.35.5",
     "tweetnacl": "1.0.3",
-    "ws": "^8.21.3"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -44,14 +44,14 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/multer": "^2.2.0",
-    "@types/node": "^24.13.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^24.19.2",
     "@types/supertest": "^7.2.1",
-    "@types/ws": "^8.18.1",
-    "@vitest/coverage-v8": "^5.0.2",
-    "supertest": "^7.3.0",
-    "tsc-alias": "^1.9.5",
+    "@types/ws": "^8.18.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "supertest": "^7.3.1",
+    "tsc-alias": "^1.9.9",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.5"
   }
 }

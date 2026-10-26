@@ -1,4 +1,5 @@
 import type { Request } from "express"
+import { logger } from "./logger.js"
 
 export const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -24,4 +25,13 @@ export function localDay(instant: Date, timeZone: string): string {
   }).formatToParts(instant)
   const part = (type: string) => parts.find((p) => p.type === type)!.value
   return `${part("year")}-${part("month")}-${part("day")}`
+}
+
+/** Logs an error when zone names don't resolve, since every client would then count days in UTC. */
+export function checkZoneData(): void {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Athens" })
+  } catch {
+    logger.error("ICU zone data is missing: client time zones will fall back to UTC")
+  }
 }

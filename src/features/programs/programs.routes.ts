@@ -2,13 +2,19 @@ import { Router, Request, Response } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import { healthConsentGuard } from "@/features/tracking/healthConsent.js"
 import { applyTrainerContext, denyTrainer } from "@/middleware/trainerContext.js"
-import { ForbiddenError, ValidationError } from "@/middleware/errorHandler.js"
+import { ForbiddenError, NotFoundError, ValidationError } from "@/middleware/errorHandler.js"
+import { idempotent } from "@/middleware/idempotency.js"
+import { sendPush } from "@/features/push/fcm.js"
 import {
+  parseIntParam,
   validateProgramExercisePatch,
   validateProgramUpload,
 } from "@/middleware/validation.js"
 import {
   getProgramByUserId,
+  listProgramSnapshots,
+  restoreProgramSnapshot,
+  deleteProgramSnapshot,
   upsertProgram,
   deleteProgramByUserId,
   getProgramCurrentDay,
@@ -19,6 +25,7 @@ import {
   patchExerciseMachine,
   MACHINE_FIELDS,
 } from "./programs.model.js"
+import type { StoredProgram } from "./programs.types.js"
 
 const router: Router = Router()
 
@@ -35,18 +42,14 @@ function clearsSomething(v: unknown): boolean {
   return Object.values(v).some(clearsSomething)
 }
 
-router.get("/", async (req: Request, res: Response) => {
-  const result = await getProgramByUserId(req.user!.id)
-  // Not an error: every user has no program until they save one, and the client
-  // reads this 404 as "none yet". Answered here rather than thrown so it never
-  // reaches errorHandler's log.
-  if (!result) {
-    res.status(404).json({ success: false, error: "Program not found" })
-    return
-  }
-
-  const { programData, originalFilename, uploadedAt, currentDay } = result
-  res.json({
+/** GET /api/program's body, which a snapshot restore answers with too. */
+function programResponse({
+  programData,
+  originalFilename,
+  uploadedAt,
+  currentDay,
+}: StoredProgram) {
+  return {
     success: true,
     originalFilename,
     uploadedAt,
@@ -56,7 +59,19 @@ router.get("/", async (req: Request, res: Response) => {
     totalDays: programData.days.length,
     split: programData.split,
     days: programData.days,
-  })
+  }
+}
+
+router.get("/", async (req: Request, res: Response) => {
+  const result = await getProgramByUserId(req.user!.id)
+  // Not an error: every user has no program until they save one, and the client
+  // reads this 404 as "none yet". Answered here rather than thrown so it never
+  // reaches errorHandler's log.
+  if (!result) {
+    res.status(404).json({ success: false, error: "Program not found" })
+    return
+  }
+  res.json(programResponse(result))
 })
 
 /**
@@ -93,7 +108,10 @@ router.put("/current-day", async (req: Request, res: Response) => {
  * capped by the 2 MB express.json parser mounted on this path in server.ts.
  */
 // A trainer may replace the trainee's program (the Plan editor saves this
-// way), but not with an empty one: there is no versioning to recover it from.
+// way), but not with an empty one. Every trainer upload first saves the
+// trainee's program to program_snapshots, which the trainee can restore for 7
+// days, and one that removes a day needs `confirmRemoveDays: true` (409
+// TRAINER_CONFIRM_REQUIRED without it).
 // validateProgramUpload caps days, splits, exercises and names and checks every
 // field's type before upsertProgram opens its transaction.
 router.post("/upload", validateProgramUpload, async (req: Request, res: Response) => {
@@ -101,7 +119,33 @@ router.post("/upload", validateProgramUpload, async (req: Request, res: Response
   if (req.trainer && weeklyPlan.days.length === 0)
     throw new ForbiddenError("Trainers cannot empty a trainee's program")
 
-  await upsertProgram(req.user!.id, weeklyPlan, originalFilename)
+  const { snapshotId, daysRemoved } = await upsertProgram(
+    req.user!.id,
+    weeklyPlan,
+    originalFilename,
+    req.trainer
+      ? { trainerId: req.trainer.userId, confirmRemoveDays: req.body.confirmRemoveDays === true }
+      : {},
+  )
+
+  if (snapshotId !== null) {
+    const snapshot = (await listProgramSnapshots(req.user!.id)).find((s) => s.id === snapshotId)
+    const { sendToUser } = await import("@/ws/wsServer.js")
+    sendToUser(req.user!.uuid, "program_replaced", {
+      snapshotId,
+      trainer: snapshot?.trainer ?? null,
+      daysRemoved,
+      expiresAt: snapshot?.expiresAt ?? null,
+    })
+    // Google relays the push, so it carries no name, as for messages.
+    void sendPush(req.user!.id, {
+      title: "Your plan was changed",
+      body: "Your trainer changed your plan. Tap to review or undo.",
+      channelId: "trainer",
+      tag: "program-replaced",
+      data: { type: "program_replaced", snapshotId: String(snapshotId) },
+    })
+  }
 
   // Echoes the upload back, as it always has: the app may read days/split off
   // this response. The validator's caps are what bound its size now.
@@ -110,7 +154,30 @@ router.post("/upload", validateProgramUpload, async (req: Request, res: Response
     totalDays: weeklyPlan.days.length,
     split: weeklyPlan.split,
     days: weeklyPlan.days,
+    ...(req.trainer && { snapshotId, daysRemoved }),
   })
+})
+
+// The undo of a trainer's upload is the trainee's call alone, hence denyTrainer.
+router.get("/snapshots", denyTrainer, async (req: Request, res: Response) => {
+  res.json({ success: true, snapshots: await listProgramSnapshots(req.user!.id) })
+})
+
+router.post("/snapshots/:id/restore", denyTrainer, idempotent, async (req: Request, res: Response) => {
+  const id = parseIntParam(String(req.params.id), "snapshot ID")
+  const trainerUuid = await restoreProgramSnapshot(req.user!.id, id)
+  // The trainer's open Plan editor reloads instead of saving over the restore.
+  if (trainerUuid) {
+    const { sendToUser } = await import("@/ws/wsServer.js")
+    sendToUser(trainerUuid, "program_restored", { traineeId: req.user!.uuid, snapshotId: id })
+  }
+  res.json(programResponse((await getProgramByUserId(req.user!.id))!))
+})
+
+router.delete("/snapshots/:id", denyTrainer, async (req: Request, res: Response) => {
+  const id = parseIntParam(String(req.params.id), "snapshot ID")
+  if (!(await deleteProgramSnapshot(req.user!.id, id))) throw new NotFoundError("Snapshot")
+  res.json({ success: true })
 })
 
 router.delete("/", denyTrainer, async (req: Request, res: Response) => {

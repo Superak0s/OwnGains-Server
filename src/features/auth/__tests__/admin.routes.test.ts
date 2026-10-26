@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest"
 import request from "supertest"
 import { app, signup, auth, internalId } from "../../../tests/helpers.js"
 import { pool } from "../../../config/database.js"
-import { createUser, findUserByUsername } from "../auth.model.js"
+import { createUser, deleteUser, findUserByUsername } from "../auth.model.js"
 
 describe("admin routes and moderation", () => {
   let admin: Awaited<ReturnType<typeof signup>>
@@ -102,13 +102,31 @@ describe("admin routes and moderation", () => {
 })
 
 describe("BOOTSTRAP_ADMIN_USERNAME", () => {
-  it("makes only the named user admin when set", async () => {
+  // The test database always has an admin (the admin suite above makes one),
+  // so this covers the guarded side. The no-admin side would mean demoting
+  // every admin while other files run in parallel against the same database.
+  it("does not promote the named user while an admin exists", async () => {
     process.env.BOOTSTRAP_ADMIN_USERNAME = "BootAdmin_x1"
     try {
+      const existing = await signup("bootexist")
+      await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(existing.user.id)])
       await createUser("bootadmin_x1", "bootadmin_x1@test.local", "Passw0rd-123")
-      await createUser("bootother_x1", "bootother_x1@test.local", "Passw0rd-123")
-      expect((await findUserByUsername("bootadmin_x1"))!.isAdmin).toBe(true)
-      expect((await findUserByUsername("bootother_x1"))!.isAdmin).toBe(false)
+      expect((await findUserByUsername("bootadmin_x1"))!.isAdmin).toBe(false)
+    } finally {
+      delete process.env.BOOTSTRAP_ADMIN_USERNAME
+    }
+  })
+
+  it("does not promote a re-registration of the name after the admin deleted their account", async () => {
+    process.env.BOOTSTRAP_ADMIN_USERNAME = "BootAdmin_x2"
+    try {
+      const other = await signup("bootother")
+      await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [await internalId(other.user.id)])
+      const first = await createUser("bootadmin_x2", "bootadmin_x2@test.local", "Passw0rd-123")
+      await pool.query("UPDATE users SET is_admin = 1 WHERE id = ?", [first])
+      await deleteUser(first)
+      await createUser("bootadmin_x2", "bootadmin_x2b@test.local", "Passw0rd-123")
+      expect((await findUserByUsername("bootadmin_x2"))!.isAdmin).toBe(false)
     } finally {
       delete process.env.BOOTSTRAP_ADMIN_USERNAME
     }

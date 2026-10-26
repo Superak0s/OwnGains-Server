@@ -18,4 +18,25 @@ describe("logger", () => {
     logger.error("bad")
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/^\[.*\] ERROR$/), "bad")
   })
+
+  it("drops levels below LOG_LEVEL", async () => {
+    vi.stubEnv("LOG_LEVEL", "warn")
+    vi.resetModules()
+    const { logger: quiet } = await import("../logger.js")
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    quiet.info("noise")
+    quiet.warn("careful")
+    expect(info).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledOnce()
+    vi.unstubAllEnvs()
+  })
+
+  it("refuses an unknown LOG_LEVEL", async () => {
+    vi.stubEnv("LOG_LEVEL", "debug")
+    vi.resetModules()
+    await expect(import("../logger.js")).rejects.toThrow(/LOG_LEVEL/)
+    vi.unstubAllEnvs()
+  })
 })

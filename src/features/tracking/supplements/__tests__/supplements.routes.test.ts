@@ -161,7 +161,7 @@ describe("supplement days follow the client's timezone", () => {
     // 01:30 on the 23rd in Athens, still the 22nd in UTC.
     await request(app)
       .post(`/api/tracking/supplements/${id}/log`)
-      .set(auth(user.token))
+      .set({ ...auth(user.token), "X-Time-Zone": "Europe/Athens" })
       .send({ takenAt: "2026-10-22T22:30:00.000Z" })
 
     const athens = { ...auth(user.token), "X-Time-Zone": "Europe/Athens" }
@@ -170,7 +170,8 @@ describe("supplement days follow the client's timezone", () => {
     const today = await request(app).get(`/api/tracking/supplements/${id}/log`).set(athens)
     expect(today.body.data).toMatchObject({ takenToday: true, streak: 1 })
 
+    // The dose keeps the Athens day it was logged on, whatever zone the reader sends.
     const utc = await request(app).get("/api/tracking/supplements").set(auth(user.token))
-    expect(utc.body.data[0].takenToday).toBe(false)
+    expect(utc.body.data[0].takenToday).toBe(true)
   })
 })

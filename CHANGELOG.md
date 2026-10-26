@@ -6,9 +6,16 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- Trainees can undo a trainer's program change for 7 days (`GET /api/program/snapshots`, `POST /api/program/snapshots/:id/restore`, `DELETE /api/program/snapshots/:id`), and get a `program_replaced` WebSocket event and push notification when a trainer changes their plan. The trainer gets `program_restored` when the trainee undoes it.
+- `LOG_LEVEL` (`info`, `warn` or `error`, default `info`) sets the lowest log level printed. `warn` hides the per-request lines.
+
 ### Changed
 
+- A trainer upload that removes program days returns 409 `TRAINER_CONFIRM_REQUIRED` (with `details.daysRemoved`) unless the body sets `confirmRemoveDays: true`. A successful trainer upload also returns `snapshotId` and `daysRemoved`.
 - A database connection that cannot be set to UTC is logged as an error.
+- Supplement doses and soreness episodes store the day they were logged on, so past days keep their date when the timezone changes. Existing rows use their UTC day.
 
 ### Fixed
 
@@ -16,6 +23,13 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - Supplement "taken today" and streaks follow the timezone the app sends.
 - Soreness trend days follow the timezone the app sends.
 - The cycle day changes at the user's local midnight when the app sends its timezone.
+
+### Security
+
+- Sign-in lockout now applies to every spelling of a username or email that the database treats as the same (accents, case, full-width letters), so it can't be bypassed by varying the spelling. Existing lockouts and failure counts reset once on upgrade.
+- A trainer can no longer change the program day of a trainee's finished workouts, only of the one in progress (403 `TRAINER_WORKOUT_ENDED`).
+- `BOOTSTRAP_ADMIN_USERNAME` now only grants admin while the instance has no admin, so the name can't be re-registered for admin rights after that account is deleted.
+- Editing a message answers 403 `NOT_ALLOWED` once the pair are no longer friends, trainer or client, so a blocked user can't rewrite recent messages on the blocker's screen. Deleting your own message is still allowed.
 
 ### Internal
 
@@ -31,7 +45,11 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - Rows are grouped by key with the built-in `Map.groupBy` in the program, soreness, supplement and workout models, in place of five hand-written loops.
 - The program upload's exercise shape is one `CatalogEntry` type in `programs.model.ts`, in place of three inline copies.
 - Corrected the schema and back-dated timestamp comments.
+- The server logs an error at boot when the runtime has no ICU zone data.
+- Tracking route tests send the device zone with their writes, and the provisioning test pins its fixture migration.
+- `scripts/release.sh` refuses to run off `main`, with `gh` logged out, or to reuse a version already on origin or Docker Hub, takes `--bump=` and `--message=` to skip its prompts, lists what the release commit will include, builds with `--pull`, reuses the local act runner image, pushes `:x.y.z` before `:latest`, creates the GitHub release after the image push (printing a retry command if it fails), and shows step timings.
 
+- The README explains how the server stores time and buckets days by the client's timezone.
 ## [1.0.1] - 2026-10-22
 
 ### Internal

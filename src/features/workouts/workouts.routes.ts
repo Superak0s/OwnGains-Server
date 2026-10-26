@@ -366,8 +366,9 @@ router.post("/:sessionId/end", idempotent, async (req: Request, res: Response) =
   res.json({ success: true, session, alreadyEnded })
 })
 
-// Moves a running workout to another program day when the user switches day
-// mid-session. Its sets are left in place.
+// Moves a workout to another program day when the user switches day
+// mid-session. Its sets are left in place. A trainer may only move the one in
+// progress: finished history remains the trainee's own call.
 router.patch("/:sessionId", idempotent, async (req: Request, res: Response) => {
   const userId = req.user!.id
   const sessionId = parseIntParam(String(req.params.sessionId), "session ID")
@@ -378,7 +379,9 @@ router.patch("/:sessionId", idempotent, async (req: Request, res: Response) => {
   if (dayTitle !== null && (typeof dayTitle !== "string" || dayTitle.length > 255))
     throw new ValidationError("Day title must be a string of at most 255 characters")
 
-  const session = await updateSessionDay(sessionId, userId, dayNumber, dayTitle)
+  const session = await updateSessionDay(sessionId, userId, dayNumber, dayTitle, {
+    openWorkoutOnly: !!req.trainer,
+  })
   res.json({ success: true, session })
 })
 

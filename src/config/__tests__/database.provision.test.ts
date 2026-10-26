@@ -111,13 +111,13 @@ describe.skipIf(!canCreate)(`database provisioning (needs CREATE on ${scratch})`
     await db.testDatabaseConnection()
     expect(exit).not.toHaveBeenCalled()
     const all = await migrations(db)
-    expect(all).toEqual([FIXTURE])
+    expect(all).toContain(FIXTURE)
     vi.restoreAllMocks()
     withFixtureMigration()
     exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
 
     // The column is already there, so the re-run's ER_DUP_FIELDNAME counts as done.
-    await db.pool.query("DELETE FROM _migrations WHERE name = ?", [all[0]])
+    await db.pool.query("DELETE FROM _migrations WHERE name = ?", [FIXTURE])
     db = await load({ DB_QUERY_TIMEOUT_MS: "0" })
     await db.testDatabaseConnection()
     expect(exit).not.toHaveBeenCalled()

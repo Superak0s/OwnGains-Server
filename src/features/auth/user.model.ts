@@ -132,6 +132,8 @@ const OUTBOUND_ONLY: Record<string, string> = {
   workouts: "user_id",
   // Same for a trainer's suggestions in their clients' schedules.
   scheduled_workouts: "user_id",
+  // And for the trainee's undo copies of programs a trainer replaced.
+  program_snapshots: "user_id",
   // Received messages are the sender's words. Account deletion still removes
   // both directions through the FKs.
   messages: "sender_id",

@@ -36,6 +36,7 @@ router.post("/", idempotent, async (req: Request, res: Response) => {
     intensity,
     parseBackdatedTimestamp(loggedAt, "loggedAt"),
     note ?? null,
+    requestTimeZone(req),
   )
   res.status(201).json({ success: true, data: entry })
 })
@@ -52,7 +53,7 @@ router.get("/", async (req: Request, res: Response) => {
 
 router.get("/stats", async (req: Request, res: Response) => {
   const days = queryLimit(req, { def: 30, max: 365, key: "days" })
-  res.json({ success: true, data: await getSorenessStats(req.user!.id, days, requestTimeZone(req)) })
+  res.json({ success: true, data: await getSorenessStats(req.user!.id, days) })
 })
 
 /** Check in on many episodes at once: the "how is everything today" screen. */

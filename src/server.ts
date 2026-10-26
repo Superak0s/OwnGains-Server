@@ -46,6 +46,7 @@ if (allowedOrigins.includes("*"))
 const trustProxyHops = envInt("TRUST_PROXY_HOPS", 0)
 
 import { testDatabaseConnection, pool } from "./config/database.js"
+import { checkZoneData } from "./utils/timeZone.js"
 import { createWsServer, closeWsServer } from "./ws/wsServer.js"
 import { registerRoutes, localOnlyFeatures, currentDisabledFeatures } from "./routes.js"
 import { errorHandler } from "./middleware/errorHandler.js"
@@ -363,6 +364,7 @@ let mdnsService: Service | undefined
 
 /** Connects the database, then starts the HTTP and WebSocket servers and mDNS. */
 export async function start() {
+  checkZoneData()
   await testDatabaseConnection()
   createWsServer(server)
   const b = mdnsEnabled

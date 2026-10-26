@@ -160,4 +160,21 @@ describe("messages routes", () => {
     expect((await del(ann.token, ben.user.id, id)).status).toBe(404)
     expect((await thread(ben.token, ann.user.id)).body.messages).toEqual([])
   })
+
+  it("refuses sends and edits after a block, but still lets the sender delete", async () => {
+    const ann = await signup("msgba")
+    const ben = await signup("msgbb")
+    await befriend(ann, ben)
+    const id = (await send(ann.token, ben.user.id, "before")).body.message.id
+    await request(app).post(`/api/friends/block/${ann.user.id}`).set(auth(ben.token))
+
+    const sent = await send(ann.token, ben.user.id, "after")
+    expect(sent.status).toBe(403)
+    expect(sent.body.code).toBe("NOT_ALLOWED")
+    const edited = await request(app).patch(`/api/messages/${ben.user.id}/${id}`).set(auth(ann.token)).send({ body: "rewritten" })
+    expect(edited.status).toBe(403)
+    expect(edited.body.code).toBe("NOT_ALLOWED")
+    expect((await thread(ben.token, ann.user.id)).body.messages[0]).toMatchObject({ body: "before", editedAt: null })
+    expect((await request(app).delete(`/api/messages/${ben.user.id}/${id}`).set(auth(ann.token))).status).toBe(200)
+  })
 })

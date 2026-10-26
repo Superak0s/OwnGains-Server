@@ -86,6 +86,8 @@ router.post("/:userUuid/read", async (req: Request, res: Response) => {
 
 router.patch("/:userUuid/:messageId", async (req: Request, res: Response) => {
   const peer = await resolvePeer(req.user!.id, req.params.userUuid)
+  if (!peer.allowed)
+    throw new ForbiddenError("You can only message friends and your trainer or clients", "NOT_ALLOWED")
   const messageId = parseIntParam(String(req.params.messageId), "message ID")
   const message = await editMessage(req.user!.id, peer.id, messageId, messageBody(req))
   const { sendToUser } = await import("@/ws/wsServer.js")

@@ -7,6 +7,7 @@ before it were removed, so a database from an earlier release is not upgraded.
 
 | File | Change | Minimum prior schema |
 |---|---|---|
+| `001_local_date.sql` | Adds `local_date` to `supplement_intake` and `soreness`, backfilled from the UTC timestamp, so rows from before it keep their UTC day. | 0.6.0 |
 
 To alter an existing table on live boxes, add `NNN_description.sql` here,
 zero-padded to three digits (files run in `localeCompare` order, each at most

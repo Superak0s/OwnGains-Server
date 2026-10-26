@@ -10,10 +10,11 @@
 // GET /api/program still returns exactly the shape the app has always read.
 // toProgramData below is where the rows become that shape again.
 
-import { pool, withTransaction } from "@/config/database.js"
+import { parseMySQLDate, pool, withTransaction } from "@/config/database.js"
 import type { RowDataPacket, ResultSetHeader } from "mysql2"
-import type { PoolConnection } from "mysql2/promise"
+import type { Pool, PoolConnection } from "mysql2/promise"
 import {
+  ConflictError,
   NotFoundError,
   ValidationError,
   throwCheckViolation,
@@ -94,12 +95,14 @@ interface SlotRow extends RowDataPacket {
  * Rebuilds a user's program in the JSON shape the app uploaded.
  *
  * @param userId - Numeric id of the owner.
+ * @param db - The pool, or a transaction's connection to read inside it.
  * @returns The stored program, or null when none was uploaded.
  */
 export async function getProgramByUserId(
   userId: number,
+  db: Pool | PoolConnection = pool,
 ): Promise<StoredProgram | null> {
-  const [programs] = await pool.execute<ProgramRow[]>(
+  const [programs] = await db.execute<ProgramRow[]>(
     `SELECT id, original_filename AS originalFilename,
             split_order AS splitOrder, uploaded_at AS uploadedAt,
             current_day AS currentDay
@@ -110,14 +113,14 @@ export async function getProgramByUserId(
   if (!program) return null
 
   const [[days], [slots]] = await Promise.all([
-    pool.execute<DayRow[]>(
+    db.execute<DayRow[]>(
       `SELECT id, day_number AS dayNumber, title AS dayTitle,
               primary_muscles AS primaryMuscles,
               secondary_muscles AS secondaryMuscles
        FROM program_days WHERE program_id = ? ORDER BY day_number ASC`,
       [program.id],
     ),
-    pool.execute<SlotRow[]>(
+    db.execute<SlotRow[]>(
       `SELECT pe.program_day_id AS programDayId, pe.split_name AS splitName,
               pe.position, e.name,
               IF(JSON_LENGTH(uem.primary_muscles) > 0,
@@ -300,17 +303,37 @@ async function saveUploadMuscles(
     )
 }
 
+/** What a trainer upload did to the trainee's program. */
+export interface UploadResult {
+  /** The undo copy of the trainee's previous program, or null when none was taken. */
+  snapshotId: number | null
+  daysRemoved: number[]
+}
+
 /**
  * Replace the caller's program with this one. Days are upserted on
  * (program_id, day_number) rather than deleted and recreated, so a workout's
  * program_day_id is kept across a re-upload of the same day and its history keeps its
  * muscle labels.
+ *
+ * @param options.trainerId - Set in trainer mode: the trainee's previous program is
+ *   saved to program_snapshots first, and removing a day needs `confirmRemoveDays`.
+ * @param options.after - Runs last inside the upload's transaction (a restore uses it).
  */
 export async function upsertProgram(
   userId: number,
   programData: ProgramData,
   originalFilename: string,
-): Promise<void> {
+  {
+    trainerId = null,
+    confirmRemoveDays = false,
+    after,
+  }: {
+    trainerId?: number | null
+    confirmRemoveDays?: boolean
+    after?: (connection: PoolConnection, programId: number) => Promise<void>
+  } = {},
+): Promise<UploadResult> {
   const days = programData.days ?? []
 
   // Two entries with the same dayNumber upsert onto the same row, and the
@@ -351,7 +374,13 @@ export async function upsertProgram(
 
   const ids = await catalogIds(catalog)
 
-  await withTransaction(async (connection) => {
+  return withTransaction(async (connection) => {
+    // Before the upsert below overwrites the filename and split order.
+    const result: UploadResult =
+      trainerId === null
+        ? { snapshotId: null, daysRemoved: [] }
+        : await snapshotProgram(connection, userId, trainerId, days, confirmRemoveDays)
+
     const [programResult] = await connection.execute<ResultSetHeader>(
       `INSERT INTO programs (user_id, original_filename, split_order)
        VALUES (?, ?, ?)
@@ -447,7 +476,199 @@ export async function upsertProgram(
         : `UPDATE programs SET current_day = NULL WHERE id = ?`,
       [programId, ...days.map((d) => d.dayNumber)],
     )
+
+    await after?.(connection, programId)
+    return result
   })
+}
+
+// ─── Undo of a trainer upload ─────────────────────────────────────────────────
+
+const SNAPSHOT_DAYS = 7
+const MAX_SNAPSHOTS = 10
+
+/** MariaDB returns a JSON column as text, MySQL as a parsed value. */
+const fromJson = <T>(v: unknown): T => (typeof v === "string" ? JSON.parse(v) : v) as T
+
+/**
+ * Saves the trainee's program as it is now, inside the trainer's upload
+ * transaction, so a failed snapshot fails the upload. Throws 409
+ * `TRAINER_CONFIRM_REQUIRED` when the upload removes a day without the flag.
+ */
+async function snapshotProgram(
+  connection: PoolConnection,
+  userId: number,
+  trainerId: number,
+  days: ProgramDay[],
+  confirmRemoveDays: boolean,
+): Promise<UploadResult> {
+  const old = await getProgramByUserId(userId, connection)
+  if (!old) return { snapshotId: null, daysRemoved: [] }
+
+  const kept = new Set(days.map((d) => d.dayNumber))
+  const daysRemoved = old.programData.days.map((d) => d.dayNumber).filter((n) => !kept.has(n))
+  if (daysRemoved.length && !confirmRemoveDays)
+    throw new ConflictError(
+      `This removes day(s) ${daysRemoved.join(", ")} from the trainee's plan`,
+      "TRAINER_CONFIRM_REQUIRED",
+      { daysRemoved },
+    )
+
+  // The workouts that lose their day link when those days are deleted.
+  const unlinked: number[] = []
+  if (daysRemoved.length) {
+    const [rows] = await connection.query<(RowDataPacket & { id: number })[]>(
+      `SELECT w.id FROM workouts w
+       JOIN program_days pd ON pd.id = w.program_day_id
+       JOIN programs p ON p.id = pd.program_id
+       WHERE p.user_id = ? AND pd.day_number IN (?)`,
+      [userId, daysRemoved],
+    )
+    unlinked.push(...rows.map((w) => w.id))
+  }
+
+  const [inserted] = await connection.execute<ResultSetHeader>(
+    `INSERT INTO program_snapshots
+       (user_id, trainer_id, program, days_removed, unlinked_workouts, expires_at)
+     VALUES (?, ?, ?, ?, ?, NOW() + INTERVAL ${SNAPSHOT_DAYS} DAY)`,
+    [
+      userId,
+      trainerId,
+      JSON.stringify({
+        weeklyPlan: old.programData,
+        originalFilename: old.originalFilename,
+        currentDay: old.currentDay,
+      }),
+      JSON.stringify(daysRemoved),
+      JSON.stringify(unlinked),
+    ],
+  )
+
+  // Over the cap, the second-oldest goes: the oldest is the program from
+  // before the trainer's first edit, the one most worth keeping.
+  const [[{ n }]] = await connection.execute<(RowDataPacket & { n: number })[]>(
+    `SELECT COUNT(*) AS n FROM program_snapshots WHERE user_id = ?`,
+    [userId],
+  )
+  if (Number(n) > MAX_SNAPSHOTS)
+    await connection.execute(
+      `DELETE FROM program_snapshots WHERE id IN (
+         SELECT id FROM (SELECT id FROM program_snapshots WHERE user_id = ?
+                         ORDER BY id LIMIT 1 OFFSET 1) AS s)`,
+      [userId],
+    )
+
+  return { snapshotId: inserted.insertId, daysRemoved }
+}
+
+/** One undo the trainee can still apply, as GET /api/program/snapshots lists it. */
+export interface ProgramSnapshot {
+  id: number
+  trainer: { uuid: string; username: string; displayName: string } | null
+  createdAt: string
+  expiresAt: string
+  daysRemoved: number[]
+}
+
+/**
+ * The trainee's snapshots that have neither expired nor been restored, newest first.
+ *
+ * @param userId - Numeric id of the trainee.
+ */
+export async function listProgramSnapshots(userId: number): Promise<ProgramSnapshot[]> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT ps.id, ps.created_at AS createdAt, ps.expires_at AS expiresAt,
+            ps.days_removed AS daysRemoved,
+            u.uuid AS trainerUuid, u.username AS trainerUsername, u.name AS trainerName
+     FROM program_snapshots ps
+     LEFT JOIN users u ON u.id = ps.trainer_id
+     WHERE ps.user_id = ? AND ps.restored_at IS NULL AND ps.expires_at > NOW()
+     ORDER BY ps.id DESC`,
+    [userId],
+  )
+  return rows.map((r) => ({
+    id: r.id,
+    trainer: r.trainerUuid
+      ? { uuid: r.trainerUuid, username: r.trainerUsername, displayName: r.trainerName }
+      : null,
+    createdAt: parseMySQLDate(r.createdAt).toISOString(),
+    expiresAt: parseMySQLDate(r.expiresAt).toISOString(),
+    daysRemoved: fromJson<number[]>(r.daysRemoved),
+  }))
+}
+
+/**
+ * Puts the program from a snapshot back, with its day pointer, and links the
+ * workouts the trainer's upload unlinked to the re-created days. One
+ * transaction. 404 when the snapshot isn't the caller's, has expired or was
+ * already restored.
+ *
+ * @param userId - Numeric id of the trainee.
+ * @param snapshotId - `program_snapshots.id`.
+ * @returns The uuid of the trainer who made the change, or null when that account is gone.
+ */
+export async function restoreProgramSnapshot(
+  userId: number,
+  snapshotId: number,
+): Promise<string | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT ps.program, ps.unlinked_workouts AS unlinked, u.uuid AS trainerUuid
+     FROM program_snapshots ps
+     LEFT JOIN users u ON u.id = ps.trainer_id
+     WHERE ps.id = ? AND ps.user_id = ? AND ps.restored_at IS NULL AND ps.expires_at > NOW()`,
+    [snapshotId, userId],
+  )
+  if (!rows[0]) throw new NotFoundError("Snapshot")
+  const program = fromJson<{
+    weeklyPlan: ProgramData
+    originalFilename: string
+    currentDay: number | null
+  }>(rows[0].program)
+  const unlinked = fromJson<number[]>(rows[0].unlinked)
+
+  await upsertProgram(userId, program.weeklyPlan, program.originalFilename, {
+    after: async (connection, programId) => {
+      // Also the guard against two restores of one snapshot racing.
+      const [marked] = await connection.execute<ResultSetHeader>(
+        `UPDATE program_snapshots SET restored_at = NOW()
+         WHERE id = ? AND user_id = ? AND restored_at IS NULL`,
+        [snapshotId, userId],
+      )
+      if (marked.affectedRows === 0) throw new NotFoundError("Snapshot")
+      await connection.execute(`UPDATE programs SET current_day = ? WHERE id = ?`, [
+        program.currentDay,
+        programId,
+      ])
+      // Workouts keep their own day_number, which finds the re-created day.
+      if (unlinked.length)
+        await connection.query(
+          `UPDATE workouts w
+           JOIN program_days pd ON pd.program_id = ? AND pd.day_number = w.day_number
+           SET w.program_day_id = pd.id
+           WHERE w.user_id = ? AND w.id IN (?) AND w.program_day_id IS NULL`,
+          [programId, userId, unlinked],
+        )
+    },
+  })
+  return rows[0].trainerUuid ?? null
+}
+
+/**
+ * Dismisses a snapshot ("keep the trainer's version").
+ *
+ * @returns False when the caller has no such snapshot.
+ */
+export async function deleteProgramSnapshot(userId: number, snapshotId: number): Promise<boolean> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM program_snapshots WHERE id = ? AND user_id = ?`,
+    [snapshotId, userId],
+  )
+  return result.affectedRows > 0
+}
+
+/** Deletes expired snapshots in one batch, from the cleanup sweep. */
+export async function purgeExpiredProgramSnapshots(): Promise<void> {
+  await pool.execute(`DELETE FROM program_snapshots WHERE expires_at < NOW() LIMIT 1000`)
 }
 
 /** Every exercise of every split of every day, in upload order. */

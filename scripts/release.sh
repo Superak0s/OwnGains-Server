@@ -13,7 +13,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
 else
     B='' DIM='' RED='' GRN='' YEL='' CYN='' R=''
 fi
-step() { printf '\n%s==> [%s] %s%s\n' "$B$CYN" "$1" "$2" "$R"; }
+step() { printf '\n%s==> [%s] %s %s(%dm%02ds)%s\n' "$B$CYN" "$1" "$2" "$DIM" $((SECONDS / 60)) $((SECONDS % 60)) "$R"; }
 ok()   { printf '%s  OK  %s%s\n' "$GRN" "$*" "$R"; }
 info() { printf '%s  ..  %s%s\n' "$DIM" "$*" "$R"; }
 warn() { printf '%s  !!  %s%s\n' "$YEL" "$*" "$R"; }
@@ -30,10 +30,12 @@ ${B}Usage:${R} scripts/release.sh [options]
   ${CYN}--no-test${R}         Skip the local CI run (act) in the pre-build verification.
                     Typecheck still runs.
   ${CYN}--no-docker-push${R}  Build the image but don't push it to Docker Hub.
+  ${CYN}--bump=X${R}          patch, minor, keep or 1.2.3 (skips the version prompt).
+  ${CYN}--message=MSG${R}     Commit message (skips the prompt).
   ${CYN}-h, --help${R}        Show this help.
 
 ${DIM}Steps: [0] origin/main sync check, [1] version + changelog, [2] typecheck +
-.github/workflows/ci.yml run locally by act, [3] docker build, [4] git commit/push/tag + GitHub release, [5] docker push.
+.github/workflows/ci.yml run locally by act, [3] docker build, [4] git commit/push/tag, [5] docker push + GitHub release.
 When the version is bumped, [Unreleased] in CHANGELOG.md is renamed to the new
 version and becomes the GitHub release notes. An empty [Unreleased] is left alone
 and the release gets default notes. A failed or Ctrl+C'd run before [4] reverts
@@ -44,11 +46,15 @@ EOF
 SKIP_PUSH=false
 SKIP_TESTS=false
 SKIP_DOCKER_PUSH=false
+BUMP_ARG=""
+COMMIT_MSG=""
 for arg in "$@"; do
     case "$arg" in
         --no-push) SKIP_PUSH=true ;;
         --no-test) SKIP_TESTS=true ;;
         --no-docker-push) SKIP_DOCKER_PUSH=true ;;
+        --bump=*) BUMP_ARG="${arg#*=}" ;;
+        --message=*) COMMIT_MSG="${arg#*=}" ;;
         -h|--help) usage; exit 0 ;;
         *) err "Unknown option: $arg"; echo "Run scripts/release.sh -h for the list." >&2; exit 1 ;;
     esac
@@ -58,6 +64,10 @@ docker info >/dev/null 2>&1 || die "Docker is not running."
 # Checked before any prompt, so a missing act doesn't cost a version choice.
 if [ "$SKIP_TESTS" = false ] && ! command -v act >/dev/null 2>&1; then
     die "act is not installed (winget install nektos.act). Or pass --no-test."
+fi
+if [ "$SKIP_PUSH" = false ]; then
+    command -v gh >/dev/null 2>&1 || die "gh is not installed. Install the GitHub CLI or pass --no-push."
+    gh auth status >/dev/null 2>&1 || die "gh is not logged in. Run gh auth login, or pass --no-push."
 fi
 
 cd "$SERVER_DIR"
@@ -91,16 +101,13 @@ if [ "$SKIP_PUSH" = true ]; then
     step 0/5 "Sync check: skipped (--no-push)"
 else
     step 0/5 "Checking branch is up to date with origin/main"
+    # Step 4 pushes main by name, so a release from another branch would tag a
+    # commit that never reaches main.
+    CURRENT_BRANCH=$(git branch --show-current)
+    [ "$CURRENT_BRANCH" = main ] || die "On branch '${CURRENT_BRANCH:-detached HEAD}', not main."
     git fetch origin main
-    LOCAL_HEAD=$(git rev-parse HEAD)
-    REMOTE_HEAD=$(git rev-parse origin/main)
-    BASE=$(git merge-base HEAD origin/main)
-
-    if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ] && [ "$BASE" = "$LOCAL_HEAD" ]; then
-        die "Local main is behind origin/main. Run 'git pull --rebase origin main' first."
-    elif [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ] && [ "$BASE" != "$REMOTE_HEAD" ]; then
-        die "Local main has diverged from origin/main. Resolve manually before releasing."
-    fi
+    git merge-base --is-ancestor origin/main HEAD \
+        || die "origin/main has commits this checkout doesn't. Run 'git pull --rebase origin main' first."
     ok "Up to date"
 fi
 
@@ -112,17 +119,24 @@ IFS='.' read -r CUR_MAJOR CUR_MINOR CUR_PATCH <<< "$CURRENT_VERSION"
 AUTO_PATCH_VERSION="$CUR_MAJOR.$CUR_MINOR.$((CUR_PATCH + 1))"
 AUTO_MINOR_VERSION="$CUR_MAJOR.$((CUR_MINOR + 1)).0"
 
-echo "Current version: ${B}$CURRENT_VERSION${R}"
-echo "  [1] Patch  -> $AUTO_PATCH_VERSION ${DIM}(default)${R}"
-echo "  [2] Minor  -> $AUTO_MINOR_VERSION"
-echo "  [3] Custom"
-echo "  [4] Keep $CURRENT_VERSION"
-read -rp "${B}Choose 1-4:${R} " VERSION_CHOICE
 KEEP_VERSION=false
+case "$BUMP_ARG" in
+    patch) VERSION_CHOICE=1 ;;
+    minor) VERSION_CHOICE=2 ;;
+    keep) VERSION_CHOICE=4 ;;
+    "")
+        echo "Current version: ${B}$CURRENT_VERSION${R}"
+        echo "  [1] Patch  -> $AUTO_PATCH_VERSION ${DIM}(default)${R}"
+        echo "  [2] Minor  -> $AUTO_MINOR_VERSION"
+        echo "  [3] Custom"
+        echo "  [4] Keep $CURRENT_VERSION"
+        read -rp "${B}Choose 1-4:${R} " VERSION_CHOICE ;;
+    *) VERSION_CHOICE=3; NEW_VERSION="$BUMP_ARG" ;;
+esac
 
 case "${VERSION_CHOICE:-1}" in
     2) NEW_VERSION="$AUTO_MINOR_VERSION" ;;
-    3) read -rp "${B}Custom version (e.g. 2.0.0):${R} " NEW_VERSION ;;
+    3) [ -n "$BUMP_ARG" ] || read -rp "${B}Custom version (e.g. 2.0.0):${R} " NEW_VERSION ;;
     4) NEW_VERSION="$CURRENT_VERSION"; KEEP_VERSION=true ;;
     *) NEW_VERSION="$AUTO_PATCH_VERSION" ;;
 esac
@@ -130,6 +144,17 @@ esac
 # Docker tags and git tags both assume a plain x.y.z.
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     die "'$NEW_VERSION' is not a valid x.y.z version."
+fi
+
+# Checked on the remotes, before the build, so a reused version stops the run
+# before anything is written or pushed. Keeping the version re-releases on purpose.
+if [ "$KEEP_VERSION" = false ]; then
+    if git ls-remote --exit-code --tags origin "refs/tags/v$NEW_VERSION" >/dev/null 2>&1; then
+        die "Tag v$NEW_VERSION already exists on origin. Choose another version."
+    fi
+    if [ "$SKIP_DOCKER_PUSH" = false ] && docker manifest inspect "$DOCKER_IMAGE:$NEW_VERSION" >/dev/null 2>&1; then
+        die "$DOCKER_IMAGE:$NEW_VERSION already exists on Docker Hub. Choose another version."
+    fi
 fi
 
 # Checked before anything is written, so a broken changelog stops the run clean.
@@ -144,9 +169,15 @@ if [ "$KEEP_VERSION" = false ]; then
     esac
 fi
 
+# Step 4 runs 'git add .', so everything listed here goes into the release commit.
+if [ "$SKIP_PUSH" = false ]; then
+    info "The release commit will include these changes, plus the version bump:"
+    git status --short
+fi
+
 # Asked up front so the rest of the run is unattended.
 if [ "$KEEP_VERSION" = false ] && [ "$SKIP_PUSH" = false ]; then
-    read -rp "${B}Commit message${R} (Enter for 'Release v$NEW_VERSION'): " COMMIT_MSG
+    [ -n "$COMMIT_MSG" ] || read -rp "${B}Commit message${R} (Enter for 'Release v$NEW_VERSION'): " COMMIT_MSG
     COMMIT_MSG="${COMMIT_MSG:-Release v$NEW_VERSION}"
 fi
 
@@ -179,13 +210,15 @@ ok "typecheck"
 # Linux), so a push doesn't turn up a CI failure that a local run missed.
 # act copies the working tree, uncommitted changes included, minus .gitignore.
 if [ "$SKIP_TESTS" = false ]; then
-    act push -j test --rm -P ubuntu-latest=catthehacker/ubuntu:act-latest
+    act push -j test --rm --pull=false -P ubuntu-latest=catthehacker/ubuntu:act-latest
     ok "CI (act)"
 fi
 
 # [3/5] Build Docker image
 step 3/5 "Building Docker image v$NEW_VERSION"
-docker build -t "$DOCKER_IMAGE:latest" -t "$DOCKER_IMAGE:$NEW_VERSION" .
+# --pull because the base image is a floating tag, so a cached copy could lack
+# Alpine security fixes.
+docker build --pull -t "$DOCKER_IMAGE:latest" -t "$DOCKER_IMAGE:$NEW_VERSION" .
 ok "Built $DOCKER_IMAGE:latest and :$NEW_VERSION"
 
 # Past this point a commit or push may exist, so nothing is reverted any more.
@@ -213,43 +246,54 @@ else
     fi
 
     TAG="v$NEW_VERSION"
+    CREATE_GH_RELEASE=false
     if git rev-parse "$TAG" >/dev/null 2>&1; then
         warn "Tag $TAG already exists locally, skipping tag creation"
     else
         git tag -a "$TAG" -m "Release $TAG"
         git push origin "$TAG"
         ok "Tagged and pushed $TAG"
-
-        # This version's CHANGELOG.md section becomes the release notes.
-        if command -v gh >/dev/null 2>&1; then
-            NOTES_FILE="$(mktemp)"
-            if ! bun scripts/changelog.mjs notes "$NEW_VERSION" "$NOTES_FILE" 2>/dev/null; then
-                info "No [$NEW_VERSION] notes in CHANGELOG.md, using the default release text"
-                echo "Release $TAG built on $(date '+%Y-%m-%d %H:%M')" > "$NOTES_FILE"
-            fi
-            if gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES_FILE"; then
-                ok "GitHub release $TAG"
-            else
-                warn "GitHub release for $TAG failed, create it by hand."
-            fi
-            rm -f "$NOTES_FILE"
-        else
-            warn "gh not installed, skipping the GitHub release for $TAG"
-        fi
+        CREATE_GH_RELEASE=true
     fi
 fi
 
 # [5/5] Push to Docker Hub
 if [ "$SKIP_DOCKER_PUSH" = true ]; then
     step 5/5 "Docker push: skipped (--no-docker-push)"
-    printf '\n%s=== Done! Image built locally as :latest and :%s ===%s\n' "$B$GRN" "$NEW_VERSION" "$R"
-    exit 0
+else
+    step 5/5 "Pushing image to Docker Hub"
+    # Version first, so a failed second push never leaves :latest on an
+    # image that has no version tag.
+    docker push "$DOCKER_IMAGE:$NEW_VERSION"
+    docker push "$DOCKER_IMAGE:latest"
 fi
 
-step 5/5 "Pushing image to Docker Hub"
-docker push "$DOCKER_IMAGE:latest"
-docker push "$DOCKER_IMAGE:$NEW_VERSION"
-printf '\n%s=== Done! v%s pushed as :latest and :%s ===%s\n' "$B$GRN" "$NEW_VERSION" "$NEW_VERSION" "$R"
+# Created after the image push, so a release is never announced for an image
+# nobody can pull. This version's CHANGELOG.md section becomes the release notes.
+# gh was checked before the build, since CREATE_GH_RELEASE implies a push.
+if [ "${CREATE_GH_RELEASE:-false}" = true ]; then
+    NOTES_FILE="$(mktemp)"
+    if ! bun scripts/changelog.mjs notes "$NEW_VERSION" "$NOTES_FILE" 2>/dev/null; then
+        info "No [$NEW_VERSION] notes in CHANGELOG.md, using the default release text"
+        echo "Release $TAG built on $(date '+%Y-%m-%d %H:%M')" > "$NOTES_FILE"
+    fi
+    GH_ARGS=("$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES_FILE")
+    if ! gh release create "${GH_ARGS[@]}"; then
+        # The notes file is kept so the printed command still works.
+        err "GitHub release failed. The tag and image are pushed, so retry only the release with:"
+        printf '  gh release create' >&2; printf ' %q' "${GH_ARGS[@]}" >&2; printf '\n' >&2
+        exit 1
+    fi
+    rm -f "$NOTES_FILE"
+    ok "GitHub release $TAG"
+fi
+
+if [ "$SKIP_DOCKER_PUSH" = true ]; then
+    printf '\n%s=== Done! Image built locally as :latest and :%s ===%s\n' "$B$GRN" "$NEW_VERSION" "$R"
+else
+    printf '\n%s=== Done! v%s pushed as :latest and :%s ===%s\n' "$B$GRN" "$NEW_VERSION" "$NEW_VERSION" "$R"
+fi
+printf '  Took %dm%02ds\n' $((SECONDS / 60)) $((SECONDS % 60))
 
 # Without this bash reads on past the group and mis-seeks in the file.
 exit 0

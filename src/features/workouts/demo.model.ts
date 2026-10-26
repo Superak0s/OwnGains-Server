@@ -368,9 +368,9 @@ async function insertTrackingDemo(conn: PoolConnection, userId: number, at: Demo
   }
   count += await insertDemoRows(conn, userId, "measurements", ["metric", "value", "measured_at", "entry_seq"], metrics)
   count += await insertDemoRows(conn, userId, "macros_intake", ["name", "protein", "carbs", "fat", "calories", "taken_at"], macros)
-  count += await insertDemoRows(conn, userId, "soreness", ["muscle_group", "intensity", "logged_at"], [
-    ["quads", 6, at(1, 18)],
-    ["chest_upper", 4, at(2, 18)],
+  count += await insertDemoRows(conn, userId, "soreness", ["muscle_group", "intensity", "logged_at", "local_date"], [
+    ["quads", 6, at(1, 18), at(1, 18).slice(0, 10)],
+    ["chest_upper", 4, at(2, 18), at(2, 18).slice(0, 10)],
   ])
   count += await insertDemoRows(conn, userId, "injuries", ["muscle_group", "injury_type", "pain_level", "start_date", "note"], [
     ["lower_back", "strain", 3, at(10), "Demo injury"],
@@ -433,10 +433,10 @@ async function insertSupplementsDemo(conn: PoolConnection, userId: number, at: D
     )
     const doses: Row[] = []
     for (let d = days; d >= 0; d--)
-      if ((d + i) % 5 !== 0) doses.push([userId, id, sup.amount, at(d, 8 + i)])
+      if ((d + i) % 5 !== 0) doses.push([userId, id, sup.amount, at(d, 8 + i), at(d, 8 + i).slice(0, 10)])
     await conn.execute(
-      `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at)
-       VALUES ${doses.map(() => "(?, ?, ?, ?)").join(", ")}`,
+      `INSERT INTO supplement_intake (user_id, supplement_id, amount, taken_at, local_date)
+       VALUES ${doses.map(() => "(?, ?, ?, ?, ?)").join(", ")}`,
       doses.flat(),
     )
   }

@@ -147,6 +147,37 @@ describe("trainer mode limits", () => {
     expect(ownEdit.body.timing.weight).toBe(105)
   })
 
+  it("lets a trainer change the day only of the workout in progress", async () => {
+    const start = await request(app)
+      .post("/api/sessions/start")
+      .set(auth(trainee.token))
+      .send({ dayNumber: 1, dayTitle: "Day 1" })
+    const sessionId = start.body.session.id
+
+    const open = await request(app)
+      .patch(`/api/sessions/${sessionId}`)
+      .set(asTrainer())
+      .send({ dayNumber: 2, dayTitle: "Day 2" })
+    expect(open.status).toBe(200)
+
+    await request(app).post(`/api/sessions/${sessionId}/end`).set(auth(trainee.token)).send({})
+
+    const closed = await request(app)
+      .patch(`/api/sessions/${sessionId}`)
+      .set(asTrainer())
+      .send({ dayNumber: 3, dayTitle: "x" })
+    expect(closed.status).toBe(403)
+    expect(closed.body.code).toBe("TRAINER_WORKOUT_ENDED")
+    const after = await request(app).get(`/api/sessions/${sessionId}`).set(auth(trainee.token))
+    expect(after.body.session.dayNumber).toBe(2)
+
+    const own = await request(app)
+      .patch(`/api/sessions/${sessionId}`)
+      .set(auth(trainee.token))
+      .send({ dayNumber: 1, dayTitle: "Day 1" })
+    expect(own.status).toBe(200)
+  })
+
   it("keeps the trainer's Idempotency-Keys apart from the trainee's", async () => {
     const key = `shared-${Date.now()}`
     const body = { dayNumber: 1, dayTitle: "Day 1", split: `idem${Date.now()}` }

@@ -762,6 +762,7 @@ export async function endSession(
  * @param userId - Numeric id of the owner.
  * @param dayNumber - The new program day.
  * @param dayTitle - New title, or null to clear it.
+ * @param options.openWorkoutOnly - Refuse a workout that has ended (used for trainer writes).
  * @returns The updated workout.
  */
 export async function updateSessionDay(
@@ -769,12 +770,26 @@ export async function updateSessionDay(
   userId: number,
   dayNumber: number,
   dayTitle: string | null,
+  { openWorkoutOnly = false }: { openWorkoutOnly?: boolean } = {},
 ): Promise<Session> {
-  await pool.execute<ResultSetHeader>(
+  const [updated] = await pool.execute<ResultSetHeader>(
     `UPDATE workouts SET day_number = ?, day_title = ?, program_day_id = ?
-     WHERE id = ? AND user_id = ?`,
+     WHERE id = ? AND user_id = ?${openWorkoutOnly ? " AND end_time IS NULL" : ""}`,
     [dayNumber, dayTitle, await findProgramDayId(userId, dayNumber), sessionId, userId],
   )
+  // No row changed: either not the caller's workout (getSessionDetails below
+  // answers that) or, for a trainer, one that has ended.
+  if (openWorkoutOnly && updated.affectedRows === 0) {
+    const [ended] = await pool.execute<RowDataPacket[]>(
+      `SELECT id FROM workouts WHERE id = ? AND user_id = ? AND end_time IS NOT NULL`,
+      [sessionId, userId],
+    )
+    if (ended.length)
+      throw new ForbiddenError(
+        "Trainers can only change the day of a workout in progress",
+        "TRAINER_WORKOUT_ENDED",
+      )
+  }
   return getSessionDetails(sessionId, userId)
 }
 

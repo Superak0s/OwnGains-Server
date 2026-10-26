@@ -110,7 +110,7 @@ describe("soreness routes", () => {
     at.setUTCHours(22, 30, 0, 0)
     await request(app)
       .post("/api/tracking/soreness")
-      .set(auth(s.token))
+      .set({ ...auth(s.token), "X-Time-Zone": "Europe/Athens" })
       .send({ muscleGroup: "chest", intensity: 5, loggedAt: at.toISOString() })
       .expect(201)
 

@@ -199,6 +199,7 @@ router.post("/:id/log", idempotent, async (req: Request, res: Response) => {
     // is rejected here rather than quietly destroying the user's history.
     parseBackdatedTimestamp(takenAt, "takenAt"),
     requireOptionalNote(note) ?? null,
+    requestTimeZone(req),
   )
   const streak = await getStreak(req.user!.id, supplementId, requestTimeZone(req))
 

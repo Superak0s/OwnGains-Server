@@ -592,7 +592,7 @@ trusted LAN, since the password is sent to it. Error entries include usernames
 
 Skins are shareable themes and widget layouts. The marketplace is a separate service in the same repo (`src/marketplace/`), with its own Docker image (`superak0s/owngains-marketplace`) and its own database. Every app uses the official marketplace at `https://owngains.superak0s.com/marketplace` by default, so a self-hosted OwnGains server does not need one. Run your own only to host a private catalog.
 
-Anyone can browse and download. Publishing and rating need an account on the server named by `AUTH_SERVER_URL`: the marketplace forwards the caller's token to that server's `GET /api/auth/me` and caches the answer for a minute. `/healthz` reports that server's origin, and the app only sends its token when it matches the server the app is signed in to.
+Anyone can browse and download. Publishing and rating need an account on the server named by `AUTH_SERVER_URL`: the marketplace forwards the caller's token to that server's `GET /api/auth/me` and caches the answer for a minute. The app only sends its token to a marketplace served from the same origin as the server it is signed in to, so a self-hosted marketplace that should accept sign-ins sits under that server's domain (e.g. `https://example.com/marketplace` next to `https://example.com`). `/healthz` reports the auth server's origin for information only.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

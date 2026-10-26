@@ -26,5 +26,7 @@ process.env.LARGE_BODY_RATE_LIMIT = "20"
 // Messages are only served with an FCM key. This one is never used: no test user sends to a registered device.
 process.env.FCM_SERVICE_ACCOUNT = JSON.stringify({ project_id: "test", client_email: "test@test", private_key: "test" })
 
+process.env.DOWNLOAD_SALT = "test-download-salt-0123456789-0123456789"
+process.env.PUBLIC_URL = "https://market.test/marketplace"
 process.loadEnvFile(envPath)
 

@@ -1,0 +1,40 @@
+import express from "express"
+import helmet from "helmet"
+import rateLimit from "express-rate-limit"
+import { version } from "../config/version.js"
+import { errorHandler } from "../middleware/errorHandler.js"
+import { marketplaceConfig } from "./env.js"
+
+/** The marketplace Express app, exported for tests. */
+export const app = express()
+
+app.set("trust proxy", marketplaceConfig.trustProxyHops)
+app.disable("x-powered-by")
+app.use(helmet())
+
+const skipUnderTests = () => !!process.env.VITEST
+
+app.use(
+  "/api",
+  rateLimit({
+    windowMs: 60_000,
+    limit: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipUnderTests,
+    message: { success: false, error: "Too many requests, please try again later" },
+  }),
+)
+
+// After the limiters, so an anonymous caller can't buy JSON.parse CPU. 64KB skin plus its envelope.
+app.use(express.json({ limit: "80kb" }))
+
+app.get("/healthz", (_req, res) => {
+  res.json({ status: "ok", version, authServer: new URL(marketplaceConfig.authServerUrl).origin })
+})
+
+app.use((_req, res) => {
+  res.status(404).json({ success: false, error: "Not found" })
+})
+
+app.use(errorHandler)

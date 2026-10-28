@@ -142,19 +142,27 @@ pool.on("connection", (conn) => {
  * resolves, roll back when it throws, release either way. Every multi-statement
  * write used to hand-roll this getConnection/begin/commit/rollback/release
  * block, and one of them rolled back twice on its own error path.
+ * `retryDeadlock` re-runs `fn` (up to 3 tries) when InnoDB picks it as a
+ * deadlock victim. Only for an `fn` that touches nothing but the database.
  */
 export async function withTransaction<T>(
   fn: (conn: PoolConnection) => Promise<T>,
+  { retryDeadlock = false }: { retryDeadlock?: boolean } = {},
 ): Promise<T> {
   const conn = await pool.getConnection();
   try {
-    await conn.beginTransaction();
-    const result = await fn(conn);
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await conn.beginTransaction();
+        const result = await fn(conn);
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await conn.rollback();
+        const deadlock = (err as { code?: string }).code === "ER_LOCK_DEADLOCK";
+        if (!retryDeadlock || !deadlock || attempt >= 3) throw err;
+      }
+    }
   } finally {
     conn.release();
   }

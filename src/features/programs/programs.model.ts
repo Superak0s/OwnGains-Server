@@ -374,6 +374,10 @@ export async function upsertProgram(
 
   const ids = await catalogIds(catalog)
 
+  // Retried on deadlock: the slots are deleted and re-inserted under the same
+  // uq_pe_slot keys, and the unique check's next-key locks reach the
+  // neighbouring program's slots, so two users uploading at once could
+  // deadlock and one got a 503. The transaction only touches the database.
   return withTransaction(async (connection) => {
     // Before the upsert below overwrites the filename and split order.
     const result: UploadResult =
@@ -479,7 +483,7 @@ export async function upsertProgram(
 
     await after?.(connection, programId)
     return result
-  })
+  }, { retryDeadlock: true })
 }
 
 // ─── Undo of a trainer upload ─────────────────────────────────────────────────

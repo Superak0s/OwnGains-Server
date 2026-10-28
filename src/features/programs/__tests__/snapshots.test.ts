@@ -160,6 +160,19 @@ describe("trainer program snapshots", () => {
     expect(rows.map((r) => r.id)).toEqual([ids[0], ...ids.slice(2)])
   })
 
+  it("two trainees' uploads at once never deadlock each other", async () => {
+    const pairs = await Promise.all([pair(), pair()])
+    const statuses = await Promise.all(
+      pairs.map(async ({ asTrainer }) => {
+        const out: number[] = []
+        for (let i = 0; i < 15; i++)
+          out.push((await request(app).post("/api/program/upload").set(asTrainer()).send(plan(day(1), day(2)))).status)
+        return out
+      }),
+    )
+    expect(statuses.flat().filter((s) => s !== 200)).toEqual([])
+  })
+
   it("replays a restore with the same Idempotency-Key", async () => {
     const { trainee, asTrainer } = await pair()
     const up = await request(app).post("/api/program/upload").set(asTrainer()).send(plan(day(1, "Lunge"), day(2)))

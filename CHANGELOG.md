@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-28
+
 ### Added
 
 - Trainees can undo a trainer's program change for 7 days (`GET /api/program/snapshots`, `POST /api/program/snapshots/:id/restore`, `DELETE /api/program/snapshots/:id`), and get a `program_replaced` WebSocket event and push notification when a trainer changes their plan. The trainer gets `program_restored` when the trainee undoes it.
@@ -27,9 +29,9 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - Supplement "taken today" and streaks follow the timezone the app sends. A dose logged from a zone ahead of the reader no longer resets the streak to 0.
 - Soreness trend days follow the timezone the app sends and stay in date order.
 - The cycle day changes at the user's local midnight when the app sends its timezone. A date-only cycle start counts from that calendar day west of UTC too.
+- `POST /api/program/upload` no longer answers 503 when two users upload a program at the same moment. The upload is retried when the database reports a deadlock.
 
 ### Security
-
 
 - The marketplace rejects bearer tokens that are not JWT-shaped without asking the account server, and caps account-server checks at 30 per client IP per minute (IPv6 grouped by /56, 429 `AUTH_RATE_LIMITED`), so one caller can no longer use up the shared limit for every signed-in user. When that check fails, `?mine=1`, a skin's page and its download report the 429 or 503 instead of 401 or 404. In compose the marketplace reads `MARKETPLACE_TRUST_PROXY_HOPS` (default 0), never the server's `TRUST_PROXY_HOPS`, so a directly published port can't be spoofed past its limiters. A marketplace behind a proxy must set it to 1 on upgrade, or every client shares one rate-limit bucket.
 - In compose the marketplace logs in to the shared database as its own user (`MARKETPLACE_DB_USER`, `MARKETPLACE_DB_PASSWORD`, now required for the profile), granted only the `skin*` tables, so a flaw in the public marketplace can't reach accounts or health data. A new `db` volume creates the user. README has the GRANTs for an existing one.
@@ -41,6 +43,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ### Internal
 
+- Pin `vite` to 8.3.4: with vitest 5.0.5, vite 8.3.5 crashes the global setup under Bun (`code.charCodeAt is not a function`, reported as "No test files found"). CI writes `DB_HOST=127.0.0.1` under act too, since act runs the job on the host network.
 - The event-loop histogram type no longer names `IntervalHistogram`, which current `@types/node` dropped, so `tsc` passes again.
 - The per-account rate limiters on message sends and profile and progress photo uploads are built by one `userRateLimit` helper.
 - The injury and soreness lists read their `?muscle=` and `?status=active` filters and build the matching WHERE clause through one shared `tracking/listFilter.ts`.
@@ -363,7 +366,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.0
 [1.0.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.0
 [0.5.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v0.5.2

@@ -1,8 +1,8 @@
 import { createHmac } from "node:crypto"
-import type { RowDataPacket, ResultSetHeader } from "mysql2/promise"
+import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from "mysql2/promise"
 import { pool, parseMySQLDate, withTransaction } from "../config/database.js"
 import { marketplaceConfig } from "./env.js"
-import { swatchOf, type SkinDocument, type SkinUpload } from "./skinFormat.js"
+import { skinColumns, type SkinDocument, type SkinUpload } from "./skinFormat.js"
 
 export interface SkinSummary {
   id: number
@@ -60,6 +60,9 @@ function toSummary(r: RowDataPacket): SkinSummary {
   }
 }
 
+/** Demo skins (filled by the server's demo data) are seen only by their owner. Takes the viewer's uuid or null. */
+const VISIBLE_TO = "(demo_for IS NULL OR demo_for = ?)"
+
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`)
 
 export async function listSkins(opts: {
@@ -67,9 +70,10 @@ export async function listSkins(opts: {
   sort: SkinSort
   page: number
   authorUuid?: string
+  viewerUuid?: string
 }): Promise<{ skins: SkinSummary[]; page: number; hasMore: boolean }> {
-  const where = ["taken_down_at IS NULL"]
-  const params: (string | number)[] = []
+  const where = ["taken_down_at IS NULL", VISIBLE_TO]
+  const params: (string | number | null)[] = [opts.viewerUuid ?? null]
   if (opts.q) {
     where.push("name LIKE ?")
     params.push(`%${escapeLike(opts.q)}%`)
@@ -86,11 +90,14 @@ export async function listSkins(opts: {
   return { skins: rows.slice(0, PAGE_SIZE).map(toSummary), page: opts.page, hasMore: rows.length > PAGE_SIZE }
 }
 
-/** A visible (not taken down) skin, or null. */
-export async function findSkin(id: number): Promise<(SkinSummary & { skin: SkinDocument; authorUuid: string | null }) | null> {
+/** A skin visible to `viewerUuid` (not taken down, and not someone else's demo skin), or null. */
+export async function findSkin(
+  id: number,
+  viewerUuid?: string,
+): Promise<(SkinSummary & { skin: SkinDocument; authorUuid: string | null }) | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT ${SUMMARY_COLUMNS}, body, author_uuid FROM skins WHERE id = ? AND taken_down_at IS NULL`,
-    [id],
+    `SELECT ${SUMMARY_COLUMNS}, body, author_uuid FROM skins WHERE id = ? AND taken_down_at IS NULL AND ${VISIBLE_TO}`,
+    [id, viewerUuid ?? null],
   )
   if (!rows[0]) return null
   return { ...toSummary(rows[0]), skin: JSON.parse(rows[0].body), authorUuid: rows[0].author_uuid }
@@ -107,14 +114,7 @@ export async function findRating(skinId: number, uuid: string): Promise<number |
   return rows[0]?.stars ?? null
 }
 
-const contentColumns = ({ name, description, skin }: SkinUpload) => [
-  name,
-  description,
-  JSON.stringify(skin),
-  !!skin.theme,
-  !!skin.boards && Object.keys(skin.boards).length > 0,
-  JSON.stringify(swatchOf(skin)),
-]
+const contentColumns = ({ name, description, skin }: SkinUpload) => [name, description, ...skinColumns(skin)]
 
 export async function createSkin(upload: SkinUpload, author: { uuid: string; username: string }): Promise<number> {
   const [res] = await pool.execute<ResultSetHeader>(
@@ -146,11 +146,12 @@ export async function takeDownSkin(id: number): Promise<void> {
 export async function recordDownload(
   id: number,
   installId: string | null,
+  viewerUuid?: string,
 ): Promise<{ downloads: number; uniqueDownloads: number } | null> {
   return withTransaction(async (conn) => {
     const [res] = await conn.execute<ResultSetHeader>(
-      "UPDATE skins SET downloads = downloads + 1 WHERE id = ? AND taken_down_at IS NULL",
-      [id],
+      `UPDATE skins SET downloads = downloads + 1 WHERE id = ? AND taken_down_at IS NULL AND ${VISIBLE_TO}`,
+      [id, viewerUuid ?? null],
     )
     if (!res.affectedRows) return null
     if (installId) {
@@ -186,7 +187,8 @@ export async function addReport(id: number, uuid: string, reason: string): Promi
   )
 }
 
-/** Removes a user's name and id from their skins, which stay published. Ratings and reports only ever hold the account key. */
-export async function anonymizeUser(uuid: string): Promise<void> {
-  await pool.execute("UPDATE skins SET author_uuid = NULL, author_name = NULL WHERE author_uuid = ?", [uuid])
+/** Removes users' names and ids from their skins, which stay published. Ratings and reports only ever hold the account key. */
+export async function anonymizeUsers(uuids: string[], conn: Pool | PoolConnection = pool): Promise<void> {
+  if (!uuids.length) return
+  await conn.query("UPDATE skins SET author_uuid = NULL, author_name = NULL WHERE author_uuid IN (?)", [uuids])
 }

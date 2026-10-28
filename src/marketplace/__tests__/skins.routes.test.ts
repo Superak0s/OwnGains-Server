@@ -116,3 +116,23 @@ describe("skins CRUD", () => {
     expect((await request(app).get("/api/skins").query({ mine: 1 })).status).toBe(401)
   })
 })
+
+describe("demo skins", () => {
+  it("are seen only by the account they were filled for", async () => {
+    const [res] = await pool.execute<import("mysql2/promise").ResultSetHeader>(
+      `INSERT INTO skins (demo_for, author_name, name, body, has_theme, has_boards)
+       VALUES (?, 'All', 'Demo only', '{"format":1}', 0, 0)`,
+      [author.uuid],
+    )
+    const id = res.insertId
+    const names = async (headers: Record<string, string>) =>
+      (await request(app).get("/api/skins").query({ sort: "new" }).set(headers)).body.skins.map((s: { id: number }) => s.id)
+    expect(await names({})).not.toContain(id)
+    expect(await names(bearer(other))).not.toContain(id)
+    expect(await names(bearer(author))).toContain(id)
+    expect((await request(app).get(`/api/skins/${id}`).set(bearer(other))).status).toBe(404)
+    expect((await request(app).get(`/api/skins/${id}`).set(bearer(author))).status).toBe(200)
+    expect((await request(app).post(`/api/skins/${id}/download`).set(bearer(other))).status).toBe(404)
+    expect((await request(app).post(`/api/skins/${id}/download`).set(bearer(author))).status).toBe(200)
+  })
+})

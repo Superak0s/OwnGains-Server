@@ -51,6 +51,7 @@ import { createWsServer, closeWsServer } from "./ws/wsServer.js"
 import { registerRoutes, localOnlyFeatures, currentDisabledFeatures } from "./routes.js"
 import { errorHandler } from "./middleware/errorHandler.js"
 import { authenticateToken } from "./middleware/auth.js"
+import updatesRoutes from "./features/updates/updates.routes.js"
 
 // Declared here rather than in express.d.ts to keep it co-located with the
 // only middleware that sets it. If other files need req.reqId, move it to
@@ -108,9 +109,10 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 if (metricsEnabled) app.use(metricsMiddleware)
 
 // Logged on finish, as the matched route template: the raw path contains
-// user content such as split and muscle names.
+// user content such as split and muscle names. The update check is left out:
+// the privacy policy says it stores nothing.
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path !== "/healthz")
+  if (req.path !== "/healthz" && !req.path.startsWith("/api/updates/"))
     res.on("finish", () =>
       logger.info(
         `[${req.method}] ${req.route ? req.baseUrl + req.route.path : "(unrouted)"} ${res.statusCode}`,
@@ -194,7 +196,15 @@ app.delete("/api/auth/google", credentialLimiter)
 app.put("/api/auth/password", credentialLimiter)
 app.delete("/api/auth/account", credentialLimiter)
 app.delete("/api/auth/account/data", credentialLimiter)
+app.post("/api/auth/reauth", credentialLimiter)
 app.post("/api/auth/signup", signupLimiter)
+// Ahead of the /api limiter with a higher cap of its own: every app launch and
+// foreground checks, and the routes only read a few files from UPDATES_DIR.
+app.use(
+  "/api/updates",
+  limiter(60 * 1000, envInt("UPDATES_RATE_LIMIT", 600, 1)),
+  updatesRoutes,
+)
 app.use("/api", limiter(60 * 1000, envInt("API_RATE_LIMIT", 200, 1)))
 
 // Behind authenticateToken, so it's keyed by the account, not the IP: tokens

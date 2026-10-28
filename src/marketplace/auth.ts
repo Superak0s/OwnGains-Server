@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { Request, Response, NextFunction } from "express"
+import { ipKeyGenerator } from "express-rate-limit"
 import { AppError, UnauthorizedError } from "../middleware/errorHandler.js"
 import { marketplaceConfig } from "./env.js"
 
@@ -17,18 +18,19 @@ const cache = new Map<string, { user: MarketUser | null; expires: number }>()
 
 // The account server rate-limits this service as one client, so one caller spraying fresh tokens
 // would lock every signed-in user out.
-// ponytail: fixed one-minute window per IP, cleared wholesale like the cache.
+// ponytail: fixed one-minute window per IP (IPv6 grouped by /56 like the limiters), cleared wholesale like the cache.
 const LOOKUPS_PER_MINUTE = 30
 const lookups = new Map<string, { n: number; resetAt: number }>()
 const JWT_SHAPE = /^[\w-]+\.[\w-]+\.[\w-]+$/
 
 function spendLookup(ip: string): void {
   const now = Date.now()
-  let entry = lookups.get(ip)
+  const key = ipKeyGenerator(ip)
+  let entry = lookups.get(key)
   if (!entry || entry.resetAt <= now) {
     if (lookups.size >= MAX_CACHED) lookups.clear()
     entry = { n: 0, resetAt: now + 60_000 }
-    lookups.set(ip, entry)
+    lookups.set(key, entry)
   }
   if (++entry.n > LOOKUPS_PER_MINUTE)
     throw new AppError("Too many sign-in checks. Try again in a minute.", 429, null, "AUTH_RATE_LIMITED")
@@ -47,8 +49,13 @@ async function fetchMe(token: string): Promise<MarketUser | null> {
   }
   if (res.status === 401 || res.status === 403) return null
   if (!res.ok) throw new AppError("The account server is unreachable. Try again later.", 503, null, "AUTH_UNAVAILABLE")
-  const body = (await res.json()) as { user?: { id?: unknown; username?: unknown; isAdmin?: unknown } }
-  const u = body.user
+  let body: { user?: { id?: unknown; username?: unknown; isAdmin?: unknown } }
+  try {
+    body = await res.json()
+  } catch {
+    throw new AppError("The account server is unreachable. Try again later.", 503, null, "AUTH_UNAVAILABLE")
+  }
+  const u = body?.user
   if (typeof u?.id !== "string" || typeof u.username !== "string") return null
   return { uuid: u.id, username: u.username, isAdmin: u.isAdmin === true }
 }
@@ -72,13 +79,22 @@ const bearerToken = (req: Request): string | null => {
 
 /**
  * Sets `res.locals.marketUser` when a valid token is sent. A rejected token, or an account server
- * that can't be reached, is treated as anonymous so browsing keeps working.
+ * that can't be reached, is treated as anonymous so browsing keeps working. The lookup error is kept
+ * for `authFailure`, so a route that only works signed in reports it instead of 401 or 404.
  */
 export async function optionalUser(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = bearerToken(req)
-  res.locals.marketUser = token ? ((await resolveUser(token, req.ip ?? "").catch(() => null)) ?? undefined) : undefined
+  res.locals.marketUser = token
+    ? ((await resolveUser(token, req.ip ?? "").catch((err: unknown) => {
+        res.locals.authError = err
+        return null
+      })) ?? undefined)
+    : undefined
   next()
 }
+
+/** The account-server error `optionalUser` swallowed, if any. */
+export const authFailure = (res: Response): unknown => res.locals.authError
 
 export async function requireUser(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = bearerToken(req)

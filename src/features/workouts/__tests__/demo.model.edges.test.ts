@@ -3,12 +3,12 @@
 // height, and a server keeping tracking and supplements on the device.
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { signup, internalId } from "../../../tests/helpers.js"
-import { updateUserProfile, getUserBodyData } from "../../auth/user.model.js"
+import { updateUserProfile, getUserBodyData, deleteAllUserData } from "../../auth/user.model.js"
 import { clearDemoData, fillDemoData } from "../demo.model.js"
 import { pool } from "../../../config/database.js"
 import { getFriendsActiveSessionStatuses } from "../../social/sharing/sharing.model.js"
 import { getClients, listTrainerRequests } from "../../trainer/trainer.model.js"
-import { findTraineeForTrainer } from "../../auth/auth.model.js"
+import { deleteUser, findTraineeForTrainer } from "../../auth/auth.model.js"
 import { addExercise } from "../../programs/programs.model.js"
 import { listConversations } from "../../messages/messages.model.js"
 import { listScheduled } from "../../schedule/schedule.model.js"
@@ -136,5 +136,39 @@ describe("demo model edges", () => {
     const trainee = await findTraineeForTrainer(id, clients[0].userId)
     const added = await addExercise(trainee!.id, 1, "Me", { name: "Face Pull", sets: 3 })
     expect(added.exerciseIndex).toBe(3)
+  })
+
+  it("fills marketplace skins only the owner sees, removed with the demo, a data wipe or the account", async () => {
+    const { user } = await signup("dmoskins")
+    const id = await internalId(user.id)
+    const count = async () =>
+      (await pool.query<any[]>("SELECT COUNT(*) AS n FROM skins WHERE demo_for = ?", [user.id]))[0][0].n
+    await fillDemoData(id, days, null)
+    await fillDemoData(id, days, null)
+    expect(await count()).toBe(3)
+    const [[ratings]] = await pool.query<any[]>(
+      "SELECT COUNT(*) AS n FROM skin_ratings r JOIN skins s ON s.id = r.skin_id WHERE s.demo_for = ?",
+      [user.id],
+    )
+    expect(ratings.n).toBe(15)
+    await clearDemoData(id)
+    expect(await count()).toBe(0)
+    await fillDemoData(id, days, null)
+    await deleteAllUserData(id)
+    expect(await count()).toBe(0)
+    await fillDemoData(id, days, null)
+    await deleteUser(id)
+    expect(await count()).toBe(0)
+  })
+
+  it("removes a deleted account's name from the skins it published, which stay up", async () => {
+    const { user } = await signup("skinauthor")
+    const [r] = await pool.query<any>(
+      "INSERT INTO skins (name, body, has_theme, has_boards, author_uuid, author_name) VALUES ('Kept', '{}', 1, 0, ?, 'skinauthor')",
+      [user.id],
+    )
+    await deleteUser(await internalId(user.id))
+    const [[skin]] = await pool.query<any[]>("SELECT author_uuid, author_name FROM skins WHERE id = ?", [r.insertId])
+    expect(skin).toEqual({ author_uuid: null, author_name: null })
   })
 })

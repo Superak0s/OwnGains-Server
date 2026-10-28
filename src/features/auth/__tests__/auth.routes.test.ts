@@ -379,6 +379,17 @@ describe("auth routes", () => {
     expect(d.progress_photo_blobs).toBeUndefined()
   })
 
+  it("POST /reauth checks the password and changes nothing", async () => {
+    const r = await signup("reauth")
+    const post = (body: object) => request(app).post("/api/auth/reauth").set(auth(r.token)).send(body)
+    expect((await post({})).body.code).toBe("PASSWORD_REQUIRED")
+    expect((await post({ password: "wrong-one" })).status).toBe(403)
+    const ok = await post({ password: r.password })
+    expect(ok.status).toBe(200)
+    expect(ok.body).toEqual({ success: true })
+    expect((await request(app).get("/api/auth/me").set(auth(r.token))).status).toBe(200)
+  })
+
   it("DELETE /account/data requires the confirmation token and wipes data", async () => {
     const noConfirm = await request(app)
       .delete("/api/auth/account/data")
@@ -563,11 +574,23 @@ describe("auth routes", () => {
       .send({ password: res.password })
       .expect(200)
 
-    // Simulate restoring a backup taken before the deletion.
+    // Simulate restoring a backup taken before the deletion, skins included.
     await pool.query("INSERT INTO users SET ?", [row])
+    const [skin] = await pool.query<ResultSetHeader>(
+      "INSERT INTO skins (name, description, body, has_theme, has_boards, swatch, author_uuid, author_name) VALUES ('s', '', '{}', 0, 0, '[]', ?, 'restored')",
+      [res.user.id],
+    )
+    await pool.query(
+      "INSERT INTO skins (name, description, body, has_theme, has_boards, swatch, demo_for) VALUES ('d', '', '{}', 0, 0, '[]', ?)",
+      [res.user.id],
+    )
     expect(await purgeDeletedAccounts()).toBe(1)
     const [left] = await pool.query<RowDataPacket[]>("SELECT 1 FROM users WHERE uuid = ?", [res.user.id])
     expect(left).toHaveLength(0)
+    const [[published]] = await pool.query<RowDataPacket[]>("SELECT author_uuid, author_name FROM skins WHERE id = ?", [skin.insertId])
+    expect(published).toEqual({ author_uuid: null, author_name: null })
+    const [demo] = await pool.query<RowDataPacket[]>("SELECT 1 FROM skins WHERE demo_for = ?", [res.user.id])
+    expect(demo).toHaveLength(0)
     const [tomb] = await pool.query<RowDataPacket[]>("SELECT 1 FROM deleted_accounts WHERE uuid = ?", [res.user.id])
     expect(tomb).toHaveLength(1)
   })

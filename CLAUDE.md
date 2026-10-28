@@ -36,7 +36,7 @@ Needs a `.env`, which Bun loads on its own (no `dotenv`). `DB_USER`, `DB_PASSWOR
 - `shutdown()` handles `SIGTERM`/`SIGINT`/uncaught exceptions. It is idempotent, `/healthz` answers 503 while draining, and it awaits an in-flight session sweep before `pool.end()`. Tear down any new long-lived resource there. Unhandled rejections are logged, not fatal.
 - Pool overload and query timeouts return 503 + `Retry-After`, not 500.
 
-**Skin marketplace** (`src/marketplace/`): a second entry point (`server.ts`, `cli.ts`) with its own image (`Dockerfile.marketplace`), compose profile and database (`schema.sql`, re-run on every boot, no migrations yet). It shares `config/database.ts`, `errorHandler` and validation helpers with the server but no routes or tables. Auth is the caller's bearer token checked against `AUTH_SERVER_URL/api/auth/me` (`auth.ts`). Tests run against the same test database, and `global-setup.ts` creates its tables.
+**Skin marketplace** (`src/marketplace/`): a second entry point (`server.ts`, `cli.ts`) with its own image (`Dockerfile.marketplace`), compose profile and schema (`schema.sql`, `skin*` tables in the server's database, re-run on every boot, no migrations yet). It shares `config/database.ts`, `errorHandler` and validation helpers with the server but no routes or tables. Auth is the caller's bearer token checked against `AUTH_SERVER_URL/api/auth/me` (`auth.ts`). Tests run against the same test database, and `global-setup.ts` creates its tables.
 
 **Feature-first layout**: each domain is `src/features/<domain>/` with a same-named trio: `<name>.routes.ts` (router, validation), `<name>.model.ts` (SQL via `pool.execute<RowDataPacket[]>` / `pool.execute<ResultSetHeader>`) and often `<name>.types.ts`.
 

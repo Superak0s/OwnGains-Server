@@ -11,8 +11,14 @@ services:
       MARIADB_USER: ${DB_USER:?set DB_USER in .env}
       MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+      MARKETPLACE_DB_USER: ${MARKETPLACE_DB_USER:-}
+      MARKETPLACE_DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:-}
     volumes:
       - db-data:/var/lib/mysql
+    # Creates the marketplace's DB user when the volume is first created.
+    configs:
+      - source: marketplace-db-user
+        target: /docker-entrypoint-initdb.d/marketplace-db-user.sh
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -45,42 +51,29 @@ services:
 
   # Optional skin marketplace (`docker compose --profile marketplace up -d`).
   # Most self-hosters skip it: every app uses the official marketplace by default.
-  marketplace-db:
-    image: mariadb:11.4
-    profiles: ["marketplace"]
-    restart: unless-stopped
-    environment:
-      MARIADB_DATABASE: owngains_marketplace
-      MARIADB_USER: ${DB_USER:?set DB_USER in .env}
-      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
-      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
-    volumes:
-      - marketplace-db-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   marketplace:
     image: superak0s/owngains-marketplace:latest
     # build: { context: ., dockerfile: Dockerfile.marketplace }
     profiles: ["marketplace"]
     restart: unless-stopped
     depends_on:
-      marketplace-db:
+      db:
         condition: service_healthy
+    # Shares the server's database through its own user, granted only the
+    # `skin*` tables, so a flaw in this public service can't reach accounts.
     environment:
-      DB_HOST: marketplace-db
+      DB_HOST: db
       DB_PORT: 3306
-      DB_NAME: owngains_marketplace
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      PORT: 5100
+      DB_NAME: ${DB_NAME:-owngains}
+      DB_USER: ${MARKETPLACE_DB_USER:-}
+      DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:-}
+      MARKETPLACE_PORT: 5100
       DOWNLOAD_SALT: ${DOWNLOAD_SALT:-}
-      AUTH_SERVER_URL: ${AUTH_SERVER_URL:-https://owngains.superak0s.com}
-      PUBLIC_URL: ${MARKETPLACE_PUBLIC_URL:-http://localhost:5100}
-      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      # Tokens come from the server next to it, since the two share accounts and a database.
+      AUTH_SERVER_URL: ${AUTH_SERVER_URL:-http://server:${PORT:-5000}}
+      MARKETPLACE_PUBLIC_URL: ${MARKETPLACE_PUBLIC_URL:-http://localhost:5100}
+      # Its own setting: port 5100 may be published directly while the server sits behind a proxy.
+      TRUST_PROXY_HOPS: ${MARKETPLACE_TRUST_PROXY_HOPS:-0}
     ports:
       - "${MARKETPLACE_PORT:-5100}:5100"
     logging:
@@ -92,4 +85,18 @@ services:
 volumes:
   db-data:
   backups:
-  marketplace-db-data:
+
+configs:
+  # Sourced by the MariaDB entrypoint, which defines docker_process_sql.
+  # Skipped when MARKETPLACE_DB_PASSWORD is unset. README has the GRANTs for an existing volume.
+  marketplace-db-user:
+    content: |
+      if [ -n "$$MARKETPLACE_DB_USER" ] && [ -n "$$MARKETPLACE_DB_PASSWORD" ]; then
+        docker_process_sql --database=mysql <<SQL
+      CREATE USER IF NOT EXISTS '$$MARKETPLACE_DB_USER'@'%' IDENTIFIED BY '$$MARKETPLACE_DB_PASSWORD';
+      GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON \`$$MARIADB_DATABASE\`.skins TO '$$MARKETPLACE_DB_USER'@'%';
+      GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON \`$$MARIADB_DATABASE\`.skin_ratings TO '$$MARKETPLACE_DB_USER'@'%';
+      GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON \`$$MARIADB_DATABASE\`.skin_downloads TO '$$MARKETPLACE_DB_USER'@'%';
+      GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON \`$$MARIADB_DATABASE\`.skin_reports TO '$$MARKETPLACE_DB_USER'@'%';
+      SQL
+      fi

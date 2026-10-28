@@ -407,6 +407,21 @@ router.delete("/account/data", authenticateToken, validateRequired(["confirmDele
 })
 
 /**
+ * POST /api/auth/reauth
+ *
+ * Only re-checks the password (or a fresh Google `idToken`), changing
+ * nothing. The app calls it before anonymizing its marketplace data on
+ * account deletion, which needs the token to still work, so a wrong password
+ * stops there instead of anonymizing an account that then stays alive.
+ */
+router.post("/reauth", authenticateToken, async (req: Request, res: Response) => {
+  if (req.body.password === undefined && req.body.idToken === undefined)
+    throw new ValidationError("password is required", null, "PASSWORD_REQUIRED")
+  await requireCurrentPassword(req, res, req.body.password, req.body.idToken)
+  res.json({ success: true })
+})
+
+/**
  * DELETE /api/auth/account
  *
  * Permanently deletes the account and everything it owns. Re-checks the

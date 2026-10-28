@@ -3,7 +3,6 @@ import os from "node:os"
 import {
   createHistogram,
   monitorEventLoopDelay,
-  type IntervalHistogram,
   type RecordableHistogram,
 } from "node:perf_hooks"
 import { envBool } from "@/config/env.js"
@@ -214,7 +213,8 @@ let pendingEvents: { kind: number; atMs: number; data: string }[] = []
 
 let started = false
 let historyTimer: ReturnType<typeof setInterval> | null = null
-let loopDelay: IntervalHistogram | null = null
+// Not named by type: @types/node renamed IntervalHistogram to ELDHistogram.
+let loopDelay: ReturnType<typeof monitorEventLoopDelay> | null = null
 let lastCpu = process.cpuUsage()
 let lastCpuAt = process.hrtime.bigint()
 

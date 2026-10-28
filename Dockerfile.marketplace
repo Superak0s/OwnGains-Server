@@ -1,4 +1,4 @@
-# Skin marketplace: a separate service from the OwnGains server, with its own database.
+# Skin marketplace: a separate service from the OwnGains server, sharing its database.
 FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 COPY package.json bun.lock ./
@@ -22,6 +22,6 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 EXPOSE 5100
 ENV NODE_ENV=production
-HEALTHCHECK --interval=30s --timeout=3s --start-period=20s CMD bun -e "fetch('http://localhost:' + (process.env.PORT || 5100) + '/healthz').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s CMD bun -e "fetch('http://localhost:' + (process.env.MARKETPLACE_PORT || 5100) + '/healthz').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["bun", "dist/marketplace/server.js"]

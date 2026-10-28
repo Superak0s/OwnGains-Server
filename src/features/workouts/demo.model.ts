@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
-import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise"
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise"
 import { formatDateForMySQL, withTransaction } from "@/config/database.js"
 import { readLocalOnlyFeatures } from "@/config/env.js"
+import { skinColumns, type SkinDocument } from "@/marketplace/skinFormat.js"
+import { anonymizeUsers } from "@/marketplace/skins.model.js"
 import { findOrCreateExercise, findProgramDayId } from "./workouts.model.js"
 
 interface DemoExercise {
@@ -472,6 +474,7 @@ async function deleteDemoData(conn: PoolConnection, userId: number) {
     `DELETE FROM workouts WHERE user_id = ? AND is_demo = 1`,
     [userId],
   )
+  await deleteDemoSkins(conn, userId)
   const [friends] = await conn.execute<ResultSetHeader>(
     `DELETE FROM users WHERE demo_owner_id = ?`,
     [userId],
@@ -548,9 +551,120 @@ export async function fillDemoData(
     await insertSchedule(conn, userId, friendIds.get("All")!, days[0]?.dayNumber ?? null, now)
 
     const tracking = await insertTracking(conn, userId, now)
+    await insertSkins(conn, userId)
 
     return { ...own, friends: FRIENDS.length, tracking }
   })
+}
+
+// Author, name, description, skin. Seen only by the demo's owner (skins.demo_for).
+const DEMO_SKINS: [FriendName, string, string, SkinDocument][] = [
+  [
+    "All",
+    "Midnight Iron",
+    "Dark theme with a warm orange accent.",
+    {
+      format: 1,
+      theme: {
+        name: "Midnight Iron",
+        colors: { background: "#0f1115", surface: "#181b21", accent: "#ff7a1a", textPrimary: "#f2f2f2" },
+      },
+    },
+  ],
+  [
+    "Half",
+    "Mint",
+    "Light and calm.",
+    {
+      format: 1,
+      theme: {
+        name: "Mint",
+        colors: { background: "#f4fbf8", surface: "#ffffff", accent: "#1f9e74", textPrimary: "#14231d" },
+      },
+    },
+  ],
+  [
+    "All",
+    "Streak first",
+    "Home board that puts the streak and calendar on top.",
+    {
+      format: 1,
+      boards: {
+        home: [
+          { type: "workout_streak", size: "medium", order: 0 },
+          { type: "workout_calendar", size: "large", order: 1 },
+          { type: "next_workout", size: "medium", order: 2 },
+          { type: "weekly_progress", size: "medium", order: 3 },
+        ],
+      },
+    },
+  ],
+]
+
+// Only a positive answer is kept: the marketplace may create its tables after the server boots.
+let marketplaceFound = false
+
+/** Whether this database holds the marketplace's tables (it shares the server's database when deployed). */
+async function hasMarketplace(conn: Pool | PoolConnection): Promise<boolean> {
+  if (marketplaceFound) return true
+  const [rows] = await conn.execute<RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'skins' AND COLUMN_NAME = 'demo_for'`,
+  )
+  return (marketplaceFound = rows.length > 0)
+}
+
+/** Removes the user's demo skins. Account deletion calls it too, since skins.demo_for has no foreign key. */
+export async function deleteDemoSkins(conn: PoolConnection, userId: number): Promise<void> {
+  if (await hasMarketplace(conn))
+    await conn.execute(`DELETE FROM skins WHERE demo_for = (SELECT uuid FROM users WHERE id = ?)`, [userId])
+}
+
+/**
+ * Account deletion: removes the accounts' demo skins and their name from the skins they published,
+ * which stay up. Keyed by uuid so it also reaches accounts a backup restore brought back.
+ */
+export async function forgetSkinUsers(conn: Pool | PoolConnection, uuids: string[]): Promise<void> {
+  if (!uuids.length || !(await hasMarketplace(conn))) return
+  await conn.query(`DELETE FROM skins WHERE demo_for IN (?)`, [uuids])
+  await anonymizeUsers(uuids, conn)
+}
+
+async function insertSkins(conn: PoolConnection, userId: number): Promise<void> {
+  if (!(await hasMarketplace(conn))) return
+  const [[owner]] = await conn.execute<RowDataPacket[]>(`SELECT uuid FROM users WHERE id = ?`, [userId])
+  await conn.execute(
+    `INSERT INTO skins (demo_for, author_name, name, description, body, has_theme, has_boards, swatch,
+       downloads, unique_downloads, rating_sum, rating_count)
+     VALUES ${DEMO_SKINS.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+    DEMO_SKINS.flatMap(([author, name, description, skin], i) => [
+      owner.uuid,
+      author,
+      name,
+      description,
+      ...skinColumns(skin),
+      40 - i * 10,
+      30 - i * 8,
+      23 - i * 2,
+      5,
+    ]),
+  )
+  // Rating rows behind the seeded totals, so the owner's own rating adds to them instead of replacing them.
+  const [seeded] = await conn.execute<RowDataPacket[]>(
+    `SELECT id, rating_sum, rating_count FROM skins WHERE demo_for = ?`,
+    [owner.uuid],
+  )
+  const ratings = seeded.flatMap((s) =>
+    Array.from({ length: s.rating_count }, (_, k) => [
+      s.id,
+      randomBytes(32),
+      Math.floor(s.rating_sum / s.rating_count) + (k < s.rating_sum % s.rating_count ? 1 : 0),
+    ]),
+  )
+  await conn.execute(
+    `INSERT INTO skin_ratings (skin_id, rater_key, stars) VALUES ${ratings.map(() => "(?, ?, ?)").join(", ")}`,
+    ratings.flat(),
+  )
 }
 
 async function insertMessages(

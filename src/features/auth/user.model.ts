@@ -3,6 +3,7 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2"
 import { NotFoundError, ValidationError } from "@/middleware/errorHandler.js"
 import type { UserBodyData } from "./user.types.js"
 import { asDuplicateUserError } from "./auth.model.js"
+import { deleteDemoSkins, forgetSkinUsers } from "@/features/workouts/demo.model.js"
 
 const ALLOWED_FIELDS = [
   "name",
@@ -465,13 +466,14 @@ export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
   // Two steps: users is itself in the owned list (demo_owner_id), and MySQL
   // rejects a DELETE whose subquery reads the table being deleted (error 1093).
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT u.id FROM users u
+    `SELECT u.id, u.uuid FROM users u
      WHERE u.terms_accepted_at IS NULL AND u.is_admin = 0
        AND u.created_at < NOW() - INTERVAL ${days | 0} DAY
        ${empty}`,
   )
   if (rows.length === 0) return 0
   const ids = rows.map((row) => row.id)
+  await forgetSkinUsers(pool, rows.map((row) => row.uuid))
   const [r] = await pool.execute<ResultSetHeader>(
     `DELETE FROM users WHERE id IN (${ids.map(() => "?").join(",")})`,
     ids,
@@ -493,6 +495,8 @@ export async function purgeUnconsentedAccounts(days = 30): Promise<number> {
 export async function deleteAllUserData(userId: number): Promise<void> {
   const tables = await getUserOwnedTables()
   await withTransaction(async (connection) => {
+    // skins.demo_for has no foreign key, so the table scan below never finds it.
+    await deleteDemoSkins(connection, userId)
     for (const [table, columns] of tables) {
       const anonymise = WIPE_ANONYMISES[table]
       await connection.execute(

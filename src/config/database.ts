@@ -230,11 +230,12 @@ export function parseSQLStatements(sql: string): string[] {
 // run on every boot. Further schema changes (new columns, indexes, etc.) go
 // through migrations/*.sql rather than edits to schema.sql.
 
-/** True when the database has no tables yet, i.e. schema.sql is about to
- * create everything from scratch, so no migration has anything to do. */
+/** True when the database has no server tables yet, i.e. schema.sql is about to
+ * create everything from scratch, so no migration has anything to do. The
+ * marketplace's skin* tables don't count: it may create them first. */
 async function isEmptyDatabase(conn: PoolConnection): Promise<boolean> {
   const [rows] = await conn.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE()`,
+    `SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name NOT LIKE 'skin%'`,
   );
   return Number(rows[0].n) === 0;
 }

@@ -11,6 +11,7 @@ import { hashPassword } from "./password.js"
 import { displayNameError, usernameError } from "./nameFilter.js"
 import { logger } from "@/utils/logger.js"
 import { ARE_FRIENDS } from "@/features/social/friends/friends.model.js"
+import { forgetSkinUsers } from "@/features/workouts/demo.model.js"
 
 export { verifyPassword, DUMMY_PASSWORD_HASH } from "./password.js"
 
@@ -530,6 +531,10 @@ export async function deleteUser(userId: number): Promise<void> {
       "INSERT IGNORE INTO deleted_accounts (uuid) SELECT uuid FROM users WHERE id = ?",
       [userId],
     )
+    const [[owner]] = await conn.execute<(RowDataPacket & { uuid: string })[]>(
+      "SELECT uuid FROM users WHERE id = ?",
+      [userId],
+    )
     // Only exercises this user referenced are swept. Sweeping every orphan
     // also caught other users' just-created names and failed their inserts.
     const [used] = await conn.execute<(RowDataPacket & { id: number })[]>(
@@ -541,6 +546,7 @@ export async function deleteUser(userId: number): Promise<void> {
        UNION SELECT exercise_id FROM user_exercise_muscles WHERE user_id = ?`,
       [userId, userId, userId],
     )
+    if (owner) await forgetSkinUsers(conn, [owner.uuid])
     await conn.execute("DELETE FROM users WHERE id = ?", [userId])
     if (!used.length) return
     // A custom exercise name can identify its author, and the catalog row
@@ -559,13 +565,19 @@ export async function deleteUser(userId: number): Promise<void> {
 }
 
 /**
- * Re-deletes any account that came back from a backup restore, then drops
- * tombstones older than the oldest backup that could still contain them.
+ * Re-deletes any account that came back from a backup restore, and its name
+ * on marketplace skins, then drops tombstones older than the oldest backup
+ * that could still contain them.
  * Returns how many resurrected accounts were deleted.
  */
 export async function purgeDeletedAccounts(
   days = envInt("BACKUP_RETENTION_DAYS", 30, 1),
 ): Promise<number> {
+  // The skins rows come back with the restore too, users row or not.
+  const [tombstones] = await pool.execute<(RowDataPacket & { uuid: string })[]>(
+    "SELECT uuid FROM deleted_accounts",
+  )
+  await forgetSkinUsers(pool, tombstones.map((t) => t.uuid))
   const [r] = await pool.execute<ResultSetHeader>(
     "DELETE u FROM users u JOIN deleted_accounts d ON d.uuid = u.uuid",
   )

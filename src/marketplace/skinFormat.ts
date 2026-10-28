@@ -119,3 +119,11 @@ export function swatchOf(skin: SkinDocument): string[] {
   if (!colors) return []
   return SWATCH_KEYS.flatMap((k) => (colors[k] ? [colors[k]] : []))
 }
+
+/** The skins columns derived from a skin, in order: body, has_theme, has_boards, swatch. */
+export const skinColumns = (skin: SkinDocument) => [
+  JSON.stringify(skin),
+  !!skin.theme,
+  !!skin.boards && Object.keys(skin.boards).length > 0,
+  JSON.stringify(swatchOf(skin)),
+]

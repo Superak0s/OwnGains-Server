@@ -1,5 +1,5 @@
--- Skin marketplace schema. Its own database, never the server's. Every
--- statement is CREATE TABLE IF NOT EXISTS and re-runs on every boot.
+-- Skin marketplace schema, kept in the server's database (every table is skin*).
+-- Every statement is CREATE TABLE IF NOT EXISTS and re-runs on every boot.
 
 CREATE TABLE IF NOT EXISTS skins (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -19,13 +19,21 @@ CREATE TABLE IF NOT EXISTS skins (
   rating_sum       INT UNSIGNED NOT NULL DEFAULT 0,
   rating_count     INT UNSIGNED NOT NULL DEFAULT 0,
   taken_down_at    DATETIME     DEFAULT NULL,
+  -- Server demo data: the users.uuid of the one account that may see this skin.
+  demo_for         CHAR(36) CHARACTER SET ascii DEFAULT NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_skins_author (author_uuid),
   KEY idx_skins_unique_downloads (unique_downloads),
-  KEY idx_skins_created (created_at)
+  KEY idx_skins_created (created_at),
+  KEY idx_skins_demo_for (demo_for)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Added after the table was first created. MariaDB skips both when present.
+ALTER TABLE skins
+  ADD COLUMN IF NOT EXISTS demo_for CHAR(36) CHARACTER SET ascii DEFAULT NULL AFTER taken_down_at,
+  ADD KEY IF NOT EXISTS idx_skins_demo_for (demo_for);
 
 CREATE TABLE IF NOT EXISTS skin_ratings (
   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,

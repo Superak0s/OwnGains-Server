@@ -10,7 +10,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 - Trainees can undo a trainer's program change for 7 days (`GET /api/program/snapshots`, `POST /api/program/snapshots/:id/restore`, `DELETE /api/program/snapshots/:id`), and get a `program_replaced` WebSocket event and push notification when a trainer changes their plan. The trainer gets `program_restored` when the trainee undoes it.
 - `LOG_LEVEL` (`info`, `warn` or `error`, default `info`) sets the lowest log level printed. `warn` hides the per-request lines.
-- Optional skin marketplace service (its own Docker image, `superak0s/owngains-marketplace`, and compose profile): publish, browse, rate and share themes and widget layouts, with download and unique-download counts, a share page and an operator CLI. Each account keeps one rating and one report per skin, also after it is anonymized. `scripts/release.sh` builds and pushes its image with the server's.
+- Optional skin marketplace service (its own Docker image, `superak0s/owngains-marketplace`, and compose profile, keeping its `skin*` tables in the server's database): publish, browse, rate and share themes and widget layouts, with download and unique-download counts, a share page and an operator CLI. Each account keeps one rating and one report per skin, also after it is anonymized. In compose it checks tokens against the server next to it unless `AUTH_SERVER_URL` is set, and deleting an account on the server removes its name from the skins it published. `scripts/release.sh` builds and pushes its image with the server's.
+- `POST /api/sessions/demo` also fills three marketplace skins when the marketplace shares the server's database. Only the demo's owner sees or downloads them, the owner's own rating adds to their seeded ratings, and `DELETE /api/sessions/demo`, `DELETE /api/auth/data` or deleting the account removes them.
+- `POST /api/auth/reauth` re-checks the password or a fresh Google `idToken` without changing anything (400 `PASSWORD_REQUIRED`, 403 if wrong, same throttle as the other re-checks), so the app can confirm the password before anonymizing marketplace data on account deletion.
+- Over-the-air app updates (expo-updates protocol v1) at `GET /api/updates/manifest` and `GET /api/updates/assets/...`, served from signed updates copied into the new `UPDATES_DIR`. Unset, the manifest answers 204. Both routes are unauthenticated and not logged, and are limited apart from `/api` by the new `UPDATES_RATE_LIMIT` (600 per IP per minute).
 
 ### Changed
 
@@ -26,8 +29,11 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - The cycle day changes at the user's local midnight when the app sends its timezone. A date-only cycle start counts from that calendar day west of UTC too.
 
 ### Security
-
-- The marketplace rejects bearer tokens that are not JWT-shaped without asking the account server, and caps account-server checks at 30 per client IP per minute (429 `AUTH_RATE_LIMITED`), so one caller can no longer use up the shared limit for every signed-in user.
+
+
+- The marketplace rejects bearer tokens that are not JWT-shaped without asking the account server, and caps account-server checks at 30 per client IP per minute (IPv6 grouped by /56, 429 `AUTH_RATE_LIMITED`), so one caller can no longer use up the shared limit for every signed-in user. When that check fails, `?mine=1`, a skin's page and its download report the 429 or 503 instead of 401 or 404. In compose the marketplace reads `MARKETPLACE_TRUST_PROXY_HOPS` (default 0), never the server's `TRUST_PROXY_HOPS`, so a directly published port can't be spoofed past its limiters. A marketplace behind a proxy must set it to 1 on upgrade, or every client shares one rate-limit bucket.
+- In compose the marketplace logs in to the shared database as its own user (`MARKETPLACE_DB_USER`, `MARKETPLACE_DB_PASSWORD`, now required for the profile), granted only the `skin*` tables, so a flaw in the public marketplace can't reach accounts or health data. A new `db` volume creates the user. README has the GRANTs for an existing one.
+- Re-deleting accounts that a backup restore brought back also removes their names from published skins and deletes their demo skins again.
 - Sign-in lockout now applies to every spelling of a username or email that the database treats as the same (accents, case, full-width letters), so it can't be bypassed by varying the spelling. Existing lockouts and failure counts reset once on upgrade.
 - A trainer can no longer change the program day of a trainee's finished workouts, only of the one in progress (403 `TRAINER_WORKOUT_ENDED`).
 - `BOOTSTRAP_ADMIN_USERNAME` now only grants admin while the instance has no admin, so the name can't be re-registered for admin rights after that account is deleted.
@@ -35,6 +41,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ### Internal
 
+- The event-loop histogram type no longer names `IntervalHistogram`, which current `@types/node` dropped, so `tsc` passes again.
 - The per-account rate limiters on message sends and profile and progress photo uploads are built by one `userRateLimit` helper.
 - The injury and soreness lists read their `?muscle=` and `?status=active` filters and build the matching WHERE clause through one shared `tracking/listFilter.ts`.
 - The accepted-friendship SQL check and join used by auth, messages, profile photos, sharing and trainer are two constants in `friends.model.ts`.
@@ -55,8 +62,11 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - The skin marketplace schema and skin validator (`src/marketplace/`), provisioned into the test database too.
 - The marketplace entry point (`src/marketplace/server.ts`) with `/healthz` and token checks against the trusted server's `GET /api/auth/me`.
 - Marketplace: publish, browse, update and delete skins at `/api/skins`.
+- Tests for `POST /api/auth/reauth` and the OTA update routes.
 - Marketplace: download and unique-download counts, ratings, reports and `DELETE /api/me` account anonymizing.
+- The fresh-database check ignores the marketplace's `skin*` tables, so a marketplace that boots first doesn't make the server run every migration on a new install.
 - Marketplace: shareable skin web page at `/skins/:id` with an Open in OwnGains link.
+- Demo skins and published skins derive their stored columns through one `skinColumns` helper, and server account deletion anonymizes skins through the marketplace's `anonymizeUsers`. The marketplace table check is cached once found.
 
 ## [1.0.1] - 2026-10-22
 

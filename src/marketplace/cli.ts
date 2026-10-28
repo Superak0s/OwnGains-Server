@@ -3,7 +3,7 @@ import type { RowDataPacket } from "mysql2/promise"
 import { pathToFileURL } from "node:url"
 import { pool } from "../config/database.js"
 import { isUuid, parseIntParam } from "../middleware/validation.js"
-import { anonymizeUser, takeDownSkin } from "./skins.model.js"
+import { anonymizeUsers, takeDownSkin } from "./skins.model.js"
 
 const USAGE = `Usage:
   marketplace reports [limit]   newest reports first
@@ -30,7 +30,7 @@ export async function main(args: string[]): Promise<number> {
       return 0
     }
     if (cmd === "forget" && isUuid(arg)) {
-      await anonymizeUser(arg)
+      await anonymizeUsers([arg])
       console.log(`Account ${arg} anonymized`)
       return 0
     }

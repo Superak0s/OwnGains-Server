@@ -115,6 +115,34 @@ describe("owngains CLI", () => {
     expect((await runCli(["suspend", admin, "x"])).out).toContain("Refusing to suspend an admin")
   })
 
+  it("delete dry-runs without --yes, refuses admins, and leaves a tombstone", async () => {
+    const username = uniqueName("del")
+    await createUser(username, `${username}@test.local`, "Passw0rd-123")
+    const [[{ uuid }]] = await pool.query<(RowDataPacket & { uuid: string })[]>(
+      "SELECT uuid FROM users WHERE username = ?",
+      [username],
+    )
+    const exists = async () => {
+      const [rows] = await pool.query<RowDataPacket[]>("SELECT 1 FROM users WHERE username = ?", [username])
+      return rows.length > 0
+    }
+
+    expect((await runCli(["delete"])).code).toBe(2)
+    expect((await runCli(["delete", uniqueName("nope"), "--yes"])).out).toContain("User not found")
+    expect((await runCli(["delete", username])).out).toContain("Re-run with --yes")
+    expect(await exists()).toBe(true)
+
+    expect(await runCli(["delete", username, "--yes"])).toEqual({ code: 0, out: `User ${username} deleted.` })
+    expect(await exists()).toBe(false)
+    const [tomb] = await pool.query<RowDataPacket[]>("SELECT 1 FROM deleted_accounts WHERE uuid = ?", [uuid])
+    expect(tomb).toHaveLength(1)
+
+    const admin = uniqueName("deladm")
+    await createUser(admin, `${admin}@test.local`, "Passw0rd-123")
+    await runCli(["add", admin])
+    expect((await runCli(["delete", admin, "--yes"])).out).toContain("Refusing to delete an admin")
+  })
+
   it("lists every user with an admin marker, and reports", async () => {
     const admin = uniqueName("lsadm")
     const plain = uniqueName("lsuser")

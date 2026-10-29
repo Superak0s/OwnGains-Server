@@ -7,12 +7,12 @@ import { anonymizeUsers, takeDownSkin } from "./skins.model.js"
 
 const USAGE = `Usage:
   marketplace reports [limit]   newest reports first
-  marketplace remove <skin id>  take a skin down (kept, hidden)
+  marketplace remove <skin id> <reason>  take a skin down (kept, hidden), the reason shown to its author
   marketplace forget <uuid>     anonymize an account's skins, ratings and reports`
 
 /** Runs one command and returns the exit code. */
 export async function main(args: string[]): Promise<number> {
-  const [cmd, arg] = args
+  const [cmd, arg, ...rest] = args
   try {
     if (cmd === "reports") {
       const limit = arg ? parseIntParam(arg, "limit") : 50
@@ -24,8 +24,9 @@ export async function main(args: string[]): Promise<number> {
       if (!rows.length) console.log("No open reports")
       return 0
     }
-    if (cmd === "remove" && arg) {
-      await takeDownSkin(parseIntParam(arg, "skin id"))
+    const reason = rest.join(" ").trim()
+    if (cmd === "remove" && arg && reason) {
+      await takeDownSkin(parseIntParam(arg, "skin id"), reason.slice(0, 500))
       console.log(`Skin ${arg} taken down`)
       return 0
     }

@@ -1,3 +1,4 @@
+import { marketplaceConfig } from "./env.js"
 import type { SkinSummary } from "./skins.model.js"
 
 const PLAY_URL = "https://play.google.com/store/apps/details?id=com.owngains.app"
@@ -35,7 +36,11 @@ ${skin.description ? `<p>${esc(skin.description)}</p>` : ""}
 <a class="btn primary" href="${esc(deepLink)}">Open in OwnGains</a>
 <p class="muted">Don't have the app?</p>
 <a class="btn secondary" href="${PLAY_URL}">Get it on Google Play</a>
-<a class="btn secondary" href="${RELEASES_URL}">Download the APK from GitHub</a>`
+<a class="btn secondary" href="${RELEASES_URL}">Download the APK from GitHub</a>${
+    marketplaceConfig.reportEmail
+      ? `\n<p class="muted"><a href="mailto:${esc(marketplaceConfig.reportEmail)}?subject=${encodeURIComponent(`Report skin ${skin.id}`)}" style="color:inherit">Report this skin</a>, no account needed.</p>`
+      : ""
+  }`
   const script = `document.getElementById("copy").onclick=function(){navigator.clipboard.writeText("${skin.id}");this.textContent="Copied"}`
   return shell(`${skin.name} · OwnGains skin`, body, nonce, script)
 }

@@ -260,9 +260,13 @@ function push<T>(ring: T[], item: T, cap: number): void {
   if (ring.length > cap) ring.shift()
 }
 
+// Never written to the database, so a saved event outlives no account and
+// needs no deleting with one.
+const MEMORY_ONLY = new Set(["ip", "user", "trainer"])
+
 /**
  * Adds an event to its ring and, once started, to the next save. The client
- * IP stays in memory only and is never written to the database.
+ * IP and usernames stay in memory only.
  */
 function keep<T extends { at: string }>(kind: number, item: T): void {
   const { ring, cap } = SOURCES[kind]
@@ -271,7 +275,7 @@ function keep<T extends { at: string }>(kind: number, item: T): void {
     pendingEvents.push({
       kind,
       atMs: Date.parse(item.at),
-      data: JSON.stringify(item, (k, v) => (k === "ip" ? null : v)),
+      data: JSON.stringify(item, (k, v) => (MEMORY_ONLY.has(k) ? null : v)),
     })
 }
 

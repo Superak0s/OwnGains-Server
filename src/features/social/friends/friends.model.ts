@@ -482,6 +482,7 @@ export const REPORT_REASONS = [
   "spam",
   "impersonation",
   "inappropriate",
+  "underage",
   "other",
 ] as const
 

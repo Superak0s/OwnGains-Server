@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import request from "supertest"
 import { app } from "../app.js"
+import { marketplaceConfig } from "../env.js"
 import { stubAuthServer, fakeUser, bearer } from "./authStub.js"
 
 const author = fakeUser("pagewriter")
@@ -30,6 +31,19 @@ describe("skin page", () => {
     expect(res.text).not.toContain("<script>alert")
   })
 
+  it("offers a report link that needs no account, only when an address is set", async () => {
+    const id = await publish("Reportable")
+    expect((await request(app).get(`/skins/${id}`)).text).not.toContain("mailto:")
+    marketplaceConfig.reportEmail = "abuse@market.test"
+    try {
+      expect((await request(app).get(`/skins/${id}`)).text).toContain(
+        `mailto:abuse@market.test?subject=${encodeURIComponent(`Report skin ${id}`)}`,
+      )
+    } finally {
+      marketplaceConfig.reportEmail = ""
+    }
+  })
+
   it("links to the app with the marketplace address", async () => {
     const id = await publish("Linked")
     const res = await request(app).get(`/skins/${id}`)
@@ -48,7 +62,7 @@ describe("skin page", () => {
 
   it("404s a taken-down skin", async () => {
     const id = await publish("Gone")
-    await request(app).delete(`/api/skins/${id}`).set(bearer(admin))
+    await request(app).delete(`/api/skins/${id}`).set(bearer(admin)).send({ reason: "Spam" })
     const res = await request(app).get(`/skins/${id}`)
     expect(res.status).toBe(404)
     expect(res.headers["content-type"]).toContain("text/html")

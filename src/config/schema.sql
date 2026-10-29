@@ -792,7 +792,7 @@ CREATE TABLE IF NOT EXISTS user_reports (
   reported_id INT UNSIGNED          DEFAULT NULL,
   reported_uuid     CHAR(36) CHARACTER SET ascii DEFAULT NULL,
   reported_username VARCHAR(64)     DEFAULT NULL,
-  reason      ENUM('harassment','spam','impersonation','inappropriate','other') NOT NULL,
+  reason      ENUM('harassment','spam','impersonation','inappropriate','other','underage') NOT NULL,
   details     VARCHAR(1000)         DEFAULT NULL,
   created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -944,8 +944,8 @@ CREATE TABLE IF NOT EXISTS metrics_history (
   PRIMARY KEY (span_min, at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Admin metrics events: failed requests (with username and IP), slow requests
--- and logged errors, kept 30 days and capped in rows. `data` is the event as JSON.
+-- Admin metrics events: failed requests, slow requests and logged errors, kept
+-- 30 days and capped in rows. `data` is the event as JSON, without username or IP.
 CREATE TABLE IF NOT EXISTS metrics_events (
   id    BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
   kind  TINYINT UNSIGNED NOT NULL,  -- 0 server error, 1 client error, 2 slow request, 3 error log line

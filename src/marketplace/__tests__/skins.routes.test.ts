@@ -8,6 +8,7 @@ import type { RowDataPacket } from "mysql2/promise"
 const author = fakeUser("author")
 const other = fakeUser("other")
 const admin = fakeUser("admin", true)
+const unaccepted = fakeUser("unaccepted", false, false)
 
 const body = (name = "Neon Lifter") => ({
   name,
@@ -22,7 +23,7 @@ const body = (name = "Neon Lifter") => ({
 const publish = async (b: object = body()) => request(app).post("/api/skins").set(bearer(author)).send(b)
 
 beforeEach(() => {
-  stubAuthServer([author, other, admin])
+  stubAuthServer([author, other, admin, unaccepted])
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -88,12 +89,33 @@ describe("skins CRUD", () => {
   it("hides a skin an admin takes down but keeps the row", async () => {
     const { body: created } = await publish()
     expect((await request(app).delete(`/api/skins/${created.id}`).set(bearer(other))).status).toBe(403)
-    expect((await request(app).delete(`/api/skins/${created.id}`).set(bearer(admin))).status).toBe(204)
+    expect((await request(app).delete(`/api/skins/${created.id}`).set(bearer(admin))).status).toBe(400)
+    const takedown = await request(app).delete(`/api/skins/${created.id}`).set(bearer(admin)).send({ reason: "Copied artwork" })
+    expect(takedown.status).toBe(204)
     expect((await request(app).get(`/api/skins/${created.id}`)).status).toBe(404)
     const list = await request(app).get("/api/skins").query({ sort: "new" })
     expect(list.body.skins.some((s: { id: number }) => s.id === created.id)).toBe(false)
     const [rows] = await pool.execute<RowDataPacket[]>("SELECT taken_down_at FROM skins WHERE id = ?", [created.id])
     expect(rows[0].taken_down_at).not.toBeNull()
+
+    const mine = await request(app).get("/api/skins").query({ mine: 1 }).set(bearer(author))
+    expect(mine.body.skins.find((s: { id: number }) => s.id === created.id).takenDown).toEqual({ reason: "Copied artwork" })
+    expect((await request(app).delete(`/api/skins/${created.id}`).set(bearer(author))).status).toBe(204)
+    const [gone] = await pool.execute<RowDataPacket[]>("SELECT id FROM skins WHERE id = ?", [created.id])
+    expect(gone).toHaveLength(0)
+  })
+
+  it("refuses publishing, rating and reporting until the Terms are accepted", async () => {
+    const { body: created } = await publish()
+    const as = bearer(unaccepted)
+    for (const res of [
+      await request(app).post("/api/skins").set(as).send(body()),
+      await request(app).put(`/api/skins/${created.id}/rating`).set(as).send({ stars: 5 }),
+      await request(app).post(`/api/skins/${created.id}/report`).set(as).send({ reason: "spam" }),
+    ]) {
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe("TERMS_NOT_ACCEPTED")
+    }
   })
 
   it("removes a skin its author deletes", async () => {

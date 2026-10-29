@@ -167,8 +167,10 @@ describe("error capture", () => {
     const line = info.mock.calls.find((c) => String(c[1]).startsWith("418"))
     expect(line![1]).toMatch(/^418 GET \/teapot: short and stout \[TEAPOT\] \(reqId /)
     expect(warn).not.toHaveBeenCalled()
-    const logged = error.mock.calls.find((c) => c[1] === "Server error:")![2] as { stack?: string }
+    const logged = error.mock.calls.find((c) => c[1] === "Server error:")![2] as { stack?: string; path?: string }
     expect(logged.stack).toContain("kaboom")
+    // The template, not the id the client sent.
+    expect(logged.path).toBe("/boom/:id")
     vi.restoreAllMocks()
   })
 

@@ -6,6 +6,34 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-29
+
+### Added
+
+- `owngains delete <username> [--yes]` deletes an account and everything it owns, as Delete Account in the app does. Without `--yes` it only says what it would do, and it refuses admins.
+- `POST /api/friends/report` accepts the reason `underage` (migration `003_report_reason_underage.sql`).
+- Marketplace: `MARKETPLACE_REPORT_EMAIL` adds a Report this skin link to share pages, so anyone can report a skin without an account.
+
+### Changed
+
+- Marketplace: `marketplace remove <skin id> <reason>` and an admin's `DELETE /api/skins/:id` need a reason (400 without one). `GET /api/skins?mine=1` lists the author's taken-down skins with `takenDown: { reason }`, and the author can delete them.
+
+### Fixed
+
+- `GET /api/auth/account/export` includes messages the caller received, not only those they sent.
+
+### Security
+
+- `metrics_events` no longer saves usernames. Like the client IP, they stay in the in-memory lists only, and migration `002_metrics_events_no_usernames.sql` blanks the usernames already saved.
+- Error log lines name the matched route template instead of the raw path, which can contain user content.
+- Marketplace: publishing, updating, rating and reporting a skin need accepted Terms (403 `TERMS_NOT_ACCEPTED`), unless `REQUIRE_TERMS_ACCEPTANCE=false`.
+
+### Internal
+
+- `.env.example` lists every variable the server reads, grouped and shortened.
+- `scripts/release.sh` logs each run to `release/release-<timestamp>.log`, keeps the last 20, and ends a failed run's log with the exit code and the step it failed in.
+- Tests cover the delete command, the `underage` reason, received messages in the export, usernames kept out of saved metrics, the logged route template, skin takedown reasons and the marketplace Terms check.
+
 ## [1.1.0] - 2026-10-28
 
 ### Added
@@ -366,7 +394,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.0
 [1.0.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.0

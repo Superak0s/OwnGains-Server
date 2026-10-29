@@ -182,7 +182,11 @@ describe("metrics collector", () => {
       JSON.stringify({ at: new Date(old).toISOString(), status: 404, code: null, name: null, message: "from before", route: "r" }),
     ])
     await m.startMetricsCollector()
-    hit({ status: 503, error: new Error("saved one") })
+    hit({
+      status: 503,
+      error: new Error("saved one"),
+      req: { user: { username: "trainee_name" }, trainer: { username: "coach_name" } },
+    })
     const week = await snap("7d")
     expect(week.errors.recentClient.some((e) => e.message === "from before")).toBe(true)
     expect(week.errors.recentServer.some((e) => e.message === "saved one")).toBe(true)
@@ -191,8 +195,9 @@ describe("metrics collector", () => {
     expect(h[0].n).toBeGreaterThanOrEqual(1)
     const [e] = await pool.query<RowDataPacket[]>("SELECT data FROM metrics_events WHERE kind = 0")
     expect(e.some((r) => String(r.data).includes("saved one"))).toBe(true)
-    // The IP is shown live but never saved.
-    expect(e.some((r) => String(r.data).includes("1.2.3.4"))).toBe(false)
+    // The IP and usernames are shown live but never saved.
+    for (const secret of ["1.2.3.4", "trainee_name", "coach_name"])
+      expect(e.some((r) => String(r.data).includes(secret))).toBe(false)
     await pool.query("DELETE FROM metrics_history")
     await pool.query("DELETE FROM metrics_events")
   })

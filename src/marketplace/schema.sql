@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS skins (
   rating_sum       INT UNSIGNED NOT NULL DEFAULT 0,
   rating_count     INT UNSIGNED NOT NULL DEFAULT 0,
   taken_down_at    DATETIME     DEFAULT NULL,
+  -- Shown to the author under My skins as the statement of reasons.
+  taken_down_reason VARCHAR(500) DEFAULT NULL,
   -- Server demo data: the users.uuid of the one account that may see this skin.
   demo_for         CHAR(36) CHARACTER SET ascii DEFAULT NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -33,7 +35,8 @@ CREATE TABLE IF NOT EXISTS skins (
 -- Added after the table was first created. MariaDB skips both when present.
 ALTER TABLE skins
   ADD COLUMN IF NOT EXISTS demo_for CHAR(36) CHARACTER SET ascii DEFAULT NULL AFTER taken_down_at,
-  ADD KEY IF NOT EXISTS idx_skins_demo_for (demo_for);
+  ADD KEY IF NOT EXISTS idx_skins_demo_for (demo_for),
+  ADD COLUMN IF NOT EXISTS taken_down_reason VARCHAR(500) DEFAULT NULL AFTER taken_down_at;
 
 CREATE TABLE IF NOT EXISTS skin_ratings (
   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,

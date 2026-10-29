@@ -210,6 +210,12 @@ describe("friends routes", () => {
       .send({ userId: bRow!.uuid, reason: "spam", details: "test report" })
     expect(ok.status).toBe(201)
     expect(ok.body.reportId).toBeGreaterThan(0)
+
+    const underage = await request(app)
+      .post("/api/friends/report")
+      .set(auth(b.token))
+      .send({ userId: (await findUserByUsername(a.username))!.uuid, reason: "underage" })
+    expect(underage.status).toBe(201)
   })
 
   it("blocks, lists blocks, and unblocks", async () => {

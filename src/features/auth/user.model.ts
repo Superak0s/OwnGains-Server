@@ -140,6 +140,12 @@ const OUTBOUND_ONLY: Record<string, string> = {
   messages: "sender_id",
 }
 
+// Rows the wipe leaves alone (see OUTBOUND_ONLY) that are still the caller's
+// personal data under Art. 15, so the export includes them.
+const EXPORT_ALSO: Record<string, string> = {
+  messages: "recipient_id",
+}
+
 /**
  * Tables "Clear All Data" detaches the caller from instead of deleting.
  * A report the user filed is the moderator's record, not the reporter's data:
@@ -431,9 +437,10 @@ async function exportTableRows(
     // are synthetic accounts, and their raw rows (internal id, token_version,
     // password_hash) are no one's data. The wipe still deletes them.
     if (table === "users") continue
+    const cols = EXPORT_ALSO[table] ? [...columns, EXPORT_ALSO[table]] : columns
     const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT * FROM ${table} WHERE ${ownershipClause(columns)} LIMIT ${EXPORT_ROW_CAP}`,
-      columns.map(() => userId),
+      `SELECT * FROM ${table} WHERE ${ownershipClause(cols)} LIMIT ${EXPORT_ROW_CAP}`,
+      cols.map(() => userId),
     )
     data[table] = rows
   }

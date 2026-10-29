@@ -3,6 +3,7 @@
 import { describe, it, expect } from "vitest"
 import request from "supertest"
 import { app, signup, auth, internalId, befriend } from "../../../tests/helpers.js"
+import { pool } from "../../../config/database.js"
 
 describe("account export isolation", () => {
   // idempotency_keys.actor_id has no FK to users, so idsToUuids never
@@ -33,6 +34,24 @@ describe("account export isolation", () => {
     const rows = exported.body.data.idempotency_keys as { actor_id: unknown }[]
     expect(rows.length).toBeGreaterThan(0)
     for (const r of rows) expect(r.actor_id).not.toBe(trainerId)
+  })
+
+  it("includes messages the caller received, not only those they sent", async () => {
+    const reader = await signup("exprc")
+    const writer = await signup("expwr")
+    await pool.execute("INSERT INTO messages (sender_id, recipient_id, body) VALUES (?, ?, ?)", [
+      await internalId(writer.user.id),
+      await internalId(reader.user.id),
+      "received text",
+    ])
+
+    const exported = await request(app)
+      .get("/api/auth/account/export")
+      .set(auth(reader.token))
+    expect(exported.status).toBe(200)
+    const messages = exported.body.data.messages as { body: string; sender_id: unknown }[]
+    expect(messages.map((m) => m.body)).toContain("received text")
+    expect(messages[0].sender_id).toBe(writer.user.id)
   })
 
   // users.demo_owner_id makes `users` an "owned" table, so the export dumps

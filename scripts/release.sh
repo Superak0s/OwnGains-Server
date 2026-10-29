@@ -14,7 +14,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
 else
     B='' DIM='' RED='' GRN='' YEL='' CYN='' R=''
 fi
-step() { printf '\n%s==> [%s] %s %s(%dm%02ds)%s\n' "$B$CYN" "$1" "$2" "$DIM" $((SECONDS / 60)) $((SECONDS % 60)) "$R"; }
+step() { CURRENT_STEP="[$1] $2"; printf '\n%s==> [%s] %s %s(%dm%02ds)%s\n' "$B$CYN" "$1" "$2" "$DIM" $((SECONDS / 60)) $((SECONDS % 60)) "$R"; }
 ok()   { printf '%s  OK  %s%s\n' "$GRN" "$*" "$R"; }
 info() { printf '%s  ..  %s%s\n' "$DIM" "$*" "$R"; }
 warn() { printf '%s  !!  %s%s\n' "$YEL" "$*" "$R"; }
@@ -40,7 +40,8 @@ ${DIM}Steps: [0] origin/main sync check, [1] version + changelog, [2] typecheck 
 When the version is bumped, [Unreleased] in CHANGELOG.md is renamed to the new
 version and becomes the GitHub release notes. An empty [Unreleased] is left alone
 and the release gets default notes. A failed or Ctrl+C'd run before [4] reverts
-the bump and the changelog.${R}
+the bump and the changelog. Each run's output is saved to
+release/release-<timestamp>.log (the last 20 are kept).${R}
 EOF
 }
 
@@ -73,6 +74,13 @@ fi
 
 cd "$SERVER_DIR"
 
+mkdir -p release
+old_logs=(release/release-*.log)
+if [ ${#old_logs[@]} -gt 19 ]; then rm -f "${old_logs[@]:0:${#old_logs[@]}-19}"; fi
+LOG_FILE="$SERVER_DIR/release/release-$(date +%Y%m%d-%H%M%S).log"
+# tee ignores Ctrl+C so the cleanup trap's output still reaches the terminal and the log.
+exec > >(trap '' INT; exec tee -a "$LOG_FILE") 2>&1
+
 printf '%s=== OwnGains Server Release ===%s\n' "$B$CYN" "$R"
 printf '  Image         %s\n' "$DOCKER_IMAGE"
 printf '  Tests         %s\n' "$(yn "$([ "$SKIP_TESTS" = true ] && echo false || echo true)")"
@@ -93,6 +101,7 @@ cleanup() {
         fi
         rm -rf "$BACKUP_DIR"
     fi
+    [ $rc -eq 0 ] || err "FAILED with exit code $rc during ${CURRENT_STEP:-startup} at $(date '+%Y-%m-%d %H:%M:%S'). Log: $LOG_FILE"
 }
 trap cleanup EXIT
 trap 'echo ""; err "Aborted."; exit 130' INT TERM
@@ -297,6 +306,7 @@ if [ "$SKIP_DOCKER_PUSH" = true ]; then
 else
     printf '\n%s=== Done! v%s pushed as :latest and :%s ===%s\n' "$B$GRN" "$NEW_VERSION" "$NEW_VERSION" "$R"
 fi
+printf '  Log  %s\n' "$LOG_FILE"
 printf '  Took %dm%02ds\n' $((SECONDS / 60)) $((SECONDS % 60))
 
 # Without this bash reads on past the group and mis-seeks in the file.

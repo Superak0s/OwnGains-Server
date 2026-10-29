@@ -7,6 +7,7 @@ export interface StubUser {
   uuid: string
   username: string
   isAdmin: boolean
+  termsAccepted: boolean
 }
 
 /** Answers `/api/auth/me` for the given users and counts calls. Other URLs reach the real fetch. */
@@ -20,13 +21,14 @@ export function stubAuthServer(users: StubUser[]) {
     const header = new Headers(init?.headers).get("authorization") ?? ""
     const user = users.find((u) => header === `Bearer ${u.token}`)
     if (!user) return Response.json({ success: false }, { status: 401 })
-    return Response.json({ success: true, user: { id: user.uuid, username: user.username, isAdmin: user.isAdmin } })
+    const termsAcceptedAt = user.termsAccepted ? "2026-10-01T00:00:00.000Z" : null
+    return Response.json({ success: true, user: { id: user.uuid, username: user.username, isAdmin: user.isAdmin, termsAcceptedAt } })
   })
   return calls
 }
 
-export function fakeUser(username: string, isAdmin = false): StubUser {
-  return { token: `tok.${randomUUID()}.sig`, uuid: randomUUID(), username, isAdmin }
+export function fakeUser(username: string, isAdmin = false, termsAccepted = true): StubUser {
+  return { token: `tok.${randomUUID()}.sig`, uuid: randomUUID(), username, isAdmin, termsAccepted }
 }
 
 export const bearer = (u: StubUser) => ({ Authorization: `Bearer ${u.token}` })

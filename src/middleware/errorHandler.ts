@@ -231,6 +231,8 @@ function answeredAsSpecialError(err: Error, req: Request, res: Response): boolea
 }
 
 function logRequestError(statusCode: number, err: Error, req: Request): void {
+  // The route template, as server.ts logs it: the raw path carries user content.
+  const route = req.route ? req.baseUrl + req.route.path : "(unrouted)"
   // 4xx is the client being told something normal ("wrong password", "you have
   // no program yet"): one info line, not a multi-line warning that reads like
   // the server broke. The admin metrics page counts and groups them anyway.
@@ -240,14 +242,14 @@ function logRequestError(statusCode: number, err: Error, req: Request): void {
   if (statusCode < 500) {
     const code = (err as AppError).code
     logger.info(
-      `${statusCode} ${req.method} ${req.path}: ${err.message}${code ? " [" + code + "]" : ""} (reqId ${req.reqId})`,
+      `${statusCode} ${req.method} ${route}: ${err.message}${code ? " [" + code + "]" : ""} (reqId ${req.reqId})`,
     )
     return
   }
   logger.error("Server error:", {
     message: err.message,
     stack: err.stack,
-    path: req.path,
+    path: route,
     method: req.method,
     reqId: req.reqId,
   })

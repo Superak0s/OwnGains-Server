@@ -2,7 +2,7 @@
 /*
   owngains.ts
   Operator CLI: list users, grant/revoke admin, reset passwords, read reports,
-  suspend accounts.
+  suspend and delete accounts.
   Usage (dev):
     bun run owngains list
     bun run owngains add <username>
@@ -22,6 +22,7 @@ import {
   listUsers,
   changePassword,
   setUserDisabled,
+  deleteUser,
 } from "./features/auth/auth.model.js"
 import { listReports } from "./features/social/friends/friends.model.js"
 import { passwordPolicyError, validateEmail, validateUsername } from "./middleware/validation.js"
@@ -70,6 +71,9 @@ function printHelp(): number {
   console.log("                           and can't sign in until unsuspended; the reason is")
   console.log("                           shown to the user at sign-in")
   console.log("  unsuspend <username>     Lift a suspension")
+  console.log("  delete <username> [--yes]")
+  console.log("                           Delete an account and everything it owns, as the")
+  console.log("                           app's Delete Account does (dry run without --yes)")
   console.log("  purge-local-only [--yes] Delete every user's server copy of the features in")
   console.log("                           LOCAL_ONLY_FEATURES (dry run without --yes)")
   console.log("  backup create            Dump the database to BACKUP_DIR, then prune old backups")
@@ -254,6 +258,31 @@ async function suspendCmd(args: string[]): Promise<number> {
   return 0
 }
 
+async function deleteCmd(args: string[]): Promise<number> {
+  const username = args[1]
+  if (!username) {
+    console.error("Usage: owngains delete <username> [--yes]")
+    return 2
+  }
+  const user = await findUserByUsername(username)
+  if (!user) {
+    console.error(`User not found: ${username}`)
+    return 2
+  }
+  if (user.isAdmin) {
+    console.error(`Refusing to delete an admin (${username}). Run \`owngains remove ${username}\` first.`)
+    return 2
+  }
+  if (!args.includes("--yes")) {
+    console.log(`Would delete ${username} and everything it owns. Re-run with --yes to do it.`)
+    return 0
+  }
+  await deleteUser(user.id)
+  logger.warn("[AUDIT] cli delete", { target: user.uuid })
+  console.log(`User ${username} deleted.`)
+  return 0
+}
+
 async function purgeLocalOnlyCmd(args: string[]): Promise<number> {
   const features = readLocalOnlyFeatures() as HealthFeature[]
   if (!features.length) {
@@ -352,6 +381,7 @@ const COMMANDS: Record<string, Command> = {
   reports: reportsCmd,
   suspend: suspendCmd,
   unsuspend: suspendCmd,
+  delete: deleteCmd,
   "purge-local-only": purgeLocalOnlyCmd,
   backup: backupCmd,
 }

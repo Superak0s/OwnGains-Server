@@ -17,6 +17,8 @@ export interface SkinSummary {
   uniqueDownloads: number
   rating: { average: number | null; count: number }
   updatedAt: string
+  /** Set only in the author's own list, on a skin the operator removed. */
+  takenDown: { reason: string } | null
 }
 
 export interface SkinDetail extends SkinSummary {
@@ -31,7 +33,7 @@ export type SkinSort = "popular" | "rating" | "new"
 export const PAGE_SIZE = 20
 
 const SUMMARY_COLUMNS =
-  "id, name, description, author_name, version, has_theme, has_boards, swatch, downloads, unique_downloads, rating_sum, rating_count, updated_at"
+  "id, name, description, author_name, version, has_theme, has_boards, swatch, downloads, unique_downloads, rating_sum, rating_count, updated_at, taken_down_at, taken_down_reason"
 
 const ORDER: Record<SkinSort, string> = {
   popular: "unique_downloads DESC, id DESC",
@@ -57,6 +59,7 @@ function toSummary(r: RowDataPacket): SkinSummary {
     uniqueDownloads: r.unique_downloads,
     rating: { average: averageOf(r.rating_sum, r.rating_count), count: r.rating_count },
     updatedAt: parseMySQLDate(r.updated_at).toISOString(),
+    takenDown: r.taken_down_at ? { reason: r.taken_down_reason ?? "Removed by the marketplace operator" } : null,
   }
 }
 
@@ -72,7 +75,8 @@ export async function listSkins(opts: {
   authorUuid?: string
   viewerUuid?: string
 }): Promise<{ skins: SkinSummary[]; page: number; hasMore: boolean }> {
-  const where = ["taken_down_at IS NULL", VISIBLE_TO]
+  // The author still sees a removed skin, with the reason.
+  const where = [opts.authorUuid ? "TRUE" : "taken_down_at IS NULL", VISIBLE_TO]
   const params: (string | number | null)[] = [opts.viewerUuid ?? null]
   if (opts.q) {
     where.push("name LIKE ?")
@@ -134,12 +138,14 @@ export async function updateSkin(id: number, upload: SkinUpload): Promise<number
   return rows[0].version
 }
 
-export async function deleteSkin(id: number): Promise<void> {
-  await pool.execute("DELETE FROM skins WHERE id = ?", [id])
+/** Deletes the skin if `authorUuid` published it, taken down or not. False when it did not. */
+export async function deleteOwnSkin(id: number, authorUuid: string): Promise<boolean> {
+  const [res] = await pool.execute<ResultSetHeader>("DELETE FROM skins WHERE id = ? AND author_uuid = ?", [id, authorUuid])
+  return res.affectedRows > 0
 }
 
-export async function takeDownSkin(id: number): Promise<void> {
-  await pool.execute("UPDATE skins SET taken_down_at = UTC_TIMESTAMP() WHERE id = ?", [id])
+export async function takeDownSkin(id: number, reason: string): Promise<void> {
+  await pool.execute("UPDATE skins SET taken_down_at = UTC_TIMESTAMP(), taken_down_reason = ? WHERE id = ?", [reason, id])
 }
 
 /** Counts a download, and a unique one the first time this install fetches this skin. Null when the skin is not visible. */

@@ -72,6 +72,7 @@ services:
       # Tokens come from the server next to it, since the two share accounts and a database.
       AUTH_SERVER_URL: ${AUTH_SERVER_URL:-http://server:${PORT:-5000}}
       MARKETPLACE_PUBLIC_URL: ${MARKETPLACE_PUBLIC_URL:-http://localhost:5100}
+      MARKETPLACE_REPORT_EMAIL: ${MARKETPLACE_REPORT_EMAIL:-}
       # Its own setting: port 5100 may be published directly while the server sits behind a proxy.
       TRUST_PROXY_HOPS: ${MARKETPLACE_TRUST_PROXY_HOPS:-0}
     ports:

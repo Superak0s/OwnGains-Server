@@ -58,7 +58,7 @@ describe("requireUser", () => {
     const calls = stubAuthServer([user])
     const first = await request(probe).get("/probe").set(bearer(user))
     expect(first.status).toBe(200)
-    expect(first.body.user).toEqual({ uuid: user.uuid, username: "mara", isAdmin: true })
+    expect(first.body.user).toEqual({ uuid: user.uuid, username: "mara", isAdmin: true, termsAccepted: true })
     await request(probe).get("/probe").set(bearer(user))
     expect(calls.count).toBe(1)
   })

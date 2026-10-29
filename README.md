@@ -151,7 +151,7 @@ Mounted on every server, `LOCAL_ONLY_FEATURES` included, since it is account dat
 
 - **Friends:** `GET /search` (`?q=` username prefix, ≥3 characters, `?limit=` default 10, max 20), `GET /` (`?include=requests` adds `pendingRequests` and `sentRequests`), `GET /requests/{pending,sent}`, `POST /request`, `POST /request/:friendshipId/{accept,reject}`, `DELETE /:friendId`. A declined request can't be re-sent to the same person for 30 days (1 hour if the sender cancelled it).
 - **Blocking:** `POST`/`DELETE /block/:userId` and `GET /blocked`. A block tears down the friendship, every sharing permission in both directions, and any outstanding joint invite or trainer request, then hides each user from the other's search and blocks new requests.
-- **Reporting:** `POST /report` (`userId`, `reason`, optional `details`). Reports are stored on the instance for its operator to review with `bun run owngains reports` or `GET /api/admin/reports`. Nothing is forwarded to another server.
+- **Reporting:** `POST /report` (`userId`, `reason` one of `harassment`, `spam`, `impersonation`, `inappropriate`, `underage`, `other`, optional `details`). Reports are stored on the instance for its operator to review with `bun run owngains reports` or `GET /api/admin/reports`. Nothing is forwarded to another server.
 - **Sharing permissions:** `POST /permissions` (grant), `GET /permissions/{granted,received}`, `GET /permissions/:permissionId/payload`, `DELETE /permissions/:permissionId`. Types: `history`, `analytics`, `program`, `joint_session`, `watch_session`, `trainer`. Grants need `{ friendId (uuid), permissionType, payload? }` and a friendship (403 otherwise). A `program` grant needs `payload.programData`, capped at 256 KB (`413 PAYLOAD_TOO_LARGE`). The `granted`/`received` lists omit payloads and say `hasPayload` instead.
 - **Shared reads:** `GET /sessions/friend/:friendId` (`?includeTimings=true` adds each session's `setTimings`, and it pages with `?before=<nextCursor>` like `GET /api/sessions`) and `/sessions/friend/:friendId/:sessionId`. Sets are listed in the order they were performed.
 - **Joint sessions:** `GET /joint-sessions/status?friendIds=<uuid>,…` (up to 100 friends at once, non-friends omitted, and a friend reads as idle unless they granted the caller `watch_session`, `joint_session` or `trainer`), `POST /joint-sessions/invite` (the invitee must have granted the caller `joint_session`, 403 otherwise), `POST /joint-sessions/invites/:inviteId/{accept,decline}`, `PATCH /joint-sessions/:id/progress`, `DELETE /joint-sessions/:id/leave`, for two friends working out in sync. Leaving (here or with the WS `leave_joint_session` frame) sends the partner both `joint_session_ended` and `invite_status { status: "session_ended" }`.
@@ -429,6 +429,7 @@ OwnGains and the official server at `owngains.superak0s.com` are built and run b
   bun run owngains backup create|list|verify|restore|prune   # see Backups
   bun run owngains suspend <username> <reason>  # sign out everywhere and block sign-in (not admins), the reason is shown at sign-in
   bun run owngains unsuspend <username>
+  bun run owngains delete <username> [--yes]  # delete an account and everything it owns, as Delete Account in the app (dry run without --yes, refuses admins)
   bun run owngains purge-local-only [--yes]   # delete every user’s server copy of LOCAL_ONLY_FEATURES data
   ```
   `purge-local-only` is for data written before a feature became local-only:
@@ -601,13 +602,14 @@ trusted LAN, since the password is sent to it. Error entries include usernames
 
 Skins are shareable themes and widget layouts. The marketplace is a separate service in the same repo (`src/marketplace/`), with its own Docker image (`superak0s/owngains-marketplace`). It keeps its `skin*` tables in the server's database. Every app uses the official marketplace at `https://owngains.superak0s.com/marketplace` by default, so a self-hosted OwnGains server does not need one. Run your own only to host a private catalog.
 
-Anyone can browse and download. Publishing and rating need an account on the server named by `AUTH_SERVER_URL`: the marketplace forwards the caller's token to that server's `GET /api/auth/me` and caches the answer for a minute. The app only sends its token to a marketplace served from the same origin as the server it is signed in to, so a self-hosted marketplace that should accept sign-ins sits under that server's domain (e.g. `https://example.com/marketplace` next to `https://example.com`). `/healthz` reports the auth server's origin for information only.
+Anyone can browse and download. Publishing, rating and reporting need an account on the server named by `AUTH_SERVER_URL` with the Terms accepted (403 `TERMS_NOT_ACCEPTED` otherwise, unless `REQUIRE_TERMS_ACCEPTANCE=false`): the marketplace forwards the caller's token to that server's `GET /api/auth/me` and caches the answer for a minute. The app only sends its token to a marketplace served from the same origin as the server it is signed in to, so a self-hosted marketplace that should accept sign-ins sits under that server's domain (e.g. `https://example.com/marketplace` next to `https://example.com`). `/healthz` reports the auth server's origin for information only.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DOWNLOAD_SALT` | none, required | At least 32 random characters. Keys the hashes behind unique-download counts. Install ids are never stored. |
 | `AUTH_SERVER_URL` | `https://owngains.superak0s.com` (compose: `http://server:${PORT}`, the server next to it) | OwnGains server whose accounts may publish and rate |
 | `MARKETPLACE_PUBLIC_URL` | `http://localhost:5100` | Public address used in share links |
+| `MARKETPLACE_REPORT_EMAIL` | none | Address on each share page for reporting a skin without an account. Unset hides the link |
 | `MARKETPLACE_PORT` | `5100` | Listen port (`PORT` is the server's, so both can share one `.env`) |
 | `TRUST_PROXY_HOPS` | `0` | Same rule as the server. Compose sets it from `MARKETPLACE_TRUST_PROXY_HOPS`, never the server's value, so a marketplace behind a proxy needs it set to `1` or every client shares one rate-limit bucket. Set `1` only when the proxy is the one way in (publish the port as `127.0.0.1:5100:5100`), or a client can spoof `X-Forwarded-For` past its limiters |
 | `DB_*` | | Same as the server. Compose points it at the server's database, logging in as `MARKETPLACE_DB_USER` / `MARKETPLACE_DB_PASSWORD` (required for the profile) |
@@ -630,7 +632,7 @@ Use your `DB_NAME` in place of `owngains`. Start it with `docker compose --profi
 Operator CLI (`docker exec <container> marketplace ...` or `bun run marketplace ...`):
 
 - `reports [limit]`: newest open reports
-- `remove <skin id>`: take a skin down (an admin of the auth server can also do this from the app)
+- `remove <skin id> <reason>`: take a skin down. Its author still sees it under My skins with the reason, as the statement of reasons the EU DSA asks for, and can delete it. An admin of the auth server can do the same with `DELETE /api/skins/:id` and a `reason` in the body.
 - `forget <uuid>`: anonymize an account. The app calls `DELETE /api/me` when a user deletes their account. Use this for a deletion request that arrives by email. Skins stay published without an author name, and ratings still count without a rater.
 
 ---

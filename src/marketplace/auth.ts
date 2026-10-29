@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto"
 import type { Request, Response, NextFunction } from "express"
 import { ipKeyGenerator } from "express-rate-limit"
-import { AppError, UnauthorizedError } from "../middleware/errorHandler.js"
+import { envBool } from "../config/env.js"
+import { AppError, ForbiddenError, UnauthorizedError } from "../middleware/errorHandler.js"
 import { marketplaceConfig } from "./env.js"
 
 export interface MarketUser {
   uuid: string
   username: string
   isAdmin: boolean
+  termsAccepted: boolean
 }
 
 const USER_TTL_MS = 60_000
@@ -49,7 +51,7 @@ async function fetchMe(token: string): Promise<MarketUser | null> {
   }
   if (res.status === 401 || res.status === 403) return null
   if (!res.ok) throw new AppError("The account server is unreachable. Try again later.", 503, null, "AUTH_UNAVAILABLE")
-  let body: { user?: { id?: unknown; username?: unknown; isAdmin?: unknown } }
+  let body: { user?: { id?: unknown; username?: unknown; isAdmin?: unknown; termsAcceptedAt?: unknown } }
   try {
     body = await res.json()
   } catch {
@@ -57,7 +59,7 @@ async function fetchMe(token: string): Promise<MarketUser | null> {
   }
   const u = body?.user
   if (typeof u?.id !== "string" || typeof u.username !== "string") return null
-  return { uuid: u.id, username: u.username, isAdmin: u.isAdmin === true }
+  return { uuid: u.id, username: u.username, isAdmin: u.isAdmin === true, termsAccepted: !!u.termsAcceptedAt }
 }
 
 async function resolveUser(token: string, ip: string): Promise<MarketUser | null> {
@@ -101,6 +103,13 @@ export async function requireUser(req: Request, res: Response, next: NextFunctio
   const user = token ? await resolveUser(token, req.ip ?? "") : null
   if (!user) throw new UnauthorizedError("Sign in to your OwnGains account first")
   res.locals.marketUser = user
+  next()
+}
+
+/** Publishing, rating and reporting need recorded Terms acceptance, as writes on the account server do. Deletes pass. */
+export function requireTerms(_req: Request, res: Response, next: NextFunction): void {
+  if (!currentUser(res)!.termsAccepted && envBool("REQUIRE_TERMS_ACCEPTANCE", true))
+    throw new ForbiddenError("Accept the Terms in the app to continue", "TERMS_NOT_ACCEPTED")
   next()
 }
 

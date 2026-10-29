@@ -13,7 +13,7 @@ const insertSkin = async (authorUuid: string) => {
 }
 
 const row = async (id: number) =>
-  (await pool.execute<RowDataPacket[]>("SELECT author_uuid, author_name, taken_down_at FROM skins WHERE id = ?", [id]))[0][0]
+  (await pool.execute<RowDataPacket[]>("SELECT author_uuid, author_name, taken_down_at, taken_down_reason FROM skins WHERE id = ?", [id]))[0][0]
 
 describe("marketplace CLI", () => {
   vi.spyOn(console, "log").mockImplementation(() => {})
@@ -25,9 +25,12 @@ describe("marketplace CLI", () => {
     expect(await row(id)).toMatchObject({ author_uuid: null, author_name: null })
   })
 
-  it("remove takes a skin down", async () => {
+  it("remove takes a skin down with the reason its author is shown", async () => {
     const id = await insertSkin(randomUUID())
-    expect(await main(["remove", String(id)])).toBe(0)
+    expect(await main(["remove", String(id)])).toBe(1)
+    expect((await row(id)).taken_down_at).toBeNull()
+    expect(await main(["remove", String(id), "Copied", "artwork"])).toBe(0)
+    expect(await row(id)).toMatchObject({ taken_down_reason: "Copied artwork" })
     expect((await row(id)).taken_down_at).not.toBeNull()
   })
 

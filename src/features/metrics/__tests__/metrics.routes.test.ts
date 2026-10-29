@@ -152,8 +152,9 @@ describe("error capture", () => {
     expect(errors.recentClient.find((e) => e.code === "TEAPOT")!.details).toBeNull()
   })
 
-  it("logs a 4xx as one info line and a 5xx with its stack", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+  it("logs a 4xx as one debug line and a 5xx with its stack", async () => {
+    // Spied on the logger, not console: debug is below the test LOG_LEVEL.
+    const debug = vi.spyOn(logger, "debug").mockImplementation(() => {})
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const prev = process.env.NODE_ENV
@@ -164,8 +165,8 @@ describe("error capture", () => {
     } finally {
       process.env.NODE_ENV = prev
     }
-    const line = info.mock.calls.find((c) => String(c[1]).startsWith("418"))
-    expect(line![1]).toMatch(/^418 GET \/teapot: short and stout \[TEAPOT\] \(reqId /)
+    const line = debug.mock.calls.find((c) => String(c[0]).startsWith("418"))
+    expect(line![0]).toMatch(/^418 GET \/teapot: short and stout \[TEAPOT\] \(reqId /)
     expect(warn).not.toHaveBeenCalled()
     const logged = error.mock.calls.find((c) => c[1] === "Server error:")![2] as { stack?: string; path?: string }
     expect(logged.stack).toContain("kaboom")

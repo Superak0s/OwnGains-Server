@@ -438,6 +438,9 @@ export function createWsServer(
       cb(true)
     },
   })
+  logger.info(
+    `🔌 WebSocket on /ws: up to ${maxConnections} sockets, ${maxConnectionsPerIp} per IP, ${maxSocketsPerUser} per user`,
+  )
 
   let revalidating = false
 
@@ -501,7 +504,7 @@ export function createWsServer(
     const extWs = ws as ExtendedWebSocket
     extWs._pongReceived = true
 
-    logger.info("[WS] connection attempt")
+    logger.debug("[WS] connection attempt")
 
     // Auth happens over the socket, never in the handshake URL: a long-lived
     // JWT in the URL would end up in server and proxy access logs. Set by the
@@ -517,7 +520,7 @@ export function createWsServer(
     }, authTimeoutMs)
 
     async function handleAuth(msg: WsMessage): Promise<void> {
-      logger.info("[WS] processing auth message")
+      logger.debug("[WS] processing auth message")
       authInFlight = true
       try {
         if (typeof msg.token !== "string" || !msg.token) {
@@ -551,7 +554,7 @@ export function createWsServer(
         // socket open with no timeout left.
         clearTimeout(authTimeout)
 
-        logger.info(`[WS] authenticated via message uid=${authed.id}`)
+        logger.debug(`[WS] authenticated via message uid=${authed.id}`)
         send(ws, "auth_success", { userId: authed.uuid })
 
         let sockets = clients.get(authed.uuid)
@@ -571,7 +574,7 @@ export function createWsServer(
         ws.on("pong", () => {
           extWs._pongReceived = true
         })
-        logger.info(`[WS] connection ready uid=${authed.id}`)
+        logger.debug(`[WS] connection ready uid=${authed.id}`)
       } catch (err) {
         logger.error("[WS] auth failed:", err)
         if (err instanceof jwt.JsonWebTokenError) {
@@ -707,7 +710,7 @@ export function createWsServer(
         }
       }
       clearTimeout(authTimeout)
-      logger.info(`[WS] disconnected uid=${extWs._userId}`)
+      logger.debug(`[WS] disconnected uid=${extWs._userId}`)
     })
 
     ws.on("error", (err: Error) =>

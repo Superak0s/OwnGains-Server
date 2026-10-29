@@ -234,14 +234,15 @@ function logRequestError(statusCode: number, err: Error, req: Request): void {
   // The route template, as server.ts logs it: the raw path carries user content.
   const route = req.route ? req.baseUrl + req.route.path : "(unrouted)"
   // 4xx is the client being told something normal ("wrong password", "you have
-  // no program yet"): one info line, not a multi-line warning that reads like
-  // the server broke. The admin metrics page counts and groups them anyway.
+  // no program yet"): one debug line next to the request line, not a warning
+  // that reads like the server broke. The admin metrics page counts and groups
+  // them anyway.
   // Only 5xx means this server is broken, and its stack goes to the log in
   // every environment. The log is the operator's, and the response is
   // where production hides it.
   if (statusCode < 500) {
     const code = (err as AppError).code
-    logger.info(
+    logger.debug(
       `${statusCode} ${req.method} ${route}: ${err.message}${code ? " [" + code + "]" : ""} (reqId ${req.reqId})`,
     )
     return

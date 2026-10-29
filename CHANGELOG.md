@@ -6,6 +6,22 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-29
+
+### Added
+
+- `LOG_LEVEL=debug` logs every request as one line with route, status and duration, plus each 4xx reason and WebSocket connects and disconnects.
+- The boot log shows a summary of the instance: local, LAN and public URLs, runtime and `NODE_ENV`, proxy trust, rate limits, CORS origins, local-only and disabled features, consent requirements, photo quotas, minimum app version and log level. It also names the database host, server version and migration state, and the WebSocket connection caps.
+- Log levels and request statuses are colored when the output is a terminal. `NO_COLOR` and `FORCE_COLOR` override it.
+
+### Changed
+
+- Per-request lines, 4xx reasons and WebSocket connection events moved from `info` to `debug`, so the default `info` log keeps boot messages, jobs, audits and warnings only.
+
+### Internal
+
+- Logger tests cover the `debug` level and colors.
+
 ## [1.1.1] - 2026-10-29
 
 ### Added
@@ -394,7 +410,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.0
 [1.0.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.0.1

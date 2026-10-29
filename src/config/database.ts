@@ -310,6 +310,7 @@ async function runMigrations(
     return;
   }
 
+  let ran = 0;
   for (const file of files) {
     const [applied] = await conn.execute<RowDataPacket[]>(
       `SELECT 1 FROM _migrations WHERE name = ?`,
@@ -317,7 +318,9 @@ async function runMigrations(
     );
     if (applied.length > 0) continue;
     await applyMigration(conn, migrationsDir, file);
+    ran++;
   }
+  logger.info(`✓ Migrations up to date (${files.length} known, ${ran} applied now)`);
 }
 
 async function applyMigration(
@@ -396,7 +399,12 @@ export async function testDatabaseConnection(): Promise<void> {
   try {
     await createDatabaseIfNotExists();
     const connection = await pool.getConnection();
-    logger.info("✓ Database connected successfully");
+    const [[server]] = await connection.query<RowDataPacket[]>("SELECT VERSION() AS version");
+    logger.info(
+      `✓ Database connected: ${process.env.DB_NAME} on ${process.env.DB_HOST || "localhost"}:${
+        Number(process.env.DB_PORT) || 3306
+      } (${server!.version}, query timeout ${queryTimeoutMs / 1000}s)`,
+    );
     connection.release();
     await provisionSchema();
     logger.info("✓ Database is ready");

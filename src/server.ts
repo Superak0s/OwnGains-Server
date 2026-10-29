@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url"
 import { Bonjour, type Service } from "bonjour-service"
 import { version } from "@/config/version.js"
 import { startStaleSessionCleanup, stopStaleSessionCleanup } from "./jobs/sessionCleanup.js"
-import { logger } from "./utils/logger.js"
+import { logger, logLevel, paint } from "./utils/logger.js"
 import { envBool, envInt, readMinAppVersion } from "./config/env.js"
 import {
   metricsBanner,
@@ -52,6 +52,7 @@ import { registerRoutes, localOnlyFeatures, currentDisabledFeatures } from "./ro
 import { errorHandler } from "./middleware/errorHandler.js"
 import { authenticateToken } from "./middleware/auth.js"
 import updatesRoutes from "./features/updates/updates.routes.js"
+import { photoQuota } from "./features/tracking/progressPhoto/progressPhoto.model.js"
 
 // Declared here rather than in express.d.ts to keep it co-located with the
 // only middleware that sets it. If other files need req.reqId, move it to
@@ -108,23 +109,38 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // Ahead of the limiters, so a 429 and the time spent reaching it are counted.
 if (metricsEnabled) app.use(metricsMiddleware)
 
-// Logged on finish, as the matched route template: the raw path contains
-// user content such as split and muscle names. The update check is left out:
-// the privacy policy says it stores nothing.
+const statusStyle = (status: number) =>
+  status >= 500 ? "red" : status >= 400 ? "yellow" : status >= 300 ? "cyan" : "green"
+
+// Logged on finish at debug level, as the matched route template: the raw
+// path contains user content such as split and muscle names. The update
+// check is left out: the privacy policy says it stores nothing.
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path !== "/healthz" && !req.path.startsWith("/api/updates/"))
-    res.on("finish", () =>
-      logger.info(
-        `[${req.method}] ${req.route ? req.baseUrl + req.route.path : "(unrouted)"} ${res.statusCode}`,
-        {
-          auth: req.headers.authorization ? "present" : "missing",
-          reqId: req.reqId,
-          user: req.user?.uuid,
-          actor: req.trainer?.uuid,
-          ip: req.ip,
-        },
-      ),
-    )
+  if (req.path !== "/healthz" && !req.path.startsWith("/api/updates/")) {
+    const started = performance.now()
+    res.on("finish", () => {
+      const fields = {
+        auth: req.headers.authorization ? "present" : "missing",
+        user: req.user?.uuid,
+        actor: req.trainer?.uuid,
+        ip: req.ip,
+        reqId: req.reqId,
+      }
+      logger.debug(
+        `${req.method} ${req.route ? req.baseUrl + req.route.path : "(unrouted)"} ${paint(
+          statusStyle(res.statusCode),
+          String(res.statusCode),
+        )} ${Math.round(performance.now() - started)}ms`,
+        paint(
+          "dim",
+          Object.entries(fields)
+            .filter(([, v]) => v)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" "),
+        ),
+      )
+    })
+  }
   next()
 })
 
@@ -184,12 +200,13 @@ const FIFTEEN_MIN = 15 * 60 * 1000
 // household signing in on several devices never reaches it. Signup counts every
 // attempt, since a successful signup is exactly what a spammer wants. Both
 // hold the old 20 per 15 minutes per IP.
-const credentialLimiter = limiter(
-  FIFTEEN_MIN,
-  envInt("AUTH_RATE_LIMIT", 20, 1),
-  { skipSuccessfulRequests: true },
-)
-const signupLimiter = limiter(FIFTEEN_MIN, envInt("SIGNUP_RATE_LIMIT", 20, 1))
+const authRateLimit = envInt("AUTH_RATE_LIMIT", 20, 1)
+const signupRateLimit = envInt("SIGNUP_RATE_LIMIT", 20, 1)
+const apiRateLimit = envInt("API_RATE_LIMIT", 200, 1)
+const credentialLimiter = limiter(FIFTEEN_MIN, authRateLimit, {
+  skipSuccessfulRequests: true,
+})
+const signupLimiter = limiter(FIFTEEN_MIN, signupRateLimit)
 app.post("/api/auth/signin", credentialLimiter)
 app.post("/api/auth/google", credentialLimiter)
 app.delete("/api/auth/google", credentialLimiter)
@@ -205,7 +222,7 @@ app.use(
   limiter(60 * 1000, envInt("UPDATES_RATE_LIMIT", 600, 1)),
   updatesRoutes,
 )
-app.use("/api", limiter(60 * 1000, envInt("API_RATE_LIMIT", 200, 1)))
+app.use("/api", limiter(60 * 1000, apiRateLimit))
 
 // Behind authenticateToken, so it's keyed by the account, not the IP: tokens
 // are free to create, but each one is tied to one user, and this bounds how much
@@ -366,6 +383,50 @@ export function getLanInterface(): string | undefined {
   return undefined
 }
 
+/** What this instance is configured to do, as label/value rows for the boot log. Never secrets. */
+function bootSummary(): [string, string | false | undefined][] {
+  const lanIp = getLanInterface()
+  const fqdn = process.env.SERVER_FQDN?.replace(/^https?:\/\//, "")
+  const list = (items: string[]) => (items.length ? items.join(", ") : "none")
+  const required = (name: string) => (envBool(name, true) ? "required" : "not required")
+  const nodeEnv = process.env.NODE_ENV
+  return [
+    ["Local", `http://localhost:${PORT}`],
+    ["LAN", lanIp && `http://${lanIp}:${PORT}`],
+    ["Public", fqdn && `https://${fqdn}`],
+    [
+      "Runtime",
+      `Bun ${process.versions.bun}, pid ${process.pid}, NODE_ENV=${nodeEnv ?? "(unset)"} (${
+        nodeEnv === "development" ? "full error details in responses" : "error details masked"
+      })`,
+    ],
+    [
+      "Proxy",
+      trustProxyHops === 0
+        ? "TRUST_PROXY_HOPS=0, client IP is the socket address (set 1 behind a reverse proxy)"
+        : `TRUST_PROXY_HOPS=${trustProxyHops}, client IP read from X-Forwarded-For`,
+    ],
+    [
+      "Rate limits",
+      `${apiRateLimit}/min on /api, ${authRateLimit} failed sign-ins and ${signupRateLimit} signups per 15min, per IP${
+        bypassLocalIps ? " (LAN callers exempt)" : ""
+      }`,
+    ],
+    ["CORS", allowedOrigins.join(", ")],
+    ["Features", `local only: ${list(localOnlyFeatures)}, disabled: ${list(currentDisabledFeatures())}`],
+    ["Consent", `Terms ${required("REQUIRE_TERMS_ACCEPTANCE")} for writes, health consent ${required("REQUIRE_HEALTH_CONSENT")} for health data`],
+    [
+      "Photos",
+      !localOnlyFeatures.includes("tracking") &&
+        `${photoQuota.perUserMb ? `${photoQuota.perUserMb} MB` : "no cap"} per user, ${
+          photoQuota.totalGb ? `${photoQuota.totalGb} GB` : "no cap"
+        } for the instance`,
+    ],
+    ["Min app", minAppVersion ?? "any version"],
+    ["Log level", logLevel === "debug" ? "debug, every request is logged" : `${logLevel} (LOG_LEVEL=debug logs every request)`],
+  ]
+}
+
 // Created in start() (not at import time) so importing app in tests doesn't
 // open a multicast socket. `interface` is a real multicast-dns option that
 // bonjour-service forwards but omits from its own (mistyped) ServiceConfig.
@@ -384,7 +445,10 @@ export async function start() {
     : undefined
   bonjour = b
   server.listen(PORT, () => {
-    logger.info(`🚀 OwnGains Server v${version} running on port ${PORT}`)
+    const rows = bootSummary()
+    logger.info(paint(["bold", "green"], `🚀 OwnGains Server v${version} running on port ${PORT}`))
+    for (const [label, value] of rows)
+      if (value) logger.info(`   ${paint("bold", label.padEnd(12))} ${value}`)
     startStaleSessionCleanup()
     void startMetricsCollector()
     logger.info(

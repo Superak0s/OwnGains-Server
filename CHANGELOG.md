@@ -6,6 +6,30 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-03
+
+### Added
+
+- `POST /api/sharing/permissions` accepts a `machines` grant that shares gym machine names with a friend. `payload.machines` must be an array of at most 100 names of 1 to 60 characters after trimming (400 otherwise), only the trimmed list is stored, and re-granting replaces it. The grant lists with `hasPayload: true` and its list is served by `GET /api/sharing/permissions/:permissionId/payload`. Needs migration `004`, which runs on boot.
+- Drop sets: `POST /api/sessions/:sessionId/set` and `PATCH /api/sessions/:sessionId/sets/:setId` accept an optional `drops` array of up to 20 `{ weight, reps }` (weight 0 to 99999.99 kg, reps an integer of at least 1), the rows done straight after the set at lower weights. `[]` stores none, and on `PATCH` an absent field leaves the stored drops alone. Any other shape answers 400 `drops must be an array of up to 20 { weight, reps }`. The set's `timing`, session details, history with timings and live spectator updates return `drops` as an array, or `null` when there are none. Needs migration `005`, which runs on boot.
+
+### Changed
+
+- Marketplace: `POST /api/skins` and `PUT /api/skins/:id` keep an optional `skin.typography` (`font`: `default`, `serif`, `mono`, `condensed` or `casual`, `scale`: 0.9 to 1.3) and return it from `GET /api/skins/:id`. A skin with only typography is now valid, and the empty-skin 400 reads `skin must include a theme, typography or boards`.
+- `POST /api/sessions/demo` answers 403 `DEMO_DATA_DISABLED` when `NODE_ENV=production`, which the Docker image sets, so a production server never gets demo accounts, messages or skins. `DELETE /api/sessions/demo` still clears existing demo data.
+
+### Security
+
+- Photo uploads (progress and profile) claim a decode slot only once the body has arrived, so a slow upload no longer blocks every other account's uploads. An account may have one photo upload in flight at a time, and a second answers `429 UPLOAD_IN_PROGRESS`.
+
+### Internal
+
+- Route test for the production demo fill refusal.
+- Validator tests for skin typography.
+- Route test for `machines` sharing grants.
+- Route test for drop sets.
+- Route test for the one-upload-per-account limit.
+
 ## [1.1.2] - 2026-10-29
 
 ### Added
@@ -410,7 +434,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.2.0
 [1.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.0

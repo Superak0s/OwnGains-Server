@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import { userRateLimit } from "@/middleware/userRateLimit.js"
 import { parseUuidParam } from "@/middleware/validation.js"
-import { photoUpload, assertImageUpload, uploadSlot } from "@/middleware/imageUpload.js"
+import { photoUpload, assertImageUpload, oneUploadPerUser, uploadSlot } from "@/middleware/imageUpload.js"
 import {
   setProfilePhoto,
   getProfilePhoto,
@@ -24,8 +24,9 @@ const uploadLimiter = userRateLimit(
 router.put(
   "/",
   uploadLimiter,
-  uploadSlot,
+  oneUploadPerUser,
   photoUpload.single("photo"),
+  uploadSlot,
   async (req: Request, res: Response) => {
     assertImageUpload(req.file)
     const hash = await setProfilePhoto(req.user!.id, req.file.buffer)

@@ -82,6 +82,7 @@ const VALID_PERMISSION_TYPES: ReadonlySet<PermissionType> = new Set([
   "watch_session",
   "trainer",
   "tracking",
+  "machines",
 ])
 
 const INVITE_TTL_SECONDS = 120
@@ -118,7 +119,7 @@ function parsePayload(v: unknown): Record<string, unknown> | null {
  * @param fromUserId - Numeric id of the grantor.
  * @param toUserId - Numeric id of the grantee.
  * @param permissionType - What is being granted.
- * @param payload - Program snapshot to share. Kept only for `program` grants.
+ * @param payload - Program snapshot or `{ machines }` list. Kept only for `program` and `machines` grants.
  * @returns The `sharing_permissions.id`, new or existing.
  * @throws ValidationError for an unknown permission type.
  * @throws AppError 409 `TOO_MANY_GRANTS` when a cap would be exceeded.
@@ -133,9 +134,9 @@ export async function grantPermission(
   if (!VALID_PERMISSION_TYPES.has(permissionType))
     throw new ValidationError(`Invalid permission type: ${permissionType}`)
 
-  // Only a program grant has anything to carry. Any other type's payload was
-  // stored and then listed back verbatim: 2 MB of arbitrary JSON per grant.
-  if (permissionType !== "program") payload = null
+  // Only program and machines grants have anything to carry. Any other type's
+  // payload was stored and then listed back verbatim: 2 MB of arbitrary JSON per grant.
+  if (permissionType !== "program" && permissionType !== "machines") payload = null
 
   if (permissionType === "tracking") {
     const [trainer] = await pool.execute<RowDataPacket[]>(

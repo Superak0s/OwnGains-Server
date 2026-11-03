@@ -5,6 +5,7 @@ import { healthConsentGuard } from "../healthConsent.js"
 import {
   photoUpload,
   assertImageUpload,
+  oneUploadPerUser,
   uploadSlot,
 } from "@/middleware/imageUpload.js"
 import { ValidationError } from "@/middleware/errorHandler.js"
@@ -40,13 +41,15 @@ const uploadLimiter = userRateLimit(
   "Too many photo uploads, please try again later",
 )
 
-// Order matters: the rate limit and the decode slot are both claimed before
-// multer buffers the body, so a refused upload costs nothing.
+// Order matters: the rate limit and the one-upload-per-account claim come
+// before multer buffers the body, so a refused upload costs nothing. The decode
+// slot comes after, so a slow client never holds one (see uploadSlot).
 router.post(
   "/",
   uploadLimiter,
-  uploadSlot,
+  oneUploadPerUser,
   photoUpload.single("photo"),
+  uploadSlot,
   async (req: Request, res: Response) => {
     assertImageUpload(req.file)
 

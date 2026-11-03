@@ -550,8 +550,10 @@ export function validateSetTiming(
   _res: Response,
   next: NextFunction,
 ): void {
-  const { exerciseName, primaryMuscles, secondaryMuscles, startTime, endTime, note, isWarmup, machineName } =
+  const { exerciseName, primaryMuscles, secondaryMuscles, startTime, endTime, note, isWarmup, drops, machineName } =
     req.body
+  // Its own message, not one of the list below: the app matches on it.
+  if (drops !== undefined) req.body.drops = parseDrops(drops)
   const errors: string[] = []
 
   if (exerciseName !== undefined)
@@ -583,6 +585,34 @@ export function validateSetTiming(
   if (errors.length > 0)
     throw new ValidationError("Invalid set timing data", errors)
   next()
+}
+
+const MAX_DROPS = 20
+// workout_sets.weight is DECIMAL(7,2), so a drop can't claim more than a set can.
+const MAX_WEIGHT = 99999.99
+
+/**
+ * A set's drops, normalised for storage: `null` for none (null or `[]`),
+ * otherwise each `{ weight, reps }` with any other key dropped.
+ *
+ * @throws ValidationError for a non-array, more than 20 rows, or a row with an
+ * out-of-range weight (0 to 99999.99 kg) or reps (integer >= 1).
+ */
+export function parseDrops(value: unknown): { weight: number; reps: number }[] | null {
+  if (value === null) return null
+  const ok =
+    Array.isArray(value) &&
+    value.length <= MAX_DROPS &&
+    value.every(
+      (d) =>
+        typeof d?.weight === "number" &&
+        d.weight >= 0 &&
+        d.weight <= MAX_WEIGHT &&
+        validateInteger(d.reps) &&
+        d.reps >= 1,
+    )
+  if (!ok) throw new ValidationError("drops must be an array of up to 20 { weight, reps }")
+  return value.length ? value.map((d) => ({ weight: d.weight, reps: d.reps })) : null
 }
 
 /** The numeric fields of a set timing, each checked only when present. */

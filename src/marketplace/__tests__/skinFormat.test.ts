@@ -27,13 +27,30 @@ describe("validateSkinUpload", () => {
     expect(out.skin.boards?.home).toEqual([widget])
   })
 
+  it("keeps typography and accepts a typography-only skin", () => {
+    const out = validateSkinUpload({
+      name: "Serif",
+      skin: { format: 1, typography: { font: "serif", scale: 1.3, extra: 1 } },
+    })
+    expect(out.skin.typography).toEqual({ font: "serif", scale: 1.3 })
+  })
+
+  it("rejects bad typography", () => {
+    const up = (typography: unknown) => () => validateSkinUpload({ name: "x", skin: { format: 1, typography } })
+    expect(up("serif")).toThrow("skin.typography must be an object")
+    expect(up({ font: "comic" })).toThrow("skin.typography.font is not a known font")
+    expect(up({ scale: 1.31 })).toThrow("skin.typography.scale must be a number from 0.9 to 1.3")
+    expect(up({ scale: "1" })).toThrow(/scale/)
+    expect(up({})).toThrow("skin must include a theme, typography or boards")
+  })
+
   it("rejects an unknown format", () => {
     expect(() => validateSkinUpload({ name: "x", skin: { format: 2, boards: { home: [widget] } } })).toThrow(/format/)
   })
 
   it("rejects a skin with neither part", () => {
     expect(() => validateSkinUpload({ name: "x", skin: { format: 1 } })).toThrow(
-      "skin must include a theme or boards",
+      "skin must include a theme, typography or boards",
     )
   })
 

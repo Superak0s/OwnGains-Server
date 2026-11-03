@@ -27,10 +27,22 @@ import {
 const router: Router = Router()
 
 router.post("/permissions", async (req: Request, res: Response) => {
-  const { friendId, permissionType, payload } = req.body
+  const { friendId, permissionType } = req.body
+  let { payload } = req.body
 
   if (!friendId) throw new ValidationError("friendId is required")
   if (!permissionType) throw new ValidationError("permissionType is required")
+
+  if (permissionType === "machines") {
+    const list: unknown = payload?.machines
+    const machines = Array.isArray(list) && list.length <= 100
+      ? list.map((m) => (typeof m === "string" ? m.trim() : ""))
+      : null
+    if (!machines?.every((m) => m.length >= 1 && m.length <= 60))
+      throw new ValidationError("payload.machines must be an array of up to 100 names")
+    // Only the trimmed list is stored, never whatever else the body carried.
+    payload = { machines }
+  }
 
   if (permissionType === "program") {
     if (

@@ -318,6 +318,9 @@ CREATE TABLE IF NOT EXISTS workout_sets (
   is_warmup    TINYINT(1)   NOT NULL DEFAULT 0,
   rir          TINYINT UNSIGNED      DEFAULT NULL,   -- reps in reserve; 0 = failure
   machine_name VARCHAR(100)          DEFAULT NULL,
+  -- Drop set: [{ weight, reps }] done straight after the set at lower weights,
+  -- in order. NULL for none.
+  drops        JSON                  DEFAULT NULL,
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_ws_workout_created (workout_id, created_at),
@@ -692,7 +695,7 @@ CREATE TABLE IF NOT EXISTS sharing_permissions (
   from_user_id    INT UNSIGNED NOT NULL,
   to_user_id      INT UNSIGNED NOT NULL,
   permission_type ENUM('history','analytics','program','joint_session',
-                       'watch_session','trainer','tracking') NOT NULL,
+                       'watch_session','trainer','tracking','machines') NOT NULL,
   -- Per-grant options. JSON, not TEXT: the driver parses it on read and MySQL
   -- validates it on write.
   payload         JSON                  DEFAULT NULL,

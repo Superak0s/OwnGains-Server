@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express"
 import { authenticateToken } from "@/middleware/auth.js"
 import { healthConsentGuard } from "@/features/tracking/healthConsent.js"
 import { applyTrainerContext, denyTrainer } from "@/middleware/trainerContext.js"
-import { ValidationError } from "@/middleware/errorHandler.js"
+import { ForbiddenError, ValidationError } from "@/middleware/errorHandler.js"
 import { idempotent } from "@/middleware/idempotency.js"
 import {
   parseBackdatedTimestamp,
@@ -179,6 +179,7 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
     reps,
     note,
     isWarmup,
+    drops,
     primaryMuscles,
     secondaryMuscles,
     machineName,
@@ -198,6 +199,7 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
       reps: reps || 0,
       note: note || null,
       isWarmup: isWarmup || false,
+      drops,
       primaryMuscles: primaryMuscles ?? [],
       secondaryMuscles: secondaryMuscles ?? [],
       machineName: machineName || null,
@@ -219,6 +221,7 @@ router.post("/:sessionId/set", idempotent, validateRequired(["exerciseName", "se
       setIndex,
       weight: weight || 0,
       reps: reps || 0,
+      drops: timing.drops,
       setDuration: timing.setDuration,
       restTime: timing.restTime,
       machineName: timing.machineName,
@@ -281,6 +284,9 @@ router.patch("/:sessionId/sets/:setId", validateSetTiming, async (req: Request, 
 // /:sessionId routes so Express doesn't treat the literal as a session ID.
 
 router.post("/demo", denyTrainer, validateDemoFill, async (req: Request, res: Response) => {
+  // Demo friends, messages and skins are made-up accounts and content. Clearing them stays allowed.
+  if (process.env.NODE_ENV === "production")
+    throw new ForbiddenError("Demo data can't be filled on a production server", "DEMO_DATA_DISABLED")
   const result = await fillDemoData(req.user!.id, req.body.days, req.body.split ?? null)
   await sendDemoTracking(req.user!.id)
   res.json({ success: true, ...result })

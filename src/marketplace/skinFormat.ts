@@ -11,9 +11,15 @@ export interface SkinWidget {
   subtitle?: string
 }
 
+export interface SkinTypography {
+  font?: string
+  scale?: number
+}
+
 export interface SkinDocument {
   format: 1
   theme?: { name: string; colors: Record<string, string> }
+  typography?: SkinTypography
   boards?: Record<string, SkinWidget[]>
 }
 
@@ -29,6 +35,7 @@ const RGBA = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\
 const COLOR_KEY = /^[a-zA-Z]{1,40}$/
 const BOARD_ID = /^[a-z]+(?:\.[a-zA-Z]+)?$/
 const WIDGET_TYPE = /^\w{1,64}$/
+const FONTS: ReadonlySet<string> = new Set(["default", "serif", "mono", "condensed", "casual"])
 
 const fail = (path: string, problem: string): never => {
   throw new ValidationError(`${path} ${problem}`)
@@ -63,6 +70,22 @@ function theme(v: unknown): SkinDocument["theme"] {
     colors[key] = value as string
   }
   return { name, colors }
+}
+
+function typography(v: unknown): SkinTypography {
+  if (!isObject(v)) return fail("skin.typography", "must be an object")
+  const out: SkinTypography = {}
+  if (v.font !== undefined) {
+    if (typeof v.font !== "string" || !FONTS.has(v.font)) fail("skin.typography.font", "is not a known font")
+    out.font = v.font as string
+  }
+  if (v.scale !== undefined) {
+    const s = v.scale
+    if (typeof s !== "number" || !Number.isFinite(s) || s < 0.9 || s > 1.3)
+      fail("skin.typography.scale", "must be a number from 0.9 to 1.3")
+    out.scale = s as number
+  }
+  return out
 }
 
 function widget(v: unknown, path: string): SkinWidget {
@@ -106,9 +129,14 @@ export function validateSkinUpload(body: unknown): SkinUpload {
   if (raw.format !== 1) fail("skin.format", "must be 1")
   const skin: SkinDocument = { format: 1 }
   if (raw.theme !== undefined) skin.theme = theme(raw.theme)
+  if (raw.typography !== undefined) {
+    const t = typography(raw.typography)
+    if (Object.keys(t).length > 0) skin.typography = t
+  }
   if (raw.boards !== undefined) skin.boards = boards(raw.boards)
   const hasBoards = skin.boards !== undefined && Object.keys(skin.boards).length > 0
-  if (!skin.theme && !hasBoards) throw new ValidationError("skin must include a theme or boards")
+  if (!skin.theme && !skin.typography && !hasBoards)
+    throw new ValidationError("skin must include a theme, typography or boards")
   return { name, description, skin }
 }
 

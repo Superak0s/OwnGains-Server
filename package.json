@@ -1,6 +1,6 @@
 {
   "name": "owngains-server",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Sync, accounts and social backend for the OwnGains fitness app — central instance or self-hosted",
   "main": "dist/server.js",
   "scripts": {
@@ -30,15 +30,15 @@
     "compression": "^1.8.2",
     "cors": "^2.8.6",
     "express": "^5.3.0",
-    "express-rate-limit": "^8.7.1",
-    "google-auth-library": "^11.3.1",
+    "express-rate-limit": "^8.7.3",
+    "google-auth-library": "^11.3.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.5.0",
     "mysql2": "^3.24.6",
     "sharp": "^0.35.5",
     "tweetnacl": "1.0.3",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -50,11 +50,11 @@
     "@types/node": "^24.19.2",
     "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.2",
-    "@vitest/coverage-v8": "^5.0.5",
+    "@vitest/coverage-v8": "^5.1.0",
     "supertest": "^7.3.1",
-    "tsc-alias": "^1.9.9",
+    "tsc-alias": "^1.9.10",
     "typescript": "^7.0.2",
     "vite": "8.3.4",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

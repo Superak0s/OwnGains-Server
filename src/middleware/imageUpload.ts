@@ -65,7 +65,7 @@ export function assertImageUpload(
 
 // ─── Decode slots ─────────────────────────────────────────────────────────────
 //
-// A photo upload holds up to 10 MB of body in memory and then a sharp decode of
+// A photo upload is up to 10 MB of body in memory and then a sharp decode of
 // up to 40 MP (see progressPhoto.model.ts). Two at a time is what a small box
 // carries without starving everything else of memory and of the libuv pool
 // sharp shares with gzip, fs and DNS. Past that a caller gets 503 + Retry-After
@@ -100,9 +100,11 @@ export function tryAcquireDecodeSlot(): (() => void) | null {
 }
 
 /**
- * Route middleware, mounted *before* multer so a busy server refuses the
- * request without buffering its body. The slot is held until the response
- * finishes or the socket closes, whichever comes first.
+ * Route middleware, mounted *after* multer, so the slot covers the decode and
+ * the insert only. Claimed before the body, a client trickling its upload held
+ * one of the two slots for the whole request timeout, and two accounts could
+ * block every photo upload on the instance. The slot is held until the
+ * response finishes or the socket closes, whichever comes first.
  *
  * @param _req - Unused.
  * @param res - Gets `Retry-After: 5` when no slot is free. The slot is released on `finish` or `close`.
@@ -115,6 +117,40 @@ export function uploadSlot(_req: Request, res: Response, next: NextFunction): vo
     res.set("Retry-After", "5")
     throw new UploadBusyError()
   }
+  res.once("finish", release)
+  res.once("close", release)
+  next()
+}
+
+// Accounts with an upload body still being received. One per account bounds
+// what one account can make the server buffer to one 10 MB body at a time.
+const uploadingUsers = new Set<number>()
+
+/** Mark an account as uploading, or null when it already is. The release is idempotent. */
+export function tryClaimUserUpload(userId: number): (() => void) | null {
+  if (uploadingUsers.has(userId)) return null
+  uploadingUsers.add(userId)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    uploadingUsers.delete(userId)
+  }
+}
+
+/**
+ * Route middleware, mounted after authenticateToken and *before* multer:
+ * an account may have one photo upload in flight, refused with 429
+ * `UPLOAD_IN_PROGRESS` before its body is read.
+ *
+ * @param req - Authenticated request.
+ * @param res - The claim is released on `finish` or `close`.
+ * @param next - Called once the claim is held.
+ */
+export function oneUploadPerUser(req: Request, res: Response, next: NextFunction): void {
+  const release = tryClaimUserUpload(req.user!.id)
+  if (!release)
+    throw new AppError("Another photo upload is still in progress", 429, null, "UPLOAD_IN_PROGRESS")
   res.once("finish", release)
   res.once("close", release)
   next()

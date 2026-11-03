@@ -45,6 +45,7 @@ export type PermissionType =
   | "watch_session"
   | "trainer"
   | "tracking"
+  | "machines"
 
 /** A grant between two users, as received or as given. */
 export interface Permission {

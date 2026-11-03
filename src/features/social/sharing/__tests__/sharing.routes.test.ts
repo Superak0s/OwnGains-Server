@@ -310,4 +310,39 @@ describe("sharing routes", () => {
       .set(auth(b.token))
     expect(ghostInvite.status).toBe(404)
   })
+
+  it("shares gym machine names and replaces them on re-grant", async () => {
+    const grant = (payload: unknown) =>
+      request(app)
+        .post("/api/sharing/permissions")
+        .set(auth(b.token))
+        .send({ friendId: a.user.id, permissionType: "machines", payload })
+
+    for (const bad of [
+      undefined,
+      { machines: "Cybex" },
+      { machines: ["   "] },
+      { machines: ["x".repeat(61)] },
+      { machines: [42] },
+      { machines: Array(101).fill("Cybex") },
+    ]) {
+      const res = await grant(bad)
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe("payload.machines must be an array of up to 100 names")
+    }
+
+    const first = await grant({ machines: [" Hammer Strength ", "Cybex"], junk: "x" })
+    expect(first.status).toBe(201)
+    const again = await grant({ machines: ["Life Fitness"] })
+    expect(again.body.permissionId).toBe(first.body.permissionId)
+
+    const received = await request(app).get("/api/sharing/permissions/received").set(auth(a.token))
+    const row = received.body.permissions.find((p: { permissionType: string }) => p.permissionType === "machines")
+    expect(row.hasPayload).toBe(true)
+
+    const payload = await request(app)
+      .get(`/api/sharing/permissions/${first.body.permissionId}/payload`)
+      .set(auth(a.token))
+    expect(payload.body).toEqual({ success: true, payload: { machines: ["Life Fitness"] } })
+  })
 })

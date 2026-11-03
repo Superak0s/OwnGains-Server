@@ -36,6 +36,7 @@ interface SetTiming {
   reps: number
   note: string | null
   isWarmup: number
+  drops: { weight: number; reps: number }[] | null
   rir: number | null
   machineName: string | null
 }
@@ -69,6 +70,7 @@ interface RecordSetResult {
   restTime: number | null
   rir: number | null
   machineName: string | null
+  drops: { weight: number; reps: number }[] | null
 }
 
 // The API speaks camelCase, MySQL speaks snake_case. Every workout/set read
@@ -119,7 +121,7 @@ const SET_COLS = `ws.id, ws.workout_id AS sessionId, ws.exercise_id AS exerciseI
   ws.set_index AS setIndex,
   ws.start_time AS startTime, ws.end_time AS endTime,
   ws.set_duration AS setDuration, ws.rest_time AS restTime,
-  ws.weight, ws.reps, ws.note, ws.is_warmup AS isWarmup, ws.rir,
+  ws.weight, ws.reps, ws.note, ws.is_warmup AS isWarmup, ws.drops, ws.rir,
   ws.machine_name AS machineName, e.name AS exerciseName,
   ${EXERCISE_MUSCLE_COLS}`
 
@@ -144,6 +146,14 @@ interface WorkoutRow extends RowDataPacket {
 
 /** A SET_COLS row: the same fields as SetTiming, as the driver types a row. */
 interface WorkoutSetRow extends RowDataPacket, SetTiming {}
+
+/**
+ * The row with `drops` parsed. MariaDB's JSON is LONGTEXT, so the driver may
+ * hand it back as a string, and the app wants an array.
+ */
+function withDrops<T extends { drops: unknown }>(row: T): T {
+  return typeof row.drops === "string" ? { ...row, drops: JSON.parse(row.drops) } : row
+}
 
 /**
  * Normalise a muscle-group JSON column to string[].
@@ -332,6 +342,7 @@ export async function createSession(
  * @param set.reps - Repetitions done.
  * @param set.note - Optional free text.
  * @param set.isWarmup - Whether this is a warm-up set.
+ * @param set.drops - Lower-weight rows done straight after the set, or null for none.
  * @param set.primaryMuscles - Primary muscle groups trained.
  * @param set.secondaryMuscles - Secondary muscle groups trained.
  * @param set.machineName - Machine used, or null.
@@ -352,6 +363,7 @@ export async function recordSetTiming(
     reps: number
     note?: string | null
     isWarmup?: boolean
+    drops?: { weight: number; reps: number }[] | null
     primaryMuscles?: string[]
     secondaryMuscles?: string[]
     machineName?: string | null
@@ -368,6 +380,7 @@ export async function recordSetTiming(
     reps,
     note = null,
     isWarmup = false,
+    drops = null,
     primaryMuscles = [],
     secondaryMuscles = [],
     machineName = null,
@@ -449,8 +462,8 @@ export async function recordSetTiming(
           : null
 
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO workout_sets (workout_id, exercise_id, set_index, start_time, end_time, set_duration, rest_time, weight, reps, note, is_warmup, rir, machine_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO workout_sets (workout_id, exercise_id, set_index, start_time, end_time, set_duration, rest_time, weight, reps, note, is_warmup, drops, rir, machine_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sessionId,
           exerciseId,
@@ -463,6 +476,7 @@ export async function recordSetTiming(
           reps,
           note,
           isWarmup ? 1 : 0,
+          drops ? JSON.stringify(drops) : null,
           rir,
           machineName,
         ],
@@ -475,6 +489,7 @@ export async function recordSetTiming(
         restTime,
         rir,
         machineName,
+        drops,
       }
     })
   } catch (err) {
@@ -513,6 +528,7 @@ interface UpdateSetTimingParams {
   endTime?: string
   note?: string | null
   isWarmup?: boolean
+  drops?: { weight: number; reps: number }[] | null
   rir?: number | null
   machineName?: string | null
 }
@@ -575,7 +591,7 @@ export async function updateSetTiming(
      WHERE ws.id = ? AND w.user_id = ?`,
     [setId, userId],
   )
-  return updated[0]
+  return updated[0] && withDrops(updated[0])
 }
 
 /** The `col = ?` list and its values for the fields an edit sends. */
@@ -605,6 +621,7 @@ async function setAssignments(
   if (u.reps !== undefined) set("reps", u.reps)
   if (u.note !== undefined) set("note", u.note)
   if (u.isWarmup !== undefined) set("is_warmup", u.isWarmup ? 1 : 0)
+  if (u.drops !== undefined) set("drops", u.drops ? JSON.stringify(u.drops) : null)
   if (u.rir !== undefined) set("rir", u.rir)
   if (u.machineName !== undefined) set("machine_name", u.machineName)
   if (u.startTime !== undefined)
@@ -825,7 +842,7 @@ export async function getSessionDetails(
   )
   return {
     ...withMuscles(workouts[0]),
-    setTimings: sets,
+    setTimings: sets.map(withDrops),
   } as unknown as Session
 }
 
@@ -916,7 +933,7 @@ export async function getSessionHistory(
     )
     const bySession = Map.groupBy(sets, (t) => t.sessionId)
     sessions.forEach((s) => {
-      s.setTimings = bySession.get(s.id) || []
+      s.setTimings = (bySession.get(s.id) || []).map(withDrops)
     })
   }
   return sessions
@@ -1089,7 +1106,7 @@ async function fetchKeptSets(
        ORDER BY ws.workout_id ASC, ws.created_at ASC, ws.id ASC`,
       chunk,
     )
-    sets.push(...part)
+    sets.push(...part.map(withDrops))
     chunk = []
   }
   for (const ids of keptBySession.values()) {

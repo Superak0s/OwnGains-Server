@@ -3,9 +3,13 @@ import request from "supertest"
 import sharp from "sharp"
 import type { RowDataPacket } from "mysql2"
 import { pool } from "@/config/database.js"
-import { tryAcquireDecodeSlot, MAX_CONCURRENT_DECODES } from "@/middleware/imageUpload.js"
+import {
+  tryAcquireDecodeSlot,
+  tryClaimUserUpload,
+  MAX_CONCURRENT_DECODES,
+} from "@/middleware/imageUpload.js"
 import { photoQuota, readSizeEnv } from "../progressPhoto.model.js"
-import { app, signup, auth } from "../../../../tests/helpers.js"
+import { app, signup, auth, internalId } from "../../../../tests/helpers.js"
 
 // A real (decodable) image: upload builds a thumbnail from it. 800x600 so the
 // thumbnail visibly shrinks.
@@ -252,7 +256,19 @@ describe("progressPhoto routes", () => {
     expect(Number(row!.n)).toBe(0)
   })
 
-  it("answers 503 when every decode slot is taken, without reading the body", async () => {
+  it("answers 429 while the same account has an upload in flight", async () => {
+    const release = tryClaimUserUpload(await internalId(u.user.id))!
+    try {
+      const res = await upload(u.token, PNG)
+      expect(res.status).toBe(429)
+      expect(res.body.code).toBe("UPLOAD_IN_PROGRESS")
+    } finally {
+      release()
+    }
+    expect((await upload(u.token, PNG)).status).toBe(201)
+  })
+
+  it("answers 503 when every decode slot is taken", async () => {
     const held = []
     for (let r = tryAcquireDecodeSlot(); r; r = tryAcquireDecodeSlot()) held.push(r)
     expect(held.length).toBe(MAX_CONCURRENT_DECODES)

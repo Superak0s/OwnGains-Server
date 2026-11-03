@@ -106,6 +106,43 @@ describe("workout session routes", () => {
     expect(details.body.session.setTimings.map((t: { rir: number | null }) => t.rir).sort()).toEqual([0, 2])
   })
 
+  it("stores a set's drops and returns them parsed", async () => {
+    const start = await request(app)
+      .post("/api/sessions/start")
+      .set(auth(a.token))
+      .send({ dayNumber: 2, dayTitle: "Drop Day", split: "drops" })
+    const id = start.body.session.id
+    const log = (setIndex: number, extra = {}) =>
+      request(app)
+        .post(`/api/sessions/${id}/set`)
+        .set(auth(a.token))
+        .send({ exerciseName: "Lat Pulldown", setIndex, startTime: "2024-01-16T10:00:00Z", endTime: "2024-01-16T10:00:40Z", weight: 60, reps: 8, ...extra })
+
+    const set = await log(0, { drops: [{ weight: 45, reps: 6, junk: 1 }, { weight: 30, reps: 5 }] })
+    expect(set.status).toBe(200)
+    expect(set.body.timing.drops).toEqual([{ weight: 45, reps: 6 }, { weight: 30, reps: 5 }])
+    expect((await log(1, { drops: [] })).body.timing.drops).toBeNull()
+
+    for (const bad of ["x", [{ weight: "45", reps: 6 }], [{ weight: 45, reps: 0 }], [{ weight: -1, reps: 6 }], Array(21).fill({ weight: 1, reps: 1 })]) {
+      const res = await log(2, { drops: bad })
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe("drops must be an array of up to 20 { weight, reps }")
+    }
+
+    const details = await request(app).get(`/api/sessions/${id}`).set(auth(a.token))
+    const row = details.body.session.setTimings.find((t: { setIndex: number }) => t.setIndex === 0)
+    expect(row.drops).toEqual([{ weight: 45, reps: 6 }, { weight: 30, reps: 5 }])
+
+    const patch = (body: object) =>
+      request(app).patch(`/api/sessions/${id}/sets/${set.body.timing.id}`).set(auth(a.token)).send(body)
+    expect((await patch({ note: "kept" })).body.timing.drops).toEqual([{ weight: 45, reps: 6 }, { weight: 30, reps: 5 }])
+    expect((await patch({ drops: [{ weight: 20, reps: 10 }] })).body.timing.drops).toEqual([{ weight: 20, reps: 10 }])
+    expect((await patch({ drops: [] })).body.timing.drops).toBeNull()
+
+    // Later tests count this user's sessions.
+    await request(app).delete("/api/sessions/split/drops").set(auth(a.token))
+  })
+
   it("keeps other users out of a session", async () => {
     const foreign = await request(app)
       .post(`/api/sessions/${sessionId}/set`)
@@ -242,6 +279,17 @@ describe("workout session routes", () => {
       .set(auth(a.token))
       .send({ days: [{ dayNumber: 1, dayTitle: "X", exercises: [{ name: "Y", sets: 99 }] }] })
     expect(bad.status).toBe(400)
+  })
+
+  it("refuses a demo fill on a production server", async () => {
+    process.env.NODE_ENV = "production"
+    try {
+      const res = await request(app).post("/api/sessions/demo").set(auth(a.token)).send({ split: "Demo", days: [{ dayNumber: 1, dayTitle: "X", exercises: [{ name: "Y", sets: 3 }] }] })
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe("DEMO_DATA_DISABLED")
+    } finally {
+      process.env.NODE_ENV = "development"
+    }
   })
 
   it("rejects a non-boolean isDemo", async () => {

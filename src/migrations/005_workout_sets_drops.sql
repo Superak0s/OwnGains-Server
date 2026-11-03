@@ -1,0 +1,1 @@
+ALTER TABLE workout_sets ADD COLUMN IF NOT EXISTS drops JSON DEFAULT NULL AFTER machine_name;

@@ -15,6 +15,7 @@ const MAX_LENGTHS = {
   dayTitle: 255,
   exerciseName: 255,
   note: 1000,
+  workoutNote: 2000,
   time: 8,
   machineName: 100,
 } as const
@@ -143,6 +144,22 @@ export function parseBackdatedTimestamp(
       "FUTURE_TIMESTAMP",
     )
   return value
+}
+
+/**
+ * A workout's note from a request body: undefined when absent, null when
+ * blank, otherwise the trimmed text.
+ *
+ * @throws ValidationError when it is not a string or is too long.
+ */
+export function parseWorkoutNote(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (typeof value !== "string")
+    throw new ValidationError("note must be a string")
+  const lenErr = checkMaxLength(value.trim(), "workoutNote")
+  if (lenErr) throw new ValidationError(lenErr)
+  return value.trim() || null
 }
 
 function checkMaxLength(

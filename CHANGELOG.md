@@ -9,6 +9,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 ### Added
 
 - In-app feedback, off unless `FEEDBACK_ENABLED=true`: `POST /api/feedback` (no sign-in needed, 5 per IP per hour) stores bug reports and ideas, and admins manage them at `/api/admin/feedback` and on the `/admin/feedback` page. The cleanup job deletes feedback a year after it was sent. The `feedback` table is not created on boot, so only an instance whose operator made it by hand should turn this on.
+- Workout notes: `POST /api/sessions/:sessionId/end` accepts an optional `note`, and `PATCH /api/sessions/:sessionId` accepts `note` alone (no `dayNumber` needed) or with a day change. The note is trimmed, at most 2000 characters (400 otherwise), and blank or `null` clears it. Every workout read returns `note` (`null` when there is none). Friends never see it. A trainer may only change the note of a workout in progress, and the 403 `TRAINER_WORKOUT_ENDED` message now reads `Trainers can only change a workout in progress`. Needs migration `006`, which runs on boot.
 
 ### Internal
 

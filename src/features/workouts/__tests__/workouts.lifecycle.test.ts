@@ -126,4 +126,48 @@ describe("workout lifecycle", () => {
 
     await request(app).post(`/api/sessions/${id}/end`).set(auth(a.token)).send({})
   })
+
+  it("saves a workout note on end and edits it afterwards", async () => {
+    const start = await request(app)
+      .post("/api/sessions/start")
+      .set(auth(a.token))
+      .send({ dayNumber: 1, dayTitle: "Push", split: "push" })
+    const id = start.body.session.id
+    expect(start.body.session.note).toBeNull()
+
+    const ended = await request(app)
+      .post(`/api/sessions/${id}/end`)
+      .set(auth(a.token))
+      .send({ note: "  Felt strong  " })
+    expect(ended.body.session.note).toBe("Felt strong")
+
+    const edited = await request(app)
+      .patch(`/api/sessions/${id}`)
+      .set(auth(a.token))
+      .send({ note: "Shoulder twinge" })
+    expect(edited.status).toBe(200)
+    expect(edited.body.session.note).toBe("Shoulder twinge")
+    expect(edited.body.session.dayNumber).toBe(1)
+    expect(edited.body.session.dayTitle).toBe("Push")
+
+    const listed = await request(app).get("/api/sessions").set(auth(a.token))
+    expect(listed.body.sessions.find((s: { id: number }) => s.id === id).note).toBe(
+      "Shoulder twinge",
+    )
+
+    const cleared = await request(app)
+      .patch(`/api/sessions/${id}`)
+      .set(auth(a.token))
+      .send({ note: "   " })
+    expect(cleared.body.session.note).toBeNull()
+
+    const tooLong = await request(app)
+      .patch(`/api/sessions/${id}`)
+      .set(auth(a.token))
+      .send({ note: "x".repeat(2001) })
+    expect(tooLong.status).toBe(400)
+
+    const empty = await request(app).patch(`/api/sessions/${id}`).set(auth(a.token)).send({})
+    expect(empty.status).toBe(400)
+  })
 })

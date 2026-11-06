@@ -59,6 +59,8 @@ export interface Session {
   /** Uuid of the trainer who logged it for the owner, or null. */
   loggedByTrainerId: string | null
   loggedByTrainerUsername: string | null
+  /** The workout's own free text, separate from each set's note. */
+  note: string | null
   userName: string
   setTimings: SetTiming[]
 }
@@ -89,7 +91,7 @@ interface RecordSetResult {
 const WORKOUT_COLS = `w.id, wu.uuid AS userId, w.day_number AS dayNumber,
   w.day_title AS dayTitle, w.start_time AS startTime,
   w.end_time AS endTime, w.total_duration AS totalDuration,
-  w.completed_sets AS completedSets, w.split, w.is_demo AS isDemo,
+  w.completed_sets AS completedSets, w.split, w.is_demo AS isDemo, w.note,
   lt.uuid AS loggedByTrainerId, lt.username AS loggedByTrainerUsername,
   pd.primary_muscles AS primaryMuscles, pd.secondary_muscles AS secondaryMuscles`
 
@@ -139,6 +141,7 @@ interface WorkoutRow extends RowDataPacket {
   totalDuration: number | null
   completedSets: number
   split: string | null
+  note: string | null
   userName: string
   username: string
   setCount?: number
@@ -738,6 +741,7 @@ export async function endSession(
   sessionId: number,
   userId: number,
   endTime: Timestamp | null = null,
+  note?: string | null,
 ): Promise<{ session: Session; alreadyEnded: boolean }> {
   const ts = formatDateForMySQL(endTime ?? new Date())
   // Scoped by user_id like every other statement in this file, rather than
@@ -745,9 +749,9 @@ export async function endSession(
   let updated: ResultSetHeader
   try {
     const [res] = await pool.execute<ResultSetHeader>(
-      `UPDATE workouts SET end_time = ?, total_duration = TIMESTAMPDIFF(SECOND, start_time, ?)
+      `UPDATE workouts SET end_time = ?, total_duration = TIMESTAMPDIFF(SECOND, start_time, ?)${note === undefined ? "" : ", note = ?"}
        WHERE id = ? AND user_id = ? AND end_time IS NULL`,
-      [ts, ts, sessionId, userId],
+      note === undefined ? [ts, ts, sessionId, userId] : [ts, ts, note, sessionId, userId],
     )
     updated = res
   } catch (err) {
@@ -773,26 +777,43 @@ export async function endSession(
 }
 
 /**
- * Moves a workout to another program day.
+ * Moves a workout to another program day and/or replaces its note.
  *
  * @param sessionId - `workouts.id`.
  * @param userId - Numeric id of the owner.
- * @param dayNumber - The new program day.
- * @param dayTitle - New title, or null to clear it.
+ * @param changes.day - The new program day and its title (null clears the title).
+ * @param changes.note - The new note, or null to clear it. Omitted leaves it as is.
  * @param options.openWorkoutOnly - Refuse a workout that has ended (used for trainer writes).
  * @returns The updated workout.
  */
-export async function updateSessionDay(
+export async function updateSession(
   sessionId: number,
   userId: number,
-  dayNumber: number,
-  dayTitle: string | null,
+  changes: {
+    day?: { dayNumber: number; dayTitle: string | null }
+    note?: string | null
+  },
   { openWorkoutOnly = false }: { openWorkoutOnly?: boolean } = {},
 ): Promise<Session> {
+  const sets: string[] = []
+  const values: (string | number | null)[] = []
+  if (changes.day) {
+    sets.push("day_number = ?", "day_title = ?", "program_day_id = ?")
+    values.push(
+      changes.day.dayNumber,
+      changes.day.dayTitle,
+      await findProgramDayId(userId, changes.day.dayNumber),
+    )
+  }
+  if (changes.note !== undefined) {
+    sets.push("note = ?")
+    values.push(changes.note)
+  }
+  if (!sets.length) return getSessionDetails(sessionId, userId)
   const [updated] = await pool.execute<ResultSetHeader>(
-    `UPDATE workouts SET day_number = ?, day_title = ?, program_day_id = ?
+    `UPDATE workouts SET ${sets.join(", ")}
      WHERE id = ? AND user_id = ?${openWorkoutOnly ? " AND end_time IS NULL" : ""}`,
-    [dayNumber, dayTitle, await findProgramDayId(userId, dayNumber), sessionId, userId],
+    [...values, sessionId, userId],
   )
   // No row changed: either not the caller's workout (getSessionDetails below
   // answers that) or, for a trainer, one that has ended.
@@ -803,7 +824,7 @@ export async function updateSessionDay(
     )
     if (ended.length)
       throw new ForbiddenError(
-        "Trainers can only change the day of a workout in progress",
+        "Trainers can only change a workout in progress",
         "TRAINER_WORKOUT_ENDED",
       )
   }

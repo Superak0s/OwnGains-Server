@@ -12,6 +12,7 @@ before it were removed, so a database from an earlier release is not upgraded.
 | `003_report_reason_underage.sql` | Adds `underage` to `user_reports.reason`. | 0.6.0 |
 | `004_sharing_permission_machines.sql` | Adds `machines` to `sharing_permissions.permission_type`. | 0.6.0 |
 | `005_workout_sets_drops.sql` | Adds `drops` (JSON) to `workout_sets`. | 0.6.0 |
+| `006_workouts_note.sql` | Adds `note` (the workout's own free text) to `workouts`. | 0.6.0 |
 
 To alter an existing table on live boxes, add `NNN_description.sql` here,
 zero-padded to three digits (files run in `localeCompare` order, each at most

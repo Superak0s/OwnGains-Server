@@ -285,6 +285,7 @@ CREATE TABLE IF NOT EXISTS workouts (
   -- The trainer who started it with X-Trainee-Id. NULL when the owner did, and
   -- SET NULL when the trainer's account goes.
   logged_by_trainer_id INT UNSIGNED    DEFAULT NULL,
+  note           TEXT                  DEFAULT NULL,
   PRIMARY KEY (id),
   KEY idx_w_user_start (user_id, start_time),
   KEY idx_w_user_split_start (user_id, split, start_time),

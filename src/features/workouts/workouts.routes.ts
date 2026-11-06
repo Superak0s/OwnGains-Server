@@ -7,6 +7,7 @@ import { idempotent } from "@/middleware/idempotency.js"
 import {
   parseBackdatedTimestamp,
   parseIntParam,
+  parseWorkoutNote,
   queryLimit,
   queryString,
   validateRequired,
@@ -24,7 +25,7 @@ import {
   deleteSetByIndex,
   renameExerciseInHistory,
   endSession,
-  updateSessionDay,
+  updateSession,
   getSessionDetails,
   getSessionHistory,
   historyCursor,
@@ -356,6 +357,7 @@ router.post("/:sessionId/end", idempotent, async (req: Request, res: Response) =
     sessionId,
     userId,
     parseBackdatedTimestamp(req.body?.endTime || null, "endTime"),
+    parseWorkoutNote(req.body?.note),
   )
 
   if (!alreadyEnded) {
@@ -373,21 +375,28 @@ router.post("/:sessionId/end", idempotent, async (req: Request, res: Response) =
 })
 
 // Moves a workout to another program day when the user switches day
-// mid-session. Its sets are left in place. A trainer may only move the one in
-// progress: finished history remains the trainee's own call.
+// mid-session (its sets are left in place), and/or replaces its note. A trainer
+// may only change the one in progress: finished history remains the trainee's
+// own call.
 router.patch("/:sessionId", idempotent, async (req: Request, res: Response) => {
   const userId = req.user!.id
   const sessionId = parseIntParam(String(req.params.sessionId), "session ID")
   const { dayNumber, dayTitle = null } = req.body
+  const note = parseWorkoutNote(req.body?.note)
 
-  if (!Number.isInteger(dayNumber) || dayNumber < 1)
+  // dayNumber stays required unless the request only changes the note.
+  const changesDay = dayNumber !== undefined || note === undefined
+  if (changesDay && (!Number.isInteger(dayNumber) || dayNumber < 1))
     throw new ValidationError("Day number must be a positive integer")
   if (dayTitle !== null && (typeof dayTitle !== "string" || dayTitle.length > 255))
     throw new ValidationError("Day title must be a string of at most 255 characters")
 
-  const session = await updateSessionDay(sessionId, userId, dayNumber, dayTitle, {
-    openWorkoutOnly: !!req.trainer,
-  })
+  const session = await updateSession(
+    sessionId,
+    userId,
+    { day: changesDay ? { dayNumber, dayTitle } : undefined, note },
+    { openWorkoutOnly: !!req.trainer },
+  )
   res.json({ success: true, session })
 })
 

@@ -1,0 +1,1 @@
+ALTER TABLE workouts ADD COLUMN IF NOT EXISTS note TEXT DEFAULT NULL AFTER logged_by_trainer_id;

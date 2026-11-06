@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Added
+
+- In-app feedback, off unless `FEEDBACK_ENABLED=true`: `POST /api/feedback` (no sign-in needed, 5 per IP per hour) stores bug reports and ideas, and admins manage them at `/api/admin/feedback` and on the `/admin/feedback` page. The `feedback` table is not created on boot, so only an instance whose operator made it by hand should turn this on.
+
 ### Internal
 
 - `CLAUDE.md`: new Production section listing changes that need the user's okay first, now that the app is in production on Play.

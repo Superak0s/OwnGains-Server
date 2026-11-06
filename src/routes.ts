@@ -31,6 +31,8 @@ import profilePhotoRoutes from "./features/profilePhoto/profilePhoto.routes.js"
 import metricsRoutes from "./features/metrics/metrics.routes.js"
 import metricsPage from "./features/metrics/metrics.page.js"
 import legalRoutes from "./features/legal/legal.routes.js"
+import { adminFeedbackRoutes, feedbackEnabled, feedbackRoutes } from "./features/feedback/feedback.routes.js"
+import feedbackPage from "./features/feedback/feedback.page.js"
 import { metricsEnabled, metricsPageEnabled } from "./features/metrics/metrics.collector.js"
 
 // Features this deployment refuses to store. The client reads the same list
@@ -100,6 +102,11 @@ export function registerRoutes(app: Application): void {
   if (metricsPageEnabled) app.use("/admin/metrics", metricsPage)
   // Off by default: the pages name the official server's data controller.
   if (envBool("LEGAL_PAGES_ENABLED", false)) app.use(legalRoutes)
+  if (feedbackEnabled) {
+    app.use("/api/feedback", feedbackRoutes)
+    app.use("/api/admin/feedback", adminFeedbackRoutes)
+    app.use("/admin/feedback", feedbackPage)
+  }
   app.use("/api/admin", adminRoutes)
   app.use("/api/analytics", analyticsRoutes)
   app.use("/api/sessions", sessionRoutes)

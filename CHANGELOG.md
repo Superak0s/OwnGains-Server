@@ -8,7 +8,7 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ### Added
 
-- In-app feedback, off unless `FEEDBACK_ENABLED=true`: `POST /api/feedback` (no sign-in needed, 5 per IP per hour) stores bug reports and ideas, and admins manage them at `/api/admin/feedback` and on the `/admin/feedback` page. The `feedback` table is not created on boot, so only an instance whose operator made it by hand should turn this on.
+- In-app feedback, off unless `FEEDBACK_ENABLED=true`: `POST /api/feedback` (no sign-in needed, 5 per IP per hour) stores bug reports and ideas, and admins manage them at `/api/admin/feedback` and on the `/admin/feedback` page. The cleanup job deletes feedback a year after it was sent. The `feedback` table is not created on boot, so only an instance whose operator made it by hand should turn this on.
 
 ### Internal
 

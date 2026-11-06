@@ -1,5 +1,15 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise"
 import { pool } from "@/config/database.js"
+import { envBool } from "@/config/env.js"
+
+/**
+ * Off by default: the `feedback` table is not in schema.sql, so only an instance
+ * whose operator created it by hand (the official server) mounts these routes.
+ */
+export const feedbackEnabled = envBool("FEEDBACK_ENABLED", false)
+
+/** The privacy policy promises feedback is deleted a year after it was sent. */
+const FEEDBACK_RETENTION_DAYS = 365
 
 export const FEEDBACK_KINDS = ["bug", "idea", "other"] as const
 export const FEEDBACK_STATUSES = ["new", "read", "done"] as const
@@ -72,4 +82,11 @@ export async function setFeedbackStatus(id: number, status: FeedbackStatus): Pro
 export async function deleteFeedback(id: number): Promise<boolean> {
   const [res] = await pool.execute<ResultSetHeader>("DELETE FROM feedback WHERE id = ?", [id])
   return res.affectedRows > 0
+}
+
+export async function purgeOldFeedback(batch = 5000): Promise<number> {
+  const [res] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM feedback WHERE created_at < NOW() - INTERVAL ${FEEDBACK_RETENTION_DAYS} DAY LIMIT ${batch | 0}`,
+  )
+  return res.affectedRows
 }

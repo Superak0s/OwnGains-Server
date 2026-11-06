@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken"
 import { authenticateToken, requireAdmin } from "@/middleware/auth.js"
 import { NotFoundError, ValidationError } from "@/middleware/errorHandler.js"
 import { isUuid, parseIntParam, queryLimit } from "@/middleware/validation.js"
-import { envBool } from "@/config/env.js"
 import { findUserForAuth } from "@/features/auth/auth.model.js"
 import type { JwtPayload } from "@/features/auth/auth.types.js"
 import { logger } from "@/utils/logger.js"
@@ -18,12 +17,6 @@ import {
   listFeedback,
   setFeedbackStatus,
 } from "./feedback.model.js"
-
-/**
- * Off by default: the `feedback` table is not in schema.sql, so only an instance
- * whose operator created it by hand (the official server) mounts these routes.
- */
-export const feedbackEnabled = envBool("FEEDBACK_ENABLED", false)
 
 const submitLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

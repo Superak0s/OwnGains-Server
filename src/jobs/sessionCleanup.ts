@@ -24,6 +24,7 @@ import {
   purgeOldReports,
 } from "../features/social/friends/friends.model.js"
 import { purgeExpiredTrackingMessages } from "../features/trainer/trackingRelay.model.js"
+import { feedbackEnabled, purgeOldFeedback } from "../features/feedback/feedback.model.js"
 import { sendToUser } from "../ws/wsServer.js"
 import { logger } from "../utils/logger.js"
 
@@ -113,6 +114,7 @@ export async function runStaleSessionCleanup(): Promise<void> {
       },
     ],
   ]
+  if (feedbackEnabled) purges.push(["Feedback", () => purgeOldFeedback()])
   for (const [name, purge] of purges) {
     try {
       await purge()

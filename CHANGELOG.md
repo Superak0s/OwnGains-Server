@@ -6,6 +6,10 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+### Internal
+
+- `CLAUDE.md`: new Production section listing changes that need the user's okay first, now that the app is in production on Play.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

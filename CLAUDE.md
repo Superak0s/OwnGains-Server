@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The optional backend for the OwnGains fitness app (sibling repo `../OwnGains-App`, which runs fully offline without it): a Bun/TypeScript REST + WebSocket API on MySQL for cross-device sync, accounts and real-time social features (friends, joint workouts, live spectating). No ORM: hand-written SQL via `mysql2/promise`. The central public instance, `owngains.superak0s.com` (the app's default), runs `LOCAL_ONLY_FEATURES=tracking,supplements`, so body tracking and supplements are kept on each device. Anyone can self-host instead. Every instance is one small box: no horizontal scaling, no shared cache or queue, no other instances to reach. The central one has open signup from strangers, so treat every change as facing the public internet (`BOOTSTRAP_ADMIN_USERNAME`, photo quotas, rate limits and `TRUST_PROXY_HOPS` all matter there).
 
+## Production
+
+The app is in production on Google Play, and the official server holds real users' data. Play users update on their own schedule, so old app versions keep calling this server for months. **Ask the user before** any change that could break them, even when a task calls for it. Say what would break and for whom, propose a backward-compatible way if there is one, and wait for an explicit okay. That includes:
+
+- API contract: removing or renaming a route, response field, status code, error code or WS event, changing a field's type, or making a request field required. Add the new shape next to the old one instead.
+- Raising `minAppVersion` (it forces an update on every Play user).
+- Data: a migration that drops, renames or narrows a column or rewrites existing rows, deleting user data, or anything that needs the database re-created.
+- Auth: anything that invalidates existing tokens or sessions (JWT format or claims, `token_version` bumps, password hashing).
+- Defaults: tightening a rate limit, quota or body size limit, or changing an env variable's default in a way that changes behavior for an existing deployment.
+
 ## Commands
 
 ```bash
@@ -64,7 +74,7 @@ Needs a `.env`, which Bun loads on its own (no `dotenv`). `DB_USER`, `DB_PASSWOR
 
 **Background jobs**: `jobs/sessionCleanup.ts` ends workouts idle >30min (on boot, then every 5min) and purges expired idempotency keys. Runs never overlap (`stopStaleSessionCleanup()` returns the in-flight one for shutdown to await), and `GET_LOCK` keeps two processes from sweeping at once. Each ended workout pushes `session_auto_ended` to its owner, so the app doesn't find out through a 404 that eats the set just logged.
 
-**Database**: `src/config/schema.sql` is all `CREATE TABLE IF NOT EXISTS` and re-runs on every boot, so a new table goes straight in there. A change to an _existing_ table goes in a new `src/migrations/NNN_description.sql`, applied once per database by `runMigrations()` (tracked in `_migrations`, under `GET_LOCK`). A fresh database stamps every migration as applied _without running it_, so mirror each one into `schema.sql` too, or new installs and the test DB never get it. Note every new file in `src/migrations/README.md`. 0.6.0 is the baseline: no migration files exist yet, and a database from before 0.6.0 must be re-created.
+**Database**: `src/config/schema.sql` is all `CREATE TABLE IF NOT EXISTS` and re-runs on every boot, so a new table goes straight in there. A change to an _existing_ table goes in a new `src/migrations/NNN_description.sql`, applied once per database by `runMigrations()` (tracked in `_migrations`, under `GET_LOCK`). A fresh database stamps every migration as applied _without running it_, so mirror each one into `schema.sql` too, or new installs and the test DB never get it. Note every new file in `src/migrations/README.md`. 0.6.0 is the baseline, and a database from before 0.6.0 must be re-created.
 
 **Uploads**: photos only, `multer` memory storage into `LONGBLOB`s (10MB, image-only, magic-byte checked), re-encoded by `sharp` to a metadata-free JPEG of at most 2048px plus a 400px thumbnail. Decodes are bounded (header pixel cap, `sharp.concurrency(1)`, two decode slots, 503 when full). Per-user quota is checked inside the insert transaction, and `PHOTO_TOTAL_QUOTA_GB` caps the instance (507). Program spreadsheets are parsed in the app: the server validates the JSON (`validateProgramUpload`, before the transaction opens) and unpacks it into `programs`/`program_days`/`program_exercises`.
 

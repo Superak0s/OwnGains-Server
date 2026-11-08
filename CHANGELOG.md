@@ -6,6 +6,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-08
+
 ### Added
 
 - In-app feedback, off unless `FEEDBACK_ENABLED=true`: `POST /api/feedback` (no sign-in needed, 5 per IP per hour) stores bug reports and ideas, and admins manage them at `/api/admin/feedback` and on the `/admin/feedback` page. The cleanup job deletes feedback a year after it was sent. The `feedback` table is not created on boot, so only an instance whose operator made it by hand should turn this on.
@@ -443,7 +445,8 @@ Add an entry under **Unreleased** in the same change that introduces it. At rele
 - README: operator responsibilities for self-hosted instances and for `REQUIRE_HEALTH_CONSENT=false`.
 - Fixed a flaky exercise-records test whose 2024-dated workouts were closed by the concurrent stale-session sweep test.
 
-[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Superak0s/OwnGains-Server/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.3.0
 [1.2.0]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.2.0
 [1.1.2]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Superak0s/OwnGains-Server/releases/tag/v1.1.1
